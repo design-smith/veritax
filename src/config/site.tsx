@@ -1,4 +1,4 @@
-import { Gauge, type LucideIcon, MessagesSquare } from "lucide-react";
+import { Gauge, type LucideIcon, MessagesSquare, Palette } from "lucide-react";
 
 export type SiteConfig = typeof siteConfig;
 export type Navigation = {
@@ -8,8 +8,8 @@ export type Navigation = {
 };
 
 export const siteConfig = {
-  title: "VisActor Next Template",
-  description: "Template for VisActor and Next.js",
+  title: "Veritax",
+  description: "Veritax application",
 };
 
 export const navigations: Navigation[] = [
@@ -22,5 +22,10 @@ export const navigations: Navigation[] = [
     icon: MessagesSquare,
     name: "Ticket",
     href: "/ticket",
+  },
+  {
+    icon: Palette,
+    name: "Design System",
+    href: "/design-system",
   },
 ];
