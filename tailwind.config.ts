@@ -2,6 +2,8 @@ import type { Config } from "tailwindcss";
 import tailwindcssAnimate from "tailwindcss-animate";
 import { fontFamily } from "tailwindcss/defaultTheme";
 
+const oklch = (name: string) => `oklch(var(${name}) / <alpha-value>)`;
+
 const config = {
   darkMode: ["class"],
   content: [
@@ -21,7 +23,9 @@ const config = {
     },
     extend: {
       fontFamily: {
-        sans: ["var(--font-gabarito)", ...fontFamily.sans],
+        sans: ["var(--font-instrument)", "Instrument Sans", ...fontFamily.sans],
+        display: ["var(--font-instrument-serif)", "Instrument Serif", "Georgia", ...fontFamily.serif],
+        mono: ["var(--font-jetbrains)", "JetBrains Mono", ...fontFamily.mono],
       },
       screens: {
         phone: "370px",
@@ -30,38 +34,55 @@ const config = {
         desktop: "1200px",
       },
       colors: {
-        border: "hsl(var(--border))",
-        input: "hsl(var(--input))",
-        ring: "hsl(var(--ring))",
-        background: "hsl(var(--background))",
-        foreground: "hsl(var(--foreground))",
+        border: oklch("--border"),
+        input: oklch("--input"),
+        ring: oklch("--ring"),
+        background: oklch("--background"),
+        foreground: oklch("--foreground"),
         primary: {
-          DEFAULT: "hsl(var(--primary))",
-          foreground: "hsl(var(--primary-foreground))",
+          DEFAULT: oklch("--primary"),
+          foreground: oklch("--primary-foreground"),
         },
         secondary: {
-          DEFAULT: "hsl(var(--secondary))",
-          foreground: "hsl(var(--secondary-foreground))",
+          DEFAULT: oklch("--secondary"),
+          foreground: oklch("--secondary-foreground"),
         },
         destructive: {
-          DEFAULT: "hsl(var(--destructive))",
-          foreground: "hsl(var(--destructive-foreground))",
+          DEFAULT: oklch("--destructive"),
+          foreground: oklch("--destructive-foreground"),
         },
         muted: {
-          DEFAULT: "hsl(var(--muted))",
-          foreground: "hsl(var(--muted-foreground))",
+          DEFAULT: oklch("--muted"),
+          foreground: oklch("--muted-foreground"),
         },
         accent: {
-          DEFAULT: "hsl(var(--accent))",
-          foreground: "hsl(var(--accent-foreground))",
+          DEFAULT: oklch("--accent"),
+          foreground: oklch("--accent-foreground"),
         },
         popover: {
-          DEFAULT: "hsl(var(--popover))",
-          foreground: "hsl(var(--popover-foreground))",
+          DEFAULT: oklch("--popover"),
+          foreground: oklch("--popover-foreground"),
         },
         card: {
-          DEFAULT: "hsl(var(--card))",
-          foreground: "hsl(var(--card-foreground))",
+          DEFAULT: oklch("--card"),
+          foreground: oklch("--card-foreground"),
+        },
+        chart: {
+          1: oklch("--chart-1"),
+          2: oklch("--chart-2"),
+          3: oklch("--chart-3"),
+          4: oklch("--chart-4"),
+          5: oklch("--chart-5"),
+        },
+        sidebar: {
+          DEFAULT: oklch("--sidebar"),
+          foreground: oklch("--sidebar-foreground"),
+          primary: oklch("--sidebar-primary"),
+          "primary-foreground": oklch("--sidebar-primary-foreground"),
+          accent: oklch("--sidebar-accent"),
+          "accent-foreground": oklch("--sidebar-accent-foreground"),
+          border: oklch("--sidebar-border"),
+          ring: oklch("--sidebar-ring"),
         },
       },
       borderRadius: {
