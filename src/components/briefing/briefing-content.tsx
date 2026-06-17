@@ -7,13 +7,14 @@ import {
   CalendarDays,
   Check,
   CheckCircle,
-  ChevronRight,
+  ChevronDown,
   ExternalLink,
   Mail,
   MessageSquare,
   Package,
   Play,
   Rocket,
+  Send,
   ShieldCheck,
 } from "lucide-react";
 import {
@@ -24,7 +25,6 @@ import {
 } from "date-fns";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { GateCard } from "@/components/patterns/pat-5-gate-card";
 import { cn } from "@/lib/utils";
 import type {
   Commitment,
@@ -56,7 +56,13 @@ interface BriefingContentProps {
   className?: string;
 }
 
-type BriefingTab = "pulse" | "decisions" | "next";
+type ChatMessage = {
+  id: string;
+  role: "assistant" | "user";
+  content: string;
+};
+
+type TodoSectionKey = "events" | "obligations" | "commitments";
 
 type WorkItem =
   | {
@@ -78,16 +84,16 @@ const EVENT_META: Record<
   EventType,
   {
     label: string;
-    variant: "default" | "secondary" | "destructive" | "warning" | "success" | "outline";
+    variant: "default" | "secondary" | "success" | "outline";
   }
 > = {
-  finding_created: { label: "Finding", variant: "destructive" },
+  finding_created: { label: "Finding", variant: "secondary" },
   finding_resolved: { label: "Resolved", variant: "success" },
   run_completed: { label: "Run", variant: "secondary" },
-  gate_requested: { label: "Gate", variant: "warning" },
+  gate_requested: { label: "Gate", variant: "outline" },
   document_ingested: { label: "Document", variant: "secondary" },
-  staleness_detected: { label: "Stale", variant: "warning" },
-  obligation_due: { label: "Obligation", variant: "destructive" },
+  staleness_detected: { label: "Stale", variant: "outline" },
+  obligation_due: { label: "Obligation", variant: "outline" },
 };
 
 const PLAN_STATE_LABELS: Record<Commitment["planState"], string> = {
@@ -103,6 +109,13 @@ const SOURCE_ICONS = {
   email: Mail,
 };
 
+const SUGGESTED_PROMPTS = [
+  "What changed since I was here?",
+  "What needs my attention first?",
+  "Which deadlines are at risk?",
+  "What decisions are pending?",
+];
+
 function daysUntil(due: string): number {
   return differenceInCalendarDays(parseISO(due), new Date());
 }
@@ -113,11 +126,10 @@ function dueLabel(days: number): string {
   return `${days}d`;
 }
 
-function dueTone(days: number): string {
-  if (days < 0) return "border-destructive/30 bg-destructive/10 text-destructive";
-  if (days <= 7) return "border-amber-300 bg-amber-50 text-amber-800 dark:border-amber-800 dark:bg-amber-950 dark:text-amber-200";
-  if (days <= 30) return "border-primary/25 bg-primary/10 text-primary";
-  return "border-border bg-muted text-muted-foreground";
+function dueBadgeClass(days: number): string {
+  if (days < 0) return "border-border bg-muted text-foreground";
+  if (days <= 7) return "border-border bg-primary/10 text-primary";
+  return "border-border bg-background text-muted-foreground";
 }
 
 function gateDeadline(gate: GateRequest): Date {
@@ -126,11 +138,6 @@ function gateDeadline(gate: GateRequest): Date {
 
 function hoursRemaining(gate: GateRequest): number {
   return Math.max(0, Math.ceil((gateDeadline(gate).getTime() - Date.now()) / 3_600_000));
-}
-
-function gateProgress(gate: GateRequest): number {
-  const remaining = hoursRemaining(gate);
-  return Math.min(100, Math.max(0, ((gate.slaHours - remaining) / gate.slaHours) * 100));
 }
 
 function requesterFor(gate: GateRequest, requesterMap: Record<string, User>): User {
@@ -184,6 +191,135 @@ function buildWorkItems(obligations: Obligation[], commitments: Commitment[]): W
   return [...obligationItems, ...commitmentItems].sort((a, b) => a.days - b.days);
 }
 
+function compactList(items: string[], empty: string): string {
+  if (items.length === 0) return empty;
+  return items.slice(0, 3).join(" ");
+}
+
+function buildOpeningBrief({
+  events,
+  gates,
+  obligations,
+  commitments,
+  degradedSources,
+}: {
+  events: Event[];
+  gates: GateRequest[];
+  obligations: Obligation[];
+  commitments: Commitment[];
+  degradedSources?: string[];
+}): string {
+  const findings = events.filter((event) => event.type === "finding_created").length;
+  const nextObligation = sortObligations(obligations)[0];
+  const activeCommitments = commitments.filter(
+    (commitment) => !["completed", "dismissed"].includes(commitment.planState),
+  ).length;
+  const sourceText =
+    degradedSources && degradedSources.length > 0
+      ? `${degradedSources.length} source${degradedSources.length === 1 ? " needs" : "s need"} review`
+      : "sources look current";
+
+  return [
+    `Here is the current brief. The record has ${events.length} update${events.length === 1 ? "" : "s"} since your last visit, including ${findings} finding${findings === 1 ? "" : "s"}.`,
+    `${gates.length} gate${gates.length === 1 ? "" : "s"} are pending, ${activeCommitments} commitment${activeCommitments === 1 ? "" : "s"} are active, and ${sourceText}.`,
+    nextObligation
+      ? `The next obligation is ${nextObligation.name} for ${nextObligation.jurisdiction}, ${dueLabel(daysUntil(nextObligation.due)).toLowerCase()}.`
+      : "There are no upcoming obligations in this brief.",
+  ].join(" ");
+}
+
+function answerBriefingQuestion({
+  question,
+  events,
+  gates,
+  obligations,
+  commitments,
+  requesterMap,
+  degradedSources,
+}: {
+  question: string;
+  events: Event[];
+  gates: GateRequest[];
+  obligations: Obligation[];
+  commitments: Commitment[];
+  requesterMap: Record<string, User>;
+  degradedSources?: string[];
+}): string {
+  const query = question.toLowerCase();
+  const sortedEvents = sortEvents(events);
+  const sortedGates = sortGates(gates);
+  const sortedObligations = sortObligations(obligations);
+  const activeCommitments = commitments.filter(
+    (commitment) => !["completed", "dismissed"].includes(commitment.planState),
+  );
+
+  if (query.includes("changed") || query.includes("since")) {
+    return compactList(
+      sortedEvents.map((event) => {
+        const age = formatDistanceToNow(parseISO(event.timestamp), { addSuffix: true });
+        return `${EVENT_META[event.type].label}: ${event.description} (${age}).`;
+      }),
+      "Nothing changed in the record since your last visit.",
+    );
+  }
+
+  if (query.includes("attention") || query.includes("first") || query.includes("priority")) {
+    const gate = sortedGates[0];
+    const overdueObligation = sortedObligations.find((obligation) => daysUntil(obligation.due) < 0);
+    const executableCommitment = activeCommitments.find(
+      (commitment) => commitment.planState === "approved",
+    );
+
+    if (gate) {
+      const requester = requesterFor(gate, requesterMap);
+      return `${gate.objectName} should come first. It is a ${gate.objectType} gate requested by ${requester.name}, and the SLA is ${statusTextForGate(gate).toLowerCase()}.`;
+    }
+
+    if (overdueObligation) {
+      return `${overdueObligation.name} should come first. It is ${dueLabel(daysUntil(overdueObligation.due)).toLowerCase()} for ${overdueObligation.jurisdiction}.`;
+    }
+
+    if (executableCommitment) {
+      return `${executableCommitment.text} is ready to run. Review the plan in the to-do rail before approving it.`;
+    }
+
+    return "No item is currently blocking review. Start with the newest record changes if you want to clear the brief.";
+  }
+
+  if (query.includes("deadline") || query.includes("due") || query.includes("risk")) {
+    return compactList(
+      sortedObligations.map((obligation) => {
+        const days = daysUntil(obligation.due);
+        return `${obligation.name} is ${dueLabel(days).toLowerCase()} for ${obligation.jurisdiction}.`;
+      }),
+      "No obligation deadlines are currently loaded in this brief.",
+    );
+  }
+
+  if (query.includes("decision") || query.includes("gate") || query.includes("pending")) {
+    return compactList(
+      sortedGates.map((gate) => {
+        const requester = requesterFor(gate, requesterMap);
+        return `${gate.objectName} is pending review, requested by ${requester.name}, ${statusTextForGate(gate).toLowerCase()}.`;
+      }),
+      "No gates are pending. The board pack can move toward review once the remaining to-do items are clear.",
+    );
+  }
+
+  if (query.includes("source") || query.includes("stale") || query.includes("degraded")) {
+    if (degradedSources && degradedSources.length > 0) {
+      return `The sources to check are ${degradedSources.join(", ")}. The brief keeps them visible so you can decide whether a citation or finding needs a fresh run.`;
+    }
+
+    return "Sources look current in this brief. No degraded connectors are blocking review.";
+  }
+
+  return [
+    `The brief is tracking ${events.length} record update${events.length === 1 ? "" : "s"}, ${gates.length} pending gate${gates.length === 1 ? "" : "s"}, ${obligations.length} obligation${obligations.length === 1 ? "" : "s"}, and ${activeCommitments.length} active commitment${activeCommitments.length === 1 ? "" : "s"}.`,
+    "Ask what changed, what needs attention first, which deadlines are at risk, or what decisions are pending.",
+  ].join(" ");
+}
+
 function PanelShell({
   title,
   children,
@@ -198,7 +334,7 @@ function PanelShell({
   return (
     <section
       className={cn(
-        "min-h-0 flex-col overflow-hidden rounded-lg border border-border bg-card text-card-foreground",
+        "flex min-h-0 flex-col overflow-hidden rounded-lg border border-border bg-card text-card-foreground",
         className,
       )}
     >
@@ -206,7 +342,7 @@ function PanelShell({
         <h2 className="text-sm font-semibold">{title}</h2>
         {headerSlot}
       </div>
-      <div className="min-h-0 flex-1 overflow-auto p-3">{children}</div>
+      {children}
     </section>
   );
 }
@@ -216,32 +352,49 @@ function StatusTile({
   label,
   value,
   detail,
-  tone = "neutral",
 }: {
   icon: React.ElementType;
   label: string;
   value: string;
   detail: string;
-  tone?: "neutral" | "warning" | "danger" | "ready";
 }) {
-  const toneClass =
-    tone === "danger"
-      ? "border-destructive/25 bg-destructive/10 text-destructive"
-      : tone === "warning"
-        ? "border-amber-300 bg-amber-50 text-amber-800 dark:border-amber-800 dark:bg-amber-950 dark:text-amber-200"
-        : tone === "ready"
-          ? "border-emerald-300 bg-emerald-50 text-emerald-800 dark:border-emerald-800 dark:bg-emerald-950 dark:text-emerald-200"
-          : "border-border bg-card text-foreground";
-
   return (
-    <div className={cn("rounded-lg border px-2 py-1.5 sm:px-3 sm:py-2", toneClass)}>
+    <div
+      data-metric-tile={label}
+      className="rounded-lg border border-border bg-card px-2 py-1.5 text-foreground sm:px-3 sm:py-2"
+    >
       <div className="flex items-center gap-2">
-        <Icon className="h-4 w-4 shrink-0" />
+        <Icon className="h-4 w-4 shrink-0 text-muted-foreground" />
         <p className="text-xs font-medium text-muted-foreground">{label}</p>
       </div>
       <div className="mt-1 flex items-baseline justify-between gap-3">
         <p className="text-base font-semibold leading-none sm:text-lg">{value}</p>
         <p className="hidden truncate text-xs text-muted-foreground min-[480px]:block">{detail}</p>
+      </div>
+    </div>
+  );
+}
+
+function SourcesTile({ degradedSources }: { degradedSources?: string[] }) {
+  const degradedCount = degradedSources?.length ?? 0;
+
+  return (
+    <div
+      data-metric-tile="Sources"
+      role={degradedCount > 0 ? "alert" : undefined}
+      className="rounded-lg border border-border bg-card px-2 py-1.5 text-foreground sm:px-3 sm:py-2"
+    >
+      <div className="flex items-center gap-2">
+        <AlertTriangle className="h-4 w-4 shrink-0 text-muted-foreground" />
+        <p className="text-xs font-medium text-muted-foreground">Sources</p>
+      </div>
+      <div className="mt-1 flex items-baseline justify-between gap-3">
+        <p className="text-base font-semibold leading-none sm:text-lg">
+          {degradedCount > 0 ? degradedCount : "OK"}
+        </p>
+        <p className="hidden truncate text-xs text-muted-foreground min-[480px]:block">
+          {degradedCount > 0 ? degradedSources?.join(", ") : "current record"}
+        </p>
       </div>
     </div>
   );
@@ -268,7 +421,6 @@ function CommandStrip({
     (commitment) => !["completed", "dismissed"].includes(commitment.planState),
   );
   const urgentGate = visibleGates[0];
-  const degradedCount = degradedSources?.length ?? 0;
 
   return (
     <div className="grid shrink-0 gap-3 xl:grid-cols-[minmax(0,1fr)_auto]">
@@ -278,57 +430,32 @@ function CommandStrip({
           label="Deltas"
           value={String(visibleEvents.length)}
           detail={findingCount > 0 ? `${findingCount} findings` : "record quiet"}
-          tone={findingCount > 0 ? "danger" : "ready"}
         />
         <StatusTile
           icon={ShieldCheck}
           label="Pending gates"
           value={String(visibleGates.length)}
           detail={statusTextForGate(urgentGate)}
-          tone={visibleGates.length > 0 ? "warning" : "ready"}
         />
         <StatusTile
           icon={CalendarDays}
           label="Next obligation"
           value={nextObligation ? dueLabel(daysUntil(nextObligation.due)) : "Clear"}
           detail={nextObligation?.jurisdiction ?? "no deadlines"}
-          tone={nextObligation && daysUntil(nextObligation.due) <= 7 ? "danger" : "neutral"}
         />
         <StatusTile
           icon={CheckCircle}
           label="Commitments"
           value={String(activeCommitments.length)}
           detail="active plans"
-          tone={activeCommitments.length > 0 ? "neutral" : "ready"}
         />
-        <div
-          role={degradedCount > 0 ? "alert" : undefined}
-          className={cn(
-            "rounded-lg border px-2 py-1.5 sm:px-3 sm:py-2",
-            degradedCount > 0
-              ? "border-amber-300 bg-amber-50 text-amber-900 dark:border-amber-800 dark:bg-amber-950 dark:text-amber-100"
-              : "border-border bg-card text-foreground",
-          )}
-        >
-          <div className="flex items-center gap-2">
-            <AlertTriangle className="h-4 w-4 shrink-0" />
-            <p className="text-xs font-medium text-muted-foreground">Sources</p>
-          </div>
-          <div className="mt-1 flex items-baseline justify-between gap-3">
-            <p className="text-base font-semibold leading-none sm:text-lg">
-              {degradedCount > 0 ? degradedCount : "OK"}
-            </p>
-            <p className="hidden truncate text-xs text-muted-foreground min-[480px]:block">
-              {degradedCount > 0 ? degradedSources?.join(", ") : "current record"}
-            </p>
-          </div>
-        </div>
+        <SourcesTile degradedSources={degradedSources} />
       </div>
 
       <div className="flex flex-col items-stretch gap-2 rounded-lg border border-border bg-card px-3 py-2 min-[480px]:flex-row min-[480px]:items-center min-[480px]:justify-between xl:w-[310px]">
         <div className="min-w-0">
           <div className="flex items-center gap-2">
-            <Package className="h-4 w-4 text-primary" />
+            <Package className="h-4 w-4 text-muted-foreground" />
             <p className="text-sm font-semibold">Board pack</p>
           </div>
           <p className="truncate text-xs text-muted-foreground">
@@ -341,448 +468,366 @@ function CommandStrip({
   );
 }
 
-function MobileTabs({
-  activeTab,
-  onChange,
-}: {
-  activeTab: BriefingTab;
-  onChange: (tab: BriefingTab) => void;
-}) {
-  const tabs: Array<{ id: BriefingTab; label: string }> = [
-    { id: "pulse", label: "Pulse" },
-    { id: "decisions", label: "Decisions" },
-    { id: "next", label: "Next work" },
-  ];
-
-  return (
-    <div className="grid shrink-0 grid-cols-3 rounded-lg border border-border bg-card p-1 md:hidden">
-      {tabs.map((tab) => (
-        <button
-          key={tab.id}
-          type="button"
-          aria-pressed={activeTab === tab.id}
-          onClick={() => onChange(tab.id)}
-          className={cn(
-            "rounded-md px-2 py-1.5 text-xs font-medium text-muted-foreground transition-colors",
-            activeTab === tab.id && "bg-primary text-primary-foreground",
-          )}
-        >
-          {tab.label}
-        </button>
-      ))}
-    </div>
-  );
-}
-
-function DeltaPulsePanel({
+function BriefingChatPanel({
   events,
-  className,
-  onAcknowledge,
-  onOpen,
+  gates,
+  obligations,
+  commitments,
+  requesterMap,
+  degradedSources,
 }: {
   events: Event[];
-  className?: string;
-  onAcknowledge: (eventId: string) => void;
-  onOpen: (objectRef: string) => void;
-}) {
-  return (
-    <PanelShell
-      title="Since you were here"
-      className={className}
-      headerSlot={
-        <Badge variant="outline" className="text-[10px]">
-          {events.length} items
-        </Badge>
-      }
-    >
-      {events.length === 0 ? (
-        <CompactEmpty
-          icon={CheckCircle}
-          title="All caught up"
-          detail="No new changes since your last visit."
-        />
-      ) : (
-        <ul className="space-y-2">
-          {events.map((event) => {
-            const meta = EVENT_META[event.type];
-
-            return (
-              <li
-                key={event.id}
-                className="rounded-md border border-border bg-background p-2.5"
-              >
-                <div className="flex items-start justify-between gap-2">
-                  <div className="min-w-0 space-y-1">
-                    <div className="flex flex-wrap items-center gap-1.5">
-                      <Badge variant={meta.variant} className="text-[10px]">
-                        {meta.label}
-                      </Badge>
-                      <span className="text-xs text-muted-foreground">
-                        {formatDistanceToNow(parseISO(event.timestamp), { addSuffix: true })}
-                      </span>
-                    </div>
-                    <p className="line-clamp-2 text-sm leading-snug text-foreground">
-                      {event.description}
-                    </p>
-                  </div>
-                </div>
-                <div className="mt-2 flex items-center justify-end gap-1">
-                  <Button
-                    size="sm"
-                    variant="ghost"
-                    className="h-7 px-2 text-xs"
-                    onClick={() => onOpen(event.objectRef)}
-                    aria-label={`Open ${event.description}`}
-                  >
-                    <ExternalLink className="h-3.5 w-3.5" />
-                    Open
-                  </Button>
-                  <Button
-                    size="sm"
-                    variant="ghost"
-                    className="h-7 px-2 text-xs text-muted-foreground"
-                    onClick={() => onAcknowledge(event.id)}
-                    aria-label={`Acknowledge ${event.description}`}
-                  >
-                    <Check className="h-3.5 w-3.5" />
-                    Ack
-                  </Button>
-                </div>
-              </li>
-            );
-          })}
-        </ul>
-      )}
-    </PanelShell>
-  );
-}
-
-function MobileActiveGateCard({
-  gate,
-  requester,
-  onApprove,
-  onRequestChanges,
-  onReject,
-}: {
-  gate: GateRequest;
-  requester: User;
-  onApprove: () => void;
-  onRequestChanges: (comment: string) => void;
-  onReject: (reason: string) => void;
-}) {
-  const [mode, setMode] = useState<"idle" | "changes" | "reject">("idle");
-  const [comment, setComment] = useState("");
-  const [reason, setReason] = useState("");
-  const hours = hoursRemaining(gate);
-
-  return (
-    <div className="rounded-md border border-primary/25 bg-background p-3 md:hidden">
-      <div className="flex flex-wrap items-center gap-1.5">
-        <Badge variant="outline" className="text-[10px]">
-          Gate
-        </Badge>
-        <span className="text-xs text-muted-foreground">
-          {hours === 0 ? "Due now" : `${hours}h left`}
-        </span>
-      </div>
-      <h3 className="mt-2 text-base font-semibold leading-tight">{gate.objectName}</h3>
-      <p className="mt-1 text-xs text-muted-foreground">{gate.objectType} ready for review</p>
-      <div className="mt-3 space-y-1 text-xs text-muted-foreground">
-        <p>
-          Requested by <span className="font-medium text-foreground">{requester.name}</span>
-        </p>
-        <p>
-          Escalation: <span className="font-medium text-foreground">{gate.escalationPath}</span>
-        </p>
-      </div>
-
-      {mode === "changes" && (
-        <div className="mt-3 space-y-2 rounded-md border border-border p-2">
-          <textarea
-            value={comment}
-            onChange={(event) => setComment(event.target.value)}
-            placeholder="What needs to change?"
-            rows={3}
-            className="min-h-20 w-full rounded-md border border-input bg-background px-2 py-1.5 text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring/30"
-          />
-          <div className="grid grid-cols-2 gap-2">
-            <Button
-              size="sm"
-              className="h-8 text-xs"
-              disabled={!comment.trim()}
-              onClick={() => {
-                onRequestChanges(comment);
-                setComment("");
-                setMode("idle");
-              }}
-            >
-              Send
-            </Button>
-            <Button
-              size="sm"
-              variant="outline"
-              className="h-8 text-xs"
-              onClick={() => {
-                setComment("");
-                setMode("idle");
-              }}
-            >
-              Cancel
-            </Button>
-          </div>
-        </div>
-      )}
-
-      {mode === "reject" && (
-        <div className="mt-3 space-y-2 rounded-md border border-border p-2">
-          <select
-            value={reason}
-            onChange={(event) => setReason(event.target.value)}
-            className="h-8 w-full rounded-md border border-input bg-background px-2 text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring/30"
-          >
-            <option value="">Select a reason</option>
-            <option value="Insufficient evidence">Insufficient evidence</option>
-            <option value="Methodology not approved">Methodology not approved</option>
-            <option value="Requires additional review">Requires additional review</option>
-          </select>
-          <div className="grid grid-cols-2 gap-2">
-            <Button
-              size="sm"
-              variant="destructive"
-              className="h-8 text-xs"
-              disabled={!reason}
-              onClick={() => {
-                onReject(reason);
-                setReason("");
-                setMode("idle");
-              }}
-            >
-              Reject
-            </Button>
-            <Button
-              size="sm"
-              variant="outline"
-              className="h-8 text-xs"
-              onClick={() => {
-                setReason("");
-                setMode("idle");
-              }}
-            >
-              Cancel
-            </Button>
-          </div>
-        </div>
-      )}
-
-      <div className="mt-3 grid gap-2">
-        <Button size="sm" className="h-8 text-xs" onClick={onApprove}>
-          <ShieldCheck className="h-3.5 w-3.5" />
-          <span className="hidden min-[480px]:inline">Approve & promote</span>
-          <span className="min-[480px]:hidden">Approve</span>
-        </Button>
-        <div className="grid grid-cols-2 gap-2">
-          <Button
-            size="sm"
-            variant="outline"
-            className="h-8 text-xs"
-            onClick={() => setMode(mode === "changes" ? "idle" : "changes")}
-          >
-            Changes
-          </Button>
-          <Button
-            size="sm"
-            variant="outline"
-            className="h-8 text-xs text-destructive hover:text-destructive"
-            onClick={() => setMode(mode === "reject" ? "idle" : "reject")}
-          >
-            Reject
-          </Button>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function DecisionWorkbench({
-  gates,
-  activeGate,
-  requesterMap,
-  className,
-  onActivate,
-  onApprove,
-  onRequestChanges,
-  onReject,
-  onDelegate,
-}: {
   gates: GateRequest[];
-  activeGate?: GateRequest;
+  obligations: Obligation[];
+  commitments: Commitment[];
   requesterMap: Record<string, User>;
-  className?: string;
-  onActivate: (gateId: string) => void;
-  onApprove: (gateId: string) => void;
-  onRequestChanges: (gateId: string, comment: string) => void;
-  onReject: (gateId: string, reason: string) => void;
-  onDelegate: (gateId: string, userId: string, expiresAt: string) => void;
+  degradedSources?: string[];
 }) {
-  const queuedGates = gates.filter((gate) => gate.id !== activeGate?.id);
+  const openingMessage = useMemo(
+    () =>
+      buildOpeningBrief({
+        events,
+        gates,
+        obligations,
+        commitments,
+        degradedSources,
+      }),
+    [commitments, degradedSources, events, gates, obligations],
+  );
+  const [messages, setMessages] = useState<ChatMessage[]>([
+    {
+      id: "opening",
+      role: "assistant",
+      content: openingMessage,
+    },
+  ]);
+  const [draft, setDraft] = useState("");
+
+  function submitQuestion(question: string) {
+    const trimmedQuestion = question.trim();
+    if (!trimmedQuestion) return;
+
+    const answer = answerBriefingQuestion({
+      question: trimmedQuestion,
+      events,
+      gates,
+      obligations,
+      commitments,
+      requesterMap,
+      degradedSources,
+    });
+    const stamp = Date.now();
+
+    setMessages((current) => [
+      ...current,
+      {
+        id: `user-${stamp}`,
+        role: "user",
+        content: trimmedQuestion,
+      },
+      {
+        id: `assistant-${stamp}`,
+        role: "assistant",
+        content: answer,
+      },
+    ]);
+    setDraft("");
+  }
 
   return (
     <PanelShell
-      title="Decision queue"
-      className={className}
+      title="Ask this brief"
+      className="min-h-0"
       headerSlot={
-        <Badge variant={gates.length > 0 ? "warning" : "success"} className="text-[10px]">
-          {gates.length} pending
+        <Badge variant="outline" className="gap-1 text-[10px]">
+          <MessageSquare className="h-3 w-3" />
+          Briefing chat
         </Badge>
       }
     >
-      {gates.length === 0 || !activeGate ? (
-        <CompactEmpty
-          icon={CheckCircle}
-          title="No pending decisions"
-          detail="All gates have been resolved."
-        />
-      ) : (
-        <div className="flex min-h-full flex-col gap-3">
-          <MobileActiveGateCard
-            gate={activeGate}
-            requester={requesterFor(activeGate, requesterMap)}
-            onApprove={() => onApprove(activeGate.id)}
-            onRequestChanges={(comment) => onRequestChanges(activeGate.id, comment)}
-            onReject={(reason) => onReject(activeGate.id, reason)}
-          />
-          <GateCard
-            gate={activeGate}
-            objectSummary={`${activeGate.objectType} ready for review`}
-            requester={requesterFor(activeGate, requesterMap)}
-            onApprove={() => onApprove(activeGate.id)}
-            onRequestChanges={(comment) => onRequestChanges(activeGate.id, comment)}
-            onReject={(reason) => onReject(activeGate.id, reason)}
-            onDelegate={(userId, expiresAt) => onDelegate(activeGate.id, userId, expiresAt)}
-            className="hidden border-primary/25 bg-background md:block"
-          />
-
-          {queuedGates.length > 0 && (
-            <div className="space-y-2">
-              <div className="flex items-center justify-between">
-                <p className="text-xs font-medium text-muted-foreground">Queued gates</p>
-                <span className="text-xs text-muted-foreground">{queuedGates.length} waiting</span>
+      <div className="flex min-h-0 flex-1 flex-col">
+        <div className="min-h-0 flex-1 overflow-auto p-3">
+          <div className="mx-auto flex max-w-3xl flex-col gap-3">
+            {messages.map((message) => (
+              <div
+                key={message.id}
+                className={cn(
+                  "max-w-[88%] rounded-lg border px-3 py-2 text-sm leading-relaxed",
+                  message.role === "assistant"
+                    ? "self-start border-border bg-background text-foreground"
+                    : "self-end border-primary/20 bg-primary text-primary-foreground",
+                )}
+              >
+                {message.content}
               </div>
-              <ul className="space-y-2">
-                {queuedGates.map((gate) => {
-                  const hours = hoursRemaining(gate);
-                  const progress = gateProgress(gate);
-
-                  return (
-                    <li
-                      key={gate.id}
-                      className="rounded-md border border-border bg-background p-2.5"
-                    >
-                      <div className="flex items-start justify-between gap-3">
-                        <div className="min-w-0">
-                          <p className="truncate text-sm font-medium">{gate.objectName}</p>
-                          <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
-                            <span>{gate.objectType}</span>
-                            <span>{hours === 0 ? "Due now" : `${hours}h left`}</span>
-                            <span>{requesterFor(gate, requesterMap).name}</span>
-                          </div>
-                        </div>
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          className="h-7 shrink-0 px-2 text-xs"
-                          onClick={() => onActivate(gate.id)}
-                          aria-label={`Review ${gate.objectName}`}
-                        >
-                          Review
-                          <ChevronRight className="h-3.5 w-3.5" />
-                        </Button>
-                      </div>
-                      <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-muted">
-                        <div
-                          className={cn(
-                            "h-full rounded-full",
-                            progress >= 90 ? "bg-destructive" : progress >= 75 ? "bg-amber-500" : "bg-primary",
-                          )}
-                          style={{ width: `${progress}%` }}
-                        />
-                      </div>
-                    </li>
-                  );
-                })}
-              </ul>
-            </div>
-          )}
+            ))}
+          </div>
         </div>
-      )}
+
+        <div className="shrink-0 border-t border-border bg-card p-3">
+          <div className="mb-3 flex flex-wrap gap-2">
+            {SUGGESTED_PROMPTS.map((prompt) => (
+              <button
+                key={prompt}
+                type="button"
+                onClick={() => submitQuestion(prompt)}
+                className="rounded-md border border-border bg-background px-2.5 py-1.5 text-xs font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/30"
+              >
+                {prompt}
+              </button>
+            ))}
+          </div>
+
+          <form
+            className="flex items-end gap-2"
+            onSubmit={(event) => {
+              event.preventDefault();
+              submitQuestion(draft);
+            }}
+          >
+            <label className="sr-only" htmlFor="briefing-chat-input">
+              Ask this brief
+            </label>
+            <textarea
+              id="briefing-chat-input"
+              value={draft}
+              onChange={(event) => setDraft(event.target.value)}
+              rows={2}
+              placeholder="Ask what changed, what needs review, or what is due next."
+              className="min-h-11 flex-1 resize-none rounded-md border border-input bg-background px-3 py-2 text-sm outline-none transition-shadow placeholder:text-muted-foreground focus-visible:ring-2 focus-visible:ring-ring/30"
+            />
+            <Button type="submit" size="icon" aria-label="Send briefing question">
+              <Send className="h-4 w-4" />
+            </Button>
+          </form>
+        </div>
+      </div>
     </PanelShell>
   );
 }
 
-function NextWorkPanel({
+function TodoRail({
+  events,
   obligations,
   commitments,
   workItems,
-  className,
+  onAcknowledge,
+  onOpen,
   onNavigateObligation,
   onApproveRun,
   onDismissCommitment,
 }: {
+  events: Event[];
   obligations: Obligation[];
   commitments: Commitment[];
   workItems: WorkItem[];
-  className?: string;
+  onAcknowledge: (eventId: string) => void;
+  onOpen: (objectRef: string) => void;
   onNavigateObligation: (href: string) => void;
   onApproveRun: (commitmentId: string) => void;
   onDismissCommitment: (commitmentId: string) => void;
 }) {
-  return (
-    <section
-      className={cn(
-        "min-h-0 flex-col overflow-hidden rounded-lg border border-border bg-card text-card-foreground",
-        className,
-      )}
-    >
-      <div className="grid shrink-0 grid-cols-2 border-b border-border">
-        <div className="border-r border-border px-3 py-2.5">
-          <h2 className="text-sm font-semibold">Obligations</h2>
-          <p className="text-xs text-muted-foreground">{obligations.length} deadlines</p>
-        </div>
-        <div className="px-3 py-2.5">
-          <h2 className="text-sm font-semibold">Commitments</h2>
-          <p className="text-xs text-muted-foreground">{commitments.length} active</p>
-        </div>
-      </div>
+  const [openSections, setOpenSections] = useState<Record<TodoSectionKey, boolean>>({
+    events: true,
+    obligations: false,
+    commitments: false,
+  });
+  const obligationItems = workItems.filter(
+    (item): item is Extract<WorkItem, { kind: "obligation" }> => item.kind === "obligation",
+  );
+  const commitmentItems = workItems.filter(
+    (item): item is Extract<WorkItem, { kind: "commitment" }> => item.kind === "commitment",
+  );
 
-      <div className="min-h-0 flex-1 overflow-auto p-3">
-        {workItems.length === 0 ? (
-          <CompactEmpty
-            icon={CheckCircle}
-            title="No next work"
-            detail="Obligations and commitments are clear."
-          />
-        ) : (
-          <ul className="space-y-2">
-            {workItems.map((item) =>
-              item.kind === "obligation" ? (
+  function toggleSection(section: TodoSectionKey) {
+    setOpenSections((current) => ({
+      ...current,
+      [section]: !current[section],
+    }));
+  }
+
+  return (
+    <PanelShell
+      title="To-do list"
+      className="min-h-0"
+      headerSlot={
+        <Badge variant="outline" className="text-[10px]">
+          {events.length + obligationItems.length + commitmentItems.length} items
+        </Badge>
+      }
+    >
+      <div className="min-h-0 flex-1 overflow-auto p-2">
+        <TodoSection
+          id="since-you-were-here"
+          label="Since you were here"
+          count={events.length}
+          open={openSections.events}
+          onToggle={() => toggleSection("events")}
+        >
+          {events.length === 0 ? (
+            <RailEmpty text="No new record changes." />
+          ) : (
+            <ul className="space-y-2">
+              {events.map((event) => (
+                <EventTodoRow
+                  key={event.id}
+                  event={event}
+                  onAcknowledge={onAcknowledge}
+                  onOpen={onOpen}
+                />
+              ))}
+            </ul>
+          )}
+        </TodoSection>
+
+        <TodoSection
+          id="obligations"
+          label="Obligations"
+          count={obligations.length}
+          open={openSections.obligations}
+          onToggle={() => toggleSection("obligations")}
+        >
+          {obligationItems.length === 0 ? (
+            <RailEmpty text="No obligation work is queued." />
+          ) : (
+            <ul className="space-y-2">
+              {obligationItems.map((item) => (
                 <ObligationRow
                   key={item.id}
                   item={item}
                   onNavigateObligation={onNavigateObligation}
                 />
-              ) : (
+              ))}
+            </ul>
+          )}
+        </TodoSection>
+
+        <TodoSection
+          id="commitments"
+          label="Commitments"
+          count={commitments.filter((commitment) => !["completed", "dismissed"].includes(commitment.planState)).length}
+          open={openSections.commitments}
+          onToggle={() => toggleSection("commitments")}
+        >
+          {commitmentItems.length === 0 ? (
+            <RailEmpty text="No commitments need action." />
+          ) : (
+            <ul className="space-y-2">
+              {commitmentItems.map((item) => (
                 <CommitmentRow
                   key={item.id}
                   item={item}
                   onApproveRun={onApproveRun}
                   onDismissCommitment={onDismissCommitment}
                 />
-              ),
-            )}
-          </ul>
-        )}
+              ))}
+            </ul>
+          )}
+        </TodoSection>
+      </div>
+    </PanelShell>
+  );
+}
+
+function TodoSection({
+  id,
+  label,
+  count,
+  open,
+  onToggle,
+  children,
+}: {
+  id: string;
+  label: string;
+  count: number;
+  open: boolean;
+  onToggle: () => void;
+  children: React.ReactNode;
+}) {
+  return (
+    <section className="border-b border-border last:border-b-0">
+      <h3>
+        <button
+          type="button"
+          aria-expanded={open}
+          aria-controls={`${id}-panel`}
+          onClick={onToggle}
+          className="flex w-full items-center justify-between gap-3 px-1 py-2 text-left text-sm font-semibold focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/30"
+        >
+          <span className="flex min-w-0 items-center gap-2">
+            <ChevronDown
+              className={cn(
+                "h-4 w-4 shrink-0 text-muted-foreground transition-transform",
+                !open && "-rotate-90",
+              )}
+            />
+            <span className="truncate">{label}</span>
+          </span>
+          <Badge variant="outline" className="shrink-0 text-[10px]">
+            {count}
+          </Badge>
+        </button>
+      </h3>
+      <div
+        id={`${id}-panel`}
+        role="region"
+        aria-label={label}
+        hidden={!open}
+        className="pb-2"
+      >
+        {children}
       </div>
     </section>
+  );
+}
+
+function EventTodoRow({
+  event,
+  onAcknowledge,
+  onOpen,
+}: {
+  event: Event;
+  onAcknowledge: (eventId: string) => void;
+  onOpen: (objectRef: string) => void;
+}) {
+  const meta = EVENT_META[event.type];
+
+  return (
+    <li className="rounded-md border border-border bg-background p-2.5">
+      <div className="flex flex-wrap items-center gap-1.5">
+        <Badge variant={meta.variant} className="text-[10px]">
+          {meta.label}
+        </Badge>
+        <span className="text-xs text-muted-foreground">
+          {formatDistanceToNow(parseISO(event.timestamp), { addSuffix: true })}
+        </span>
+      </div>
+      <p className="mt-1.5 line-clamp-2 text-sm leading-snug text-foreground">
+        {event.description}
+      </p>
+      <div className="mt-2 flex items-center justify-end gap-1">
+        <Button
+          size="sm"
+          variant="ghost"
+          className="h-7 px-2 text-xs"
+          onClick={() => onOpen(event.objectRef)}
+          aria-label={`Open ${event.description}`}
+        >
+          <ExternalLink className="h-3.5 w-3.5" />
+          Open
+        </Button>
+        <Button
+          size="sm"
+          variant="ghost"
+          className="h-7 px-2 text-xs text-muted-foreground"
+          onClick={() => onAcknowledge(event.id)}
+          aria-label={`Acknowledge ${event.description}`}
+        >
+          <Check className="h-3.5 w-3.5" />
+          Ack
+        </Button>
+      </div>
+    </li>
   );
 }
 
@@ -817,7 +862,7 @@ function ObligationRow({
         <span
           className={cn(
             "shrink-0 rounded-md border px-2 py-0.5 text-xs font-medium",
-            dueTone(item.days),
+            dueBadgeClass(item.days),
           )}
         >
           {dueLabel(item.days)}
@@ -857,7 +902,7 @@ function CommitmentRow({
             <span
               className={cn(
                 "rounded-md border px-2 py-0.5 text-xs font-medium",
-                dueTone(item.days),
+                dueBadgeClass(item.days),
               )}
             >
               {dueLabel(item.days)}
@@ -906,20 +951,10 @@ function CommitmentRow({
   );
 }
 
-function CompactEmpty({
-  icon: Icon,
-  title,
-  detail,
-}: {
-  icon: React.ElementType;
-  title: string;
-  detail: string;
-}) {
+function RailEmpty({ text }: { text: string }) {
   return (
-    <div className="flex h-full min-h-40 flex-col items-center justify-center gap-2 rounded-md border border-dashed border-border bg-background/60 p-6 text-center">
-      <Icon className="h-7 w-7 text-primary" />
-      <p className="text-sm font-medium">{title}</p>
-      <p className="max-w-xs text-xs text-muted-foreground">{detail}</p>
+    <div className="rounded-md border border-dashed border-border bg-background/60 px-3 py-4 text-center text-xs text-muted-foreground">
+      {text}
     </div>
   );
 }
@@ -952,10 +987,6 @@ export function BriefingContent({
   degradedSources,
   onAcknowledge,
   onOpen,
-  onApprove,
-  onRequestChanges,
-  onReject,
-  onDelegate,
   onApproveRun,
   onDismissCommitment,
   onNavigateObligation,
@@ -968,11 +999,8 @@ export function BriefingContent({
     obligations.length === 0 &&
     commitments.length === 0;
 
-  const [activeTab, setActiveTab] = useState<BriefingTab>("decisions");
   const [dismissedEvents, setDismissedEvents] = useState<Set<string>>(new Set());
-  const [dismissedGates, setDismissedGates] = useState<Set<string>>(new Set());
   const [dismissedCommitments, setDismissedCommitments] = useState<Set<string>>(new Set());
-  const [activeGateId, setActiveGateId] = useState<string | undefined>();
   const [boardPackRunRef, setBoardPackRunRef] = useState<string | undefined>();
   const [isGenerating, setIsGenerating] = useState(false);
 
@@ -981,18 +1009,12 @@ export function BriefingContent({
     [dismissedEvents, events],
   );
 
-  const visibleGates = useMemo(
-    () => sortGates(gates.filter((gate) => !dismissedGates.has(gate.id))),
-    [dismissedGates, gates],
-  );
+  const visibleGates = useMemo(() => sortGates(gates), [gates]);
 
   const visibleCommitments = useMemo(
     () => commitments.filter((commitment) => !dismissedCommitments.has(commitment.id)),
     [commitments, dismissedCommitments],
   );
-
-  const activeGate =
-    visibleGates.find((gate) => gate.id === activeGateId) ?? visibleGates[0];
 
   const workItems = useMemo(
     () => buildWorkItems(obligations, visibleCommitments),
@@ -1010,29 +1032,15 @@ export function BriefingContent({
     onAcknowledge(eventId);
   }
 
-  function completeGate(gateId: string) {
-    setDismissedGates((prev) => new Set([...prev, gateId]));
-    const nextGate = visibleGates.find((gate) => gate.id !== gateId);
-    setActiveGateId(nextGate?.id);
-  }
-
-  function handleApprove(gateId: string) {
-    completeGate(gateId);
-    onApprove(gateId);
-  }
-
-  function handleReject(gateId: string, reason: string) {
-    completeGate(gateId);
-    onReject(gateId, reason);
+  function handleApproveRun(commitmentId: string) {
+    setDismissedCommitments((prev) => new Set([...prev, commitmentId]));
+    onApproveRun(commitmentId);
   }
 
   function handleDismissCommitment(commitmentId: string) {
     setDismissedCommitments((prev) => new Set([...prev, commitmentId]));
     onDismissCommitment(commitmentId);
   }
-
-  const panelVisibility = (tab: BriefingTab) =>
-    activeTab === tab ? "flex" : "hidden md:flex";
 
   if (isColdStart) {
     return (
@@ -1066,45 +1074,26 @@ export function BriefingContent({
           />
         </CommandStrip>
 
-        <MobileTabs activeTab={activeTab} onChange={setActiveTab} />
-
-        <div className="grid min-h-0 flex-1 grid-cols-1 gap-3 md:grid-cols-[minmax(240px,0.9fr)_minmax(360px,1.1fr)] md:grid-rows-[minmax(0,1fr)_minmax(0,0.72fr)] xl:grid-cols-[minmax(260px,0.85fr)_minmax(420px,1.25fr)_minmax(280px,0.9fr)] xl:grid-rows-[minmax(0,1fr)]">
-          <DeltaPulsePanel
+        <div className="grid min-h-0 flex-1 grid-cols-1 grid-rows-[minmax(0,1fr)_minmax(220px,0.72fr)] gap-3 lg:grid-cols-[minmax(0,1fr)_minmax(320px,0.42fr)] lg:grid-rows-[minmax(0,1fr)]">
+          <BriefingChatPanel
             events={visibleEvents}
-            onAcknowledge={handleAcknowledge}
-            onOpen={onOpen}
-            className={cn(
-              panelVisibility("pulse"),
-              "md:col-start-1 md:row-start-1 xl:col-start-1 xl:row-start-1",
-            )}
-          />
-
-          <DecisionWorkbench
             gates={visibleGates}
-            activeGate={activeGate}
+            obligations={obligations}
+            commitments={visibleCommitments}
             requesterMap={requesterMap}
-            onActivate={setActiveGateId}
-            onApprove={handleApprove}
-            onRequestChanges={onRequestChanges}
-            onReject={handleReject}
-            onDelegate={onDelegate}
-            className={cn(
-              panelVisibility("decisions"),
-              "md:col-start-2 md:row-start-1 xl:col-start-2 xl:row-start-1",
-            )}
+            degradedSources={degradedSources}
           />
 
-          <NextWorkPanel
+          <TodoRail
+            events={visibleEvents}
             obligations={obligations}
             commitments={visibleCommitments}
             workItems={workItems}
+            onAcknowledge={handleAcknowledge}
+            onOpen={onOpen}
             onNavigateObligation={onNavigateObligation}
-            onApproveRun={onApproveRun}
+            onApproveRun={handleApproveRun}
             onDismissCommitment={handleDismissCommitment}
-            className={cn(
-              panelVisibility("next"),
-              "md:col-span-2 md:row-start-2 xl:col-span-1 xl:col-start-3 xl:row-start-1",
-            )}
           />
         </div>
       </div>

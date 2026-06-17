@@ -2,114 +2,130 @@
 
 import { useState } from "react";
 import {
-  AlertTriangle,
+  AlertCircle,
   ArrowRight,
   CheckCircle2,
-  Clock3,
+  Copy,
   Database,
   Download,
   FileText,
-  GitBranch,
-  Layers3,
-  Network,
+  Filter,
+  MessageSquare,
+  MoreHorizontal,
   Play,
-  RefreshCw,
   Search,
   ShieldCheck,
+  Sparkles,
 } from "lucide-react";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card";
+import { Checkbox } from "@/components/ui/checkbox";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@/components/ui/popover";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { Separator } from "@/components/ui/separator";
 import { Skeleton } from "@/components/ui/skeleton";
+import { Switch } from "@/components/ui/switch";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
 import { CitationChip } from "@/components/patterns/pat-1-citation-chip";
 import { ProvenanceChip } from "@/components/patterns/pat-2-provenance";
-import {
-  StaleBadge,
-  SurfaceStalenessBar,
-} from "@/components/patterns/pat-3-staleness";
-import {
-  PlanConfirmationModal,
-  type PlanSpec,
-} from "@/components/patterns/pat-4-plan-confirmation";
-import { GateCard } from "@/components/patterns/pat-5-gate-card";
-import { InstructionInput } from "@/components/patterns/pat-6-instruction";
+import { StaleBadge } from "@/components/patterns/pat-3-staleness";
 import { DataTable, type Column } from "@/components/patterns/pat-8-data-table";
-import { ExportDialog } from "@/components/patterns/pat-10-export";
-import {
-  SensitivityChip,
-  SensitivityNotice,
-  VaultLockedEntry,
-} from "@/components/patterns/pat-11-sensitivity";
-import {
-  CommentThread,
-  type Comment,
-} from "@/components/patterns/pat-12-comments";
 import {
   DegradedState,
-  DeniedState,
   EmptyState,
-  ErrorState,
   LoadingState,
 } from "@/components/surface-states";
-import {
-  mockGateRequests,
-  mockUsers,
-  type GateRequest,
-  type User,
-} from "@/lib/mock";
 import { cn } from "@/lib/utils";
 
 type TokenSwatch = {
   name: string;
-  value: string;
+  role: string;
   className: string;
 };
 
 type FindingRow = {
   id: string;
-  finding: string;
-  severity: "critical" | "high" | "medium";
-  status: string;
-  exposure: string;
+  object: string;
+  state: "ready" | "stale" | "blocked";
+  citation: string;
+  owner: string;
 };
 
 const tokenSwatches: TokenSwatch[] = [
-  { name: "background", value: "0.985 0.002 90", className: "bg-background" },
-  { name: "foreground", value: "0.12 0.01 60", className: "bg-foreground" },
-  { name: "card", value: "1 0 0", className: "bg-card" },
-  { name: "muted", value: "0.94 0.005 90", className: "bg-muted" },
-  { name: "border", value: "0.88 0.01 90", className: "bg-border" },
-  { name: "primary", value: "0.12 0.01 60", className: "bg-primary" },
-  { name: "destructive", value: "0.577 0.245 27.325", className: "bg-destructive" },
+  { name: "surface", role: "primary canvas", className: "bg-surface" },
+  { name: "surface-secondary", role: "rails and toolbars", className: "bg-surface-secondary" },
+  { name: "surface-elevated", role: "menus and dialogs", className: "bg-surface-elevated" },
+  { name: "primary", role: "main action", className: "bg-primary" },
+  { name: "info", role: "source context", className: "bg-info" },
+  { name: "success", role: "resolved work", className: "bg-success" },
+  { name: "warning", role: "review needed", className: "bg-warning" },
+  { name: "danger", role: "blocked action", className: "bg-danger" },
 ];
 
-const findingRows: FindingRow[] = [
+const findings: FindingRow[] = [
   {
-    id: "fn-001",
-    finding: "UK royalty rate exceeds reviewer range",
-    severity: "critical",
-    status: "ready for review",
-    exposure: "GBP 3.2M",
+    id: "fn-108",
+    object: "UK royalty rate exceeds reviewer range",
+    state: "ready",
+    citation: "UK Local File 4.2",
+    owner: "Marcus Webb",
   },
   {
-    id: "fn-014",
-    finding: "Germany allocation key is not documented",
-    severity: "high",
-    status: "triaged",
-    exposure: "EUR 85K",
+    id: "fn-117",
+    object: "Germany allocation key lacks support",
+    state: "stale",
+    citation: "Ledger v.419",
+    owner: "Ikaika Choi",
   },
   {
-    id: "fn-021",
-    finding: "Singapore payroll data is stale",
-    severity: "medium",
-    status: "watching",
-    exposure: "none",
+    id: "fn-126",
+    object: "Japan local file claim has no source span",
+    state: "blocked",
+    citation: "missing",
+    owner: "Sarah Kimura",
   },
 ];
 
@@ -118,121 +134,66 @@ const findingColumns: Column<FindingRow>[] = [
     key: "id",
     header: "ID",
     sortable: true,
-    render: (row) => (
-      <span className="font-mono text-xs text-muted-foreground">{row.id}</span>
-    ),
+    render: (row) => <span className="font-mono text-xs text-muted-foreground">{row.id}</span>,
   },
   {
-    key: "finding",
-    header: "Finding",
+    key: "object",
+    header: "Object",
     sortable: true,
-    render: (row) => row.finding,
+    render: (row) => <span className="font-medium">{row.object}</span>,
   },
   {
-    key: "severity",
-    header: "Severity",
+    key: "state",
+    header: "State",
     sortable: true,
-    render: (row) => (
-      <Badge
-        variant={row.severity === "critical" ? "destructive" : "outline"}
-        className="capitalize"
-      >
-        {row.severity}
-      </Badge>
-    ),
+    render: (row) => {
+      const variant =
+        row.state === "ready" ? "success" : row.state === "stale" ? "warning" : "destructive";
+      return <Badge variant={variant}>{row.state}</Badge>;
+    },
   },
   {
-    key: "status",
-    header: "Status",
-    render: (row) => <span className="text-muted-foreground">{row.status}</span>,
+    key: "citation",
+    header: "Citation",
+    render: (row) => <span className="text-muted-foreground">{row.citation}</span>,
   },
   {
-    key: "exposure",
-    header: "Exposure",
-    render: (row) => (
-      <span className="font-mono text-xs">{row.exposure}</span>
-    ),
+    key: "owner",
+    header: "Owner",
+    render: (row) => row.owner,
   },
 ];
 
-const comments: Comment[] = [
-  {
-    id: "c-1",
-    authorId: "u2",
-    authorName: "Marcus Webb",
-    text: "Confirm the policy rate before this finding moves through the gate.",
-    timestamp: "2026-01-12T10:12:00Z",
-  },
-  {
-    id: "c-2",
-    authorId: "u3",
-    authorName: "Ikaika Choi",
-    text: "The cited local file section still shows the prior year rate.",
-    timestamp: "2026-01-12T11:18:00Z",
-    resolved: true,
-  },
-];
-
-const planSpec: PlanSpec = {
-  intent: "Run Mirror on the UK royalty flow and stage new findings for review.",
-  steps: [
-    {
-      id: "step-1",
-      description: "Pin corpus v.419 and rulepack rp-2026.01.",
-      scope: "UK royalty flow",
-    },
-    {
-      id: "step-2",
-      description: "Compare agreement terms, ledger rates, and local file language.",
-    },
-    {
-      id: "step-3",
-      description: "Stage findings with citations and route gated changes.",
-    },
-  ],
-  produces: ["finding candidates", "evidence chain", "run manifest"],
-  invalidates: ["UK local file draft", "board pack tax slide"],
-  estimatedDuration: "About 2 minutes",
-  costClass: "standard",
-  instruction: "Scan the UK royalty flow for FY2026 and stage only cited findings.",
-  permissionCheck: "allowed",
-  tier: "run",
-};
-
-const lineageHops = [
-  { label: "Ledger row 8492", type: "ledger-line" },
-  { label: "US to UK royalty flow", type: "mapping" },
-  { label: "UK tested-party margin", type: "entity-pl" },
-  { label: "Range watch tick", type: "metric" },
+const provenanceHops = [
+  { label: "ERP row 8492", type: "ledger-line" },
+  { label: "Royalty flow", type: "mapping" },
+  { label: "UK tested party", type: "entity-pl" },
+  { label: "Reviewer range", type: "benchmark" },
 ];
 
 function noop() {}
 
 function Section({
   id,
-  eyebrow,
+  label,
   title,
   description,
   children,
 }: {
   id: string;
-  eyebrow: string;
+  label: string;
   title: string;
   description: string;
   children: React.ReactNode;
 }) {
   return (
-    <section id={id} className="scroll-mt-20 space-y-6">
-      <div className="grid gap-4 laptop:grid-cols-[280px_1fr]">
-        <div className="space-y-2">
-          <p className="font-mono text-xs text-muted-foreground">{eyebrow}</p>
-          <h2 className="font-display text-4xl leading-none tracking-tight text-foreground">
-            {title}
-          </h2>
+    <section id={id} className="scroll-mt-20 space-y-5">
+      <div className="grid gap-3 laptop:grid-cols-[260px_1fr]">
+        <div>
+          <p className="font-mono text-xs text-muted-foreground">{label}</p>
+          <h2 className="heading-lg mt-1 text-foreground">{title}</h2>
         </div>
-        <p className="max-w-2xl text-base leading-7 text-muted-foreground">
-          {description}
-        </p>
+        <p className="max-w-3xl text-sm leading-6 text-muted-foreground">{description}</p>
       </div>
       {children}
     </section>
@@ -241,20 +202,22 @@ function Section({
 
 function Panel({
   title,
+  description,
   children,
   className,
 }: {
   title?: string;
+  description?: string;
   children: React.ReactNode;
   className?: string;
 }) {
   return (
-    <div className={cn("rounded-lg border bg-card p-5", className)}>
-      {title && (
-        <>
-          <p className="mb-4 text-sm font-medium text-foreground">{title}</p>
-          <Separator className="mb-4" />
-        </>
+    <div className={cn("rounded-xl border border-border bg-surface p-4 shadow-hairline", className)}>
+      {(title || description) && (
+        <div className="mb-4 space-y-1">
+          {title && <p className="text-sm font-semibold">{title}</p>}
+          {description && <p className="text-sm text-muted-foreground">{description}</p>}
+        </div>
       )}
       {children}
     </div>
@@ -263,310 +226,369 @@ function Panel({
 
 function TokenSwatch({ swatch }: { swatch: TokenSwatch }) {
   return (
-    <div className="flex items-center gap-3">
-      <div className={cn("h-10 w-10 rounded-md border", swatch.className)} />
-      <div>
-        <p className="text-sm font-medium">{swatch.name}</p>
-        <p className="font-mono text-xs text-muted-foreground">{swatch.value}</p>
+    <div className="flex items-center gap-3 rounded-lg border border-border bg-surface p-3">
+      <div className={cn("h-9 w-9 rounded-md border border-border", swatch.className)} />
+      <div className="min-w-0">
+        <p className="truncate text-sm font-semibold">{swatch.name}</p>
+        <p className="truncate text-xs text-muted-foreground">{swatch.role}</p>
       </div>
     </div>
   );
 }
 
-function ShellPreview() {
+function AppShellPreview() {
+  const nav = ["Briefing", "Graph", "Findings", "Library", "Runs"];
+
   return (
-    <div className="overflow-hidden rounded-lg border bg-background">
-      <div className="flex h-10 items-center justify-between border-b px-4">
+    <div className="overflow-hidden rounded-xl border border-border bg-surface shadow-hairline">
+      <div className="flex h-11 items-center justify-between border-b border-border bg-surface px-3">
         <div className="flex items-center gap-2">
           <FileText className="h-4 w-4" />
-          <span className="font-display text-lg leading-none">Veritax</span>
+          <span className="text-sm font-semibold">Veritax</span>
         </div>
         <div className="flex items-center gap-2">
-          <Badge variant="outline" className="font-mono text-[10px]">
-            FY2026
-          </Badge>
+          <Badge variant="outline">FY2026</Badge>
           <Button size="sm" variant="outline">
             <Search className="h-3.5 w-3.5" />
             Ask
           </Button>
         </div>
       </div>
-      <div className="grid min-h-[280px] grid-cols-[180px_1fr]">
-        <div className="border-r bg-muted/40 p-3">
-          {["Briefing", "Graph", "Findings", "Library", "Runs"].map((item, index) => (
+      <div className="grid min-h-[300px] grid-cols-[88px_minmax(0,1fr)] tablet:grid-cols-[160px_minmax(0,1fr)]">
+        <div className="min-w-0 border-r border-border bg-surface-secondary p-2">
+          {nav.map((item, index) => (
             <div
               key={item}
               className={cn(
                 "flex items-center gap-2 rounded-md px-2 py-1.5 text-sm",
-                index === 2
-                  ? "bg-background text-foreground"
-                  : "text-muted-foreground",
+                index === 2 ? "bg-surface text-foreground shadow-hairline" : "text-muted-foreground",
               )}
             >
               <span className="h-1.5 w-1.5 rounded-full bg-current" />
-              {item}
+              <span className="truncate">{item}</span>
             </div>
           ))}
         </div>
-        <div className="p-5">
-          <div className="mb-5 flex items-start justify-between gap-4">
-            <div>
-              <p className="font-mono text-xs text-muted-foreground">Mirror run</p>
-              <h3 className="mt-1 font-display text-3xl leading-none">
-                Findings ready for review
-              </h3>
+        <div className="min-w-0 space-y-3 p-3 tablet:p-4">
+          <div className="flex min-w-0 flex-col gap-2 tablet:flex-row tablet:items-start tablet:justify-between">
+            <div className="min-w-0">
+              <p className="font-mono text-xs text-muted-foreground">mirror.run</p>
+              <h3 className="heading-md mt-1">Findings ready for review</h3>
             </div>
-            <Badge variant="warning">3 gates</Badge>
+            <Badge variant="success" className="w-fit">
+              record staged
+            </Badge>
           </div>
-          <div className="grid gap-3">
-            {[
-              "Royalty rate exceeds reviewer range",
-              "Agreement version conflict",
-              "Unsupported claim quarantined",
-            ].map((item, index) => (
-              <div
-                key={item}
-                className="flex items-center justify-between rounded-md border bg-card px-3 py-2"
-              >
-                <div className="flex items-center gap-3">
-                  <span className="font-mono text-xs text-muted-foreground">
-                    0{index + 1}
-                  </span>
-                  <span className="text-sm">{item}</span>
-                </div>
-                <ArrowRight className="h-4 w-4 text-muted-foreground" />
+          {findings.map((finding) => (
+            <div
+              key={finding.id}
+              className="flex min-w-0 items-center justify-between gap-3 rounded-lg border border-border bg-surface px-3 py-2"
+            >
+              <div className="min-w-0">
+                <p className="truncate text-sm font-medium">{finding.object}</p>
+                <p className="text-xs text-muted-foreground">{finding.citation}</p>
               </div>
-            ))}
-          </div>
+              <ArrowRight className="h-4 w-4 text-muted-foreground" />
+            </div>
+          ))}
         </div>
       </div>
     </div>
-  );
-}
-
-function GraphFragment() {
-  const nodes = [
-    { label: "US Principal", meta: "policy owner", x: "left-4 top-8" },
-    { label: "UK Ltd", meta: "limited risk", x: "right-6 top-4" },
-    { label: "Germany GmbH", meta: "local file", x: "right-12 bottom-6" },
-    { label: "Royalty flow", meta: "exception", x: "left-24 bottom-10" },
-  ];
-
-  return (
-    <div className="relative min-h-[260px] overflow-hidden rounded-lg border bg-background p-5">
-      <div className="absolute left-16 top-24 h-px w-[65%] rotate-[-8deg] bg-border" />
-      <div className="absolute bottom-24 left-32 h-px w-[55%] rotate-[12deg] bg-border" />
-      <div className="absolute left-44 top-16 h-[55%] w-px rotate-[28deg] bg-border" />
-      {nodes.map((node) => (
-        <div
-          key={node.label}
-          className={cn(
-            "absolute rounded-md border bg-card px-3 py-2 shadow-none",
-            node.x,
-          )}
-        >
-          <p className="text-sm font-medium">{node.label}</p>
-          <p className="font-mono text-[10px] text-muted-foreground">{node.meta}</p>
-        </div>
-      ))}
-      <div className="absolute left-1/2 top-1/2 flex -translate-x-1/2 -translate-y-1/2 items-center gap-2 rounded-full border bg-foreground px-3 py-1 text-background">
-        <Network className="h-3.5 w-3.5" />
-        <span className="font-mono text-[10px]">Intercompany Graph</span>
-      </div>
-    </div>
-  );
-}
-
-function ProductSurface() {
-  return (
-    <Panel className="space-y-4">
-      <div className="flex items-center justify-between gap-3">
-        <div>
-          <p className="font-mono text-xs text-muted-foreground">surface grammar</p>
-          <p className="text-sm font-medium">Claims render with evidence or quarantine.</p>
-        </div>
-        <SensitivityChip tier="sensitive" />
-      </div>
-      <div className="rounded-md border bg-background p-4">
-        <p className="text-sm leading-7">
-          UK royalty charge is outside the current reviewer range{" "}
-          <CitationChip
-            docName="UK Local File"
-            section="4.2"
-            confidence={0.94}
-            extractorVersion="ext-18"
-            snippet="The FY2026 royalty rate is stated as 18 percent for UK distribution activity."
-          />{" "}
-          and the computed margin traces back to the ledger{" "}
-          <ProvenanceChip
-            asOf="FY2026"
-            source="ledger v.419"
-            hops={lineageHops}
-          />
-          .
-        </p>
-      </div>
-      <div className="flex flex-wrap gap-2">
-        <CitationChip
-          docName="Agreement"
-          section="2.1"
-          confidence={0.88}
-          extractorVersion="ext-18"
-        />
-        <CitationChip
-          docName="Claim"
-          section="missing"
-          confidence={0}
-          extractorVersion="ext-18"
-          isQuarantined
-        />
-        <StaleBadge whatChanged="Corpus v.419 changed the source rate." onViewDiff={noop} />
-      </div>
-    </Panel>
   );
 }
 
 export default function DesignSystemPage() {
-  const [planOpen, setPlanOpen] = useState(false);
-  const [exportOpen, setExportOpen] = useState(false);
-  const gate = mockGateRequests[0] as GateRequest;
-  const requester = mockUsers.find((user) => user.id === gate.requesterId) as User;
+  const [dialogOpen, setDialogOpen] = useState(false);
 
   return (
-    <div className="mx-auto max-w-[1280px] space-y-20 px-6 py-10 desktop:px-12">
-      <header className="grid gap-8 border-b pb-10 laptop:grid-cols-[1fr_440px]">
-        <div className="space-y-6">
-          <div className="inline-flex items-center gap-3 rounded-full border bg-card px-3 py-1">
-            <span className="h-1.5 w-1.5 rounded-full bg-foreground" />
-            <span className="font-mono text-xs text-muted-foreground">
-              Veritax design system
-            </span>
-          </div>
-          <div className="space-y-4">
-            <h1 className="max-w-4xl font-display text-6xl leading-[0.92] tracking-tight text-foreground tablet:text-7xl">
-              The record, rendered for review.
-            </h1>
-            <p className="max-w-2xl text-lg leading-8 text-muted-foreground">
-              Product UI follows the landing page foundation: warm neutral
-              surfaces, crisp borders, serif display moments, mono metadata,
-              and evidence-first controls for tax work.
-            </p>
-          </div>
-          <div className="flex flex-wrap gap-3">
-            <Button>
-              <Play className="h-4 w-4" />
-              Run Mirror
-            </Button>
-            <Button variant="outline">
-              <Download className="h-4 w-4" />
-              Export with citations
-            </Button>
-          </div>
-        </div>
-        <ShellPreview />
-      </header>
-
-      <Section
-        id="foundation"
-        eyebrow="Foundation"
-        title="Landing page tokens in product UI"
-        description="The app uses the same OKLCH neutral foundation as the landing page, translated for Tailwind utilities and product density."
-      >
-        <div className="grid gap-4 laptop:grid-cols-[1fr_1fr]">
-          <Panel title="Color tokens">
-            <div className="grid gap-4 tablet:grid-cols-2">
-              {tokenSwatches.map((swatch) => (
-                <TokenSwatch key={swatch.name} swatch={swatch} />
-              ))}
+    <TooltipProvider>
+      <div className="mx-auto max-w-[1280px] space-y-16 px-5 py-8 desktop:px-10">
+        <header className="grid gap-6 border-b border-border pb-8 laptop:grid-cols-[1fr_520px]">
+          <div className="space-y-5">
+            <Badge variant="info" className="gap-1.5">
+              <Sparkles className="h-3 w-3" />
+              OpenAI Apps SDK UI adapter
+            </Badge>
+            <div className="space-y-3">
+              <h1 className="max-w-3xl text-4xl font-semibold leading-tight tracking-normal text-foreground tablet:text-5xl">
+                App design system for dense tax review.
+              </h1>
+              <p className="max-w-2xl text-base leading-7 text-muted-foreground">
+                Veritax now uses a gray-first OpenAI Apps SDK UI grammar: compact controls,
+                elevated overlays, semantic soft states, and evidence surfaces that stay easy to scan.
+              </p>
             </div>
-          </Panel>
-          <Panel title="Type system">
-            <div className="space-y-5">
-              <div>
-                <p className="font-mono text-xs text-muted-foreground">
-                  Instrument Serif / display
-                </p>
-                <p className="font-display text-5xl leading-none">
-                  Veritax keeps the record.
-                </p>
-              </div>
-              <div>
-                <p className="font-mono text-xs text-muted-foreground">
-                  Instrument Sans / interface
-                </p>
-                <p className="text-base leading-7">
-                  Findings, citations, gates, and runs use calm product type.
-                </p>
-              </div>
-              <div>
-                <p className="font-mono text-xs text-muted-foreground">
-                  JetBrains Mono / metadata
-                </p>
-                <p className="font-mono text-sm">corpus v.419 / rulepack rp-2026.01</p>
-              </div>
-            </div>
-          </Panel>
-        </div>
-      </Section>
-
-      <Section
-        id="primitives"
-        eyebrow="Primitives"
-        title="Quiet controls, clear states"
-        description="Buttons, badges, fields, tabs, cards, and tables stay familiar. The visual change is restraint, not novelty."
-      >
-        <div className="grid gap-4 laptop:grid-cols-3">
-          <Panel title="Actions">
             <div className="flex flex-wrap gap-2">
-              <Button>Approve gate</Button>
-              <Button variant="outline">Request changes</Button>
-              <Button variant="secondary">Save view</Button>
-              <Button variant="destructive">Reject</Button>
-              <Button variant="ghost" size="icon" aria-label="Refresh">
-                <RefreshCw className="h-4 w-4" />
+              <Button>
+                <Play className="h-4 w-4" />
+                Run Mirror
+              </Button>
+              <Button variant="outline">
+                <Download className="h-4 w-4" />
+                Export record
+              </Button>
+              <Button variant="soft">
+                <MessageSquare className="h-4 w-4" />
+                Ask brief
               </Button>
             </div>
-          </Panel>
-          <Panel title="Status chips">
-            <div className="flex flex-wrap gap-2">
-              <Badge>ready for review</Badge>
-              <Badge variant="outline">draft</Badge>
-              <Badge variant="warning">stale</Badge>
-              <Badge variant="success">resolved</Badge>
-              <Badge variant="destructive">blocked</Badge>
-            </div>
-          </Panel>
-          <Panel title="Inputs">
-            <div className="space-y-3">
-              <div className="space-y-1.5">
-                <Label htmlFor="instruction">Run instruction</Label>
-                <Input id="instruction" placeholder="Scan UK royalty flow" />
-              </div>
-              <Textarea placeholder="Add reviewer context" rows={3} />
-            </div>
-          </Panel>
-        </div>
+          </div>
+          <AppShellPreview />
+        </header>
 
-        <Panel title="Data table">
+        <Section
+          id="foundation"
+          label="Foundation"
+          title="SDK token vocabulary"
+          description="The foundation keeps the app close to the OpenAI Apps SDK UI system while staying compatible with the current Tailwind 3 pipeline."
+        >
+          <div className="grid gap-3 tablet:grid-cols-2 laptop:grid-cols-4">
+            {tokenSwatches.map((swatch) => (
+              <TokenSwatch key={swatch.name} swatch={swatch} />
+            ))}
+          </div>
+          <div className="grid gap-3 laptop:grid-cols-3">
+            <Panel title="Typography" description="One sans family carries product UI. Mono remains for versions and IDs.">
+              <div className="space-y-3">
+                <p className="heading-xl">Record changes need review</p>
+                <p className="text-sm leading-6 text-muted-foreground">
+                  Findings, gates, citations, obligations, and runs use compact sentence case.
+                </p>
+                <p className="font-mono text-xs text-muted-foreground">corpus v.419 / rulepack rp-2026.01</p>
+              </div>
+            </Panel>
+            <Panel title="Elevation" description="Overlays rise; cards mostly sit flat.">
+              <div className="grid gap-3">
+                <div className="rounded-lg border border-border bg-surface p-3 shadow-hairline">surface</div>
+                <div className="rounded-lg border border-border bg-surface-elevated p-3 shadow-elevation-200">
+                  elevated
+                </div>
+              </div>
+            </Panel>
+            <Panel title="Motion" description="Transitions are 150ms and state-driven.">
+              <div className="space-y-3">
+                <Skeleton className="h-3 w-4/5" />
+                <Skeleton className="h-3 w-2/3" />
+                <Skeleton className="h-3 w-1/2" />
+              </div>
+            </Panel>
+          </div>
+        </Section>
+
+        <Section
+          id="controls"
+          label="Controls"
+          title="Compact, familiar actions"
+          description="Controls use the SDK pattern of neutral primary, outline, soft, ghost, and semantic danger. The shape stays standard across the app."
+        >
+          <div className="grid gap-3 laptop:grid-cols-3">
+            <Panel title="Buttons">
+              <div className="flex flex-wrap gap-2">
+                <Button>Approve gate</Button>
+                <Button variant="outline">Request changes</Button>
+                <Button variant="secondary">Save view</Button>
+                <Button variant="soft">Copy link</Button>
+                <Button variant="destructive">Reject</Button>
+                <Button variant="ghost" size="icon" aria-label="More actions">
+                  <MoreHorizontal className="h-4 w-4" />
+                </Button>
+              </div>
+            </Panel>
+            <Panel title="Badges">
+              <div className="flex flex-wrap gap-2">
+                <Badge>primary</Badge>
+                <Badge variant="outline">draft</Badge>
+                <Badge variant="info">cited</Badge>
+                <Badge variant="success">resolved</Badge>
+                <Badge variant="warning">stale</Badge>
+                <Badge variant="destructive">blocked</Badge>
+                <Badge variant="discovery">proposal</Badge>
+              </div>
+            </Panel>
+            <Panel title="Forms">
+              <div className="space-y-3">
+                <div className="space-y-1.5">
+                  <Label htmlFor="scope">Scope</Label>
+                  <Input id="scope" placeholder="UK royalty flow" />
+                </div>
+                <Select defaultValue="mirror">
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="mirror">Mirror run</SelectItem>
+                    <SelectItem value="factory">Factory draft</SelectItem>
+                    <SelectItem value="monitor">Monitor tick</SelectItem>
+                  </SelectContent>
+                </Select>
+                <Textarea placeholder="Add reviewer context" rows={3} />
+              </div>
+            </Panel>
+          </div>
+
+          <Panel title="Inline controls" description="Switches, checkboxes, menus, popovers, and tooltips share one surface language.">
+            <div className="flex flex-wrap items-center gap-3">
+              <label className="flex items-center gap-2 text-sm">
+                <Checkbox defaultChecked />
+                Require citations
+              </label>
+              <label className="flex items-center gap-2 text-sm">
+                <Switch defaultChecked />
+                Watch drift
+              </label>
+              <Popover>
+                <PopoverTrigger asChild>
+                  <Button variant="outline">
+                    <Filter className="h-4 w-4" />
+                    Filters
+                  </Button>
+                </PopoverTrigger>
+                <PopoverContent align="start" className="space-y-3">
+                  <p className="text-sm font-semibold">Finding filters</p>
+                  <div className="space-y-2 text-sm text-muted-foreground">
+                    <label className="flex items-center gap-2">
+                      <Checkbox defaultChecked />
+                      Ready for review
+                    </label>
+                    <label className="flex items-center gap-2">
+                      <Checkbox />
+                      Stale proposals
+                    </label>
+                  </div>
+                </PopoverContent>
+              </Popover>
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button variant="outline" size="icon" aria-label="Open actions">
+                    <MoreHorizontal className="h-4 w-4" />
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="start">
+                  <DropdownMenuLabel>Record actions</DropdownMenuLabel>
+                  <DropdownMenuItem>
+                    <Copy className="mr-2 h-4 w-4" />
+                    Copy citation path
+                  </DropdownMenuItem>
+                  <DropdownMenuItem>
+                    <Database className="mr-2 h-4 w-4" />
+                    Open source object
+                  </DropdownMenuItem>
+                  <DropdownMenuSeparator />
+                  <DropdownMenuItem className="text-danger">Quarantine claim</DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button variant="ghost" size="icon" aria-label="Citation status">
+                    <ShieldCheck className="h-4 w-4" />
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent>All visible claims have citations.</TooltipContent>
+              </Tooltip>
+            </div>
+          </Panel>
+        </Section>
+
+        <Section
+          id="evidence"
+          label="Evidence"
+          title="Product patterns keep their contracts"
+          description="Canonical Veritax patterns now inherit the OpenAI SDK visual layer while keeping their existing props and behavior."
+        >
+          <div className="grid gap-3 laptop:grid-cols-[1fr_380px]">
+            <Panel title="Cited claim">
+              <div className="rounded-lg border border-border bg-surface-secondary p-4 text-sm leading-7">
+                UK royalty charge is outside the reviewer range{" "}
+                <CitationChip
+                  docName="UK Local File"
+                  section="4.2"
+                  confidence={0.94}
+                  extractorVersion="ext-18"
+                  snippet="The FY2026 royalty rate is stated as 18 percent for UK distribution activity."
+                />{" "}
+                and traces back to the ledger{" "}
+                <ProvenanceChip asOf="FY2026" source="ledger v.419" hops={provenanceHops} />.
+              </div>
+              <div className="mt-3 flex flex-wrap gap-2">
+                <StaleBadge whatChanged="Corpus v.419 changed the source rate." onViewDiff={noop} />
+                <Badge variant="info">ready for review</Badge>
+                <Badge variant="outline">gate required</Badge>
+              </div>
+            </Panel>
+            <Panel title="Review alert">
+              <Alert variant="info">
+                <AlertCircle className="h-4 w-4" />
+                <AlertTitle>Finding is staged</AlertTitle>
+                <AlertDescription>
+                  The run proposed one record change. A reviewer must promote it through a gate.
+                </AlertDescription>
+              </Alert>
+              <Button className="mt-4" onClick={() => setDialogOpen(true)}>
+                <Play className="h-4 w-4" />
+                Open gate modal
+              </Button>
+            </Panel>
+          </div>
+        </Section>
+
+        <Section
+          id="data"
+          label="Data"
+          title="Dense tables stay calm"
+          description="Tables use subtle borders, compact cells, hover affordances, keyboard focus, and semantic state chips."
+        >
           <DataTable
             columns={findingColumns}
-            data={findingRows}
+            data={findings}
             onRowOpen={noop}
             onRowSelect={noop}
             bulkActions={
               <div className="flex gap-2">
-                <Button size="sm" variant="outline">
-                  Assign
-                </Button>
-                <Button size="sm" variant="outline">
-                  Export
-                </Button>
+                <Button size="sm" variant="outline">Assign</Button>
+                <Button size="sm" variant="outline">Export</Button>
               </div>
             }
           />
-        </Panel>
+        </Section>
 
-        <Panel title="Tabs and cards">
+        <Section
+          id="surfaces"
+          label="Surfaces"
+          title="Every state has a useful surface"
+          description="Loading, empty, and degraded states follow the same surfaces as the rest of the app."
+        >
+          <div className="grid gap-3 laptop:grid-cols-3">
+            <Panel title="Empty">
+              <EmptyState
+                heading="No findings staged"
+                description="Run Mirror to compare the record and stage cited findings."
+                action={<Button size="sm">Run Mirror</Button>}
+                className="rounded-lg border border-border py-8"
+              />
+            </Panel>
+            <Panel title="Loading">
+              <div className="rounded-lg border border-border">
+                <LoadingState rows={5} />
+              </div>
+            </Panel>
+            <Panel title="Degraded">
+              <DegradedState affectedSources={["SharePoint", "ERP"]}>
+                <div className="space-y-2 rounded-lg border border-border p-4">
+                  <Skeleton className="h-3 w-2/3" />
+                  <Skeleton className="h-3 w-1/2" />
+                  <Skeleton className="h-3 w-4/5" />
+                </div>
+              </DegradedState>
+            </Panel>
+          </div>
+        </Section>
+
+        <Section
+          id="composition"
+          label="Composition"
+          title="Panels compose without decoration"
+          description="The system favors real product surfaces over decorative cards. Repeated panels are compact, titled, and task oriented."
+        >
           <Tabs defaultValue="mirror">
             <TabsList>
               <TabsTrigger value="mirror">Mirror</TabsTrigger>
@@ -577,10 +599,15 @@ export default function DesignSystemPage() {
               <Card>
                 <CardHeader>
                   <CardTitle>Mirror stages findings</CardTitle>
+                  <CardDescription>Runs compare source material and leave cited changes ready for review.</CardDescription>
                 </CardHeader>
-                <CardContent className="text-sm leading-7 text-muted-foreground">
-                  Runs read the record, compare source material, and leave changes
-                  in staging until a reviewer promotes them through a gate.
+                <CardContent className="grid gap-3 laptop:grid-cols-3">
+                  {["Record read", "Findings staged", "Gate pending"].map((item, index) => (
+                    <div key={item} className="rounded-lg border border-border bg-surface-secondary p-3">
+                      <p className="font-mono text-xs text-muted-foreground">0{index + 1}</p>
+                      <p className="mt-1 text-sm font-semibold">{item}</p>
+                    </div>
+                  ))}
                 </CardContent>
               </Card>
             </TabsContent>
@@ -588,261 +615,56 @@ export default function DesignSystemPage() {
               <Card>
                 <CardHeader>
                   <CardTitle>Factory drafts from the record</CardTitle>
+                  <CardDescription>Drafts inherit citations and block unresolved claims.</CardDescription>
                 </CardHeader>
-                <CardContent className="text-sm leading-7 text-muted-foreground">
-                  Drafts inherit citations and remain blocked when claims cannot
-                  resolve to source material.
-                </CardContent>
               </Card>
             </TabsContent>
             <TabsContent value="monitor">
               <Card>
                 <CardHeader>
                   <CardTitle>Monitor watches drift</CardTitle>
+                  <CardDescription>Digest surfaces carry routine updates; gates carry reviewer decisions.</CardDescription>
                 </CardHeader>
-                <CardContent className="text-sm leading-7 text-muted-foreground">
-                  Alerts stay exception-first. Digest surfaces carry routine
-                  updates; gates carry reviewer urgency.
-                </CardContent>
               </Card>
             </TabsContent>
           </Tabs>
-        </Panel>
-      </Section>
+        </Section>
 
-      <Section
-        id="evidence"
-        eyebrow="Evidence chain"
-        title="No claim without source"
-        description="The product language is direct: record, runs, processes, findings, citations, gates. UI exposes provenance instead of hiding it in a tooltip maze."
-      >
-        <div className="grid gap-4 laptop:grid-cols-[1fr_380px]">
-          <ProductSurface />
-          <Panel title="Staleness proposal">
-            <div className="overflow-hidden rounded-md border">
-              <SurfaceStalenessBar count={3} onReview={noop} />
-              <div className="space-y-3 p-4">
-                {["UK Local File", "Board pack", "Royalty finding"].map((item) => (
-                  <div key={item} className="flex items-center justify-between gap-3">
-                    <div>
-                      <p className="text-sm font-medium">{item}</p>
-                      <p className="text-xs text-muted-foreground">
-                        Inputs changed since last build.
-                      </p>
-                    </div>
-                    <Button size="sm" variant="outline">
-                      Review
-                    </Button>
-                  </div>
-                ))}
-              </div>
+        <footer className="border-t border-border py-6">
+          <div className="flex flex-col justify-between gap-3 tablet:flex-row tablet:items-center">
+            <div>
+              <p className="text-sm font-semibold">Veritax app design system</p>
+              <p className="text-sm text-muted-foreground">
+                OpenAI Apps SDK UI grammar, adapted for this app shell and product workflow.
+              </p>
             </div>
-          </Panel>
-        </div>
-      </Section>
-
-      <Section
-        id="gates"
-        eyebrow="Gates and runs"
-        title="Propose, then promote"
-        description="No process commits directly to the record. The interface makes staging, review, permission, and sign-off visible."
-      >
-        <div className="grid gap-4 laptop:grid-cols-[1fr_420px]">
-          <GateCard
-            gate={gate}
-            objectSummary="Draft local file update with two changed assertions and one citation repair."
-            requester={requester}
-            diffSummary="Royalty rate changed from 12 percent to 18 percent in the draft."
-            onApprove={noop}
-            onRequestChanges={noop}
-            onReject={noop}
-            onDelegate={noop}
-          />
-          <Panel title="Run manifest">
-            <div className="space-y-4">
-              <div className="rounded-md border bg-foreground p-4 text-background">
-                <div className="mb-3 flex items-center justify-between">
-                  <span className="font-mono text-xs text-background/60">mirror.run</span>
-                  <Badge variant="outline" className="border-background/20 text-background">
-                    ready for review
-                  </Badge>
-                </div>
-                <pre className="whitespace-pre-wrap font-mono text-xs leading-6 text-background/70">
-{`run: mirror.initial_scan
-scope: UK royalty FY2026
-corpus: v.419
-outputs:
-  findings: staged
-  citations: required
-  gates: manager_review`}
-                </pre>
-              </div>
-              <Button onClick={() => setPlanOpen(true)}>
-                <Play className="h-4 w-4" />
-                Open plan confirmation
-              </Button>
+            <div className="flex items-center gap-2 text-sm text-muted-foreground">
+              <CheckCircle2 className="h-4 w-4 text-success" />
+              Landing page untouched.
             </div>
-          </Panel>
-        </div>
-      </Section>
-
-      <Section
-        id="governed-actions"
-        eyebrow="Governed actions"
-        title="Review paths stay explicit"
-        description="Instructions classify before they run. Exports block uncited claims. Sensitive objects name the policy consequence."
-      >
-        <div className="grid gap-4 laptop:grid-cols-3">
-          <Panel title="Instruction input">
-            <InstructionInput
-              initialValue="Run a scoped scan for the UK royalty flow."
-              existingInstructions={["Always cite agreement sections for royalty rates."]}
-              onSubmit={noop}
-            />
-          </Panel>
-          <Panel title="Export guard">
-            <div className="space-y-4">
-              <Alert variant="destructive">
-                <AlertTriangle className="h-4 w-4" />
-                <AlertTitle>Export blocked</AlertTitle>
-                <AlertDescription>
-                  Two claims need citations before this artifact can leave the record.
-                </AlertDescription>
-              </Alert>
-              <Button onClick={() => setExportOpen(true)}>
-                <Download className="h-4 w-4" />
-                Open export dialog
-              </Button>
-            </div>
-          </Panel>
-          <Panel title="Sensitivity">
-            <div className="space-y-3">
-              <SensitivityNotice tier="sensitive" />
-              <VaultLockedEntry label="Privileged memo" onContactCounsel={noop} />
-            </div>
-          </Panel>
-        </div>
-      </Section>
-
-      <Section
-        id="states"
-        eyebrow="State vocabulary"
-        title="Every surface has five states"
-        description="Loading follows the real layout. Empty states teach the source of future work. Denied and degraded states name the policy or source issue."
-      >
-        <div className="grid gap-4 laptop:grid-cols-2">
-          <Panel title="Empty and loading">
-            <div className="grid gap-4 tablet:grid-cols-2">
-              <EmptyState
-                heading="No findings staged"
-                description="Mirror has not returned findings for this scope yet."
-                action={<Button size="sm">Run Mirror</Button>}
-                className="rounded-md border py-10"
-              />
-              <div className="rounded-md border">
-                <LoadingState rows={6} />
-              </div>
-            </div>
-          </Panel>
-          <Panel title="Denied, degraded, error">
-            <div className="space-y-4">
-              <DeniedState
-                tierName="Privileged"
-                reason="Content access is counsel-administered for this object."
-                onRequestAccess={noop}
-                className="rounded-md border py-10"
-              />
-              <DegradedState affectedSources={["SharePoint", "ERP"]}>
-                <div className="rounded-md border p-4">
-                  <Skeleton className="mb-2 h-4 w-2/3" />
-                  <Skeleton className="h-4 w-1/2" />
-                </div>
-              </DegradedState>
-              <ErrorState incidentId="inc-2026-0112" onRetry={noop} className="rounded-md border py-10" />
-            </div>
-          </Panel>
-        </div>
-      </Section>
-
-      <Section
-        id="graph"
-        eyebrow="Intercompany Graph"
-        title="The object behind the projections"
-        description="The product surface should keep entities, flows, agreements, payments, proof, and reviewer actions visibly connected."
-      >
-        <div className="grid gap-4 laptop:grid-cols-[1fr_380px]">
-          <GraphFragment />
-          <Panel title="Graph object grammar">
-            <div className="space-y-4">
-              {[
-                { icon: Database, label: "Record object", text: "Versioned entity, flow, agreement, or artifact." },
-                { icon: GitBranch, label: "Lineage", text: "Every figure walks back to a source row or span." },
-                { icon: ShieldCheck, label: "Gate", text: "Only reviewer promotion changes the record." },
-                { icon: Clock3, label: "As-of lens", text: "Surfaces respect fiscal year and knowledge time." },
-                { icon: Layers3, label: "Projection", text: "Files and board packs render from the same object." },
-              ].map(({ icon: Icon, label, text }) => (
-                <div key={label} className="flex items-start gap-3">
-                  <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md border">
-                    <Icon className="h-4 w-4" />
-                  </div>
-                  <div>
-                    <p className="text-sm font-medium">{label}</p>
-                    <p className="text-sm text-muted-foreground">{text}</p>
-                  </div>
-                </div>
-              ))}
-            </div>
-          </Panel>
-        </div>
-      </Section>
-
-      <Section
-        id="collaboration"
-        eyebrow="Collaboration"
-        title="Comments stay anchored"
-        description="Threads belong to findings, document spans, gates, and runs. Resolved context stays available without crowding the current review."
-      >
-        <Panel className="max-w-3xl">
-          <CommentThread
-            objectRef="finding/fn-001"
-            comments={comments}
-            users={mockUsers}
-            onAdd={noop}
-            onResolve={noop}
-            onUnresolve={noop}
-          />
-        </Panel>
-      </Section>
-
-      <footer className="border-t py-8">
-        <div className="flex flex-col justify-between gap-4 tablet:flex-row tablet:items-center">
-          <div>
-            <p className="font-display text-2xl">Veritax</p>
-            <p className="text-sm text-muted-foreground">
-              Calm, cited, controlled product UI for tax teams.
-            </p>
           </div>
-          <div className="flex items-center gap-2 text-sm text-muted-foreground">
-            <CheckCircle2 className="h-4 w-4" />
-            Design system follows the landing foundation.
-          </div>
-        </div>
-      </footer>
+        </footer>
 
-      <PlanConfirmationModal
-        open={planOpen}
-        plan={planSpec}
-        onRun={() => setPlanOpen(false)}
-        onCancel={() => setPlanOpen(false)}
-      />
-      <ExportDialog
-        open={exportOpen}
-        artifactClass="record"
-        artifactName="UK Local File FY2026 draft"
-        uncitedClaimCount={2}
-        onExport={noop}
-        onClose={() => setExportOpen(false)}
-      />
-    </div>
+        <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
+          <DialogContent>
+            <DialogHeader>
+              <DialogTitle>Promote staged finding?</DialogTitle>
+              <DialogDescription>
+                This changes the record for the UK royalty flow and preserves the citation chain.
+              </DialogDescription>
+            </DialogHeader>
+            <div className="rounded-lg border border-border bg-surface-secondary p-3 text-sm">
+              <p className="font-semibold">UK royalty rate exceeds reviewer range</p>
+              <p className="mt-1 text-muted-foreground">Source: UK Local File 4.2, corpus v.419</p>
+            </div>
+            <Separator />
+            <DialogFooter>
+              <Button variant="outline" onClick={() => setDialogOpen(false)}>Cancel</Button>
+              <Button onClick={() => setDialogOpen(false)}>Promote finding</Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+      </div>
+    </TooltipProvider>
   );
 }

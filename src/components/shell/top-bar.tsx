@@ -57,20 +57,20 @@ export function TopBar({
   return (
     <header
       className={cn(
-        "sticky top-0 z-30 flex h-14 shrink-0 items-center gap-3 border-b border-border bg-background px-4",
+        "sticky top-0 z-30 flex h-14 shrink-0 items-center gap-2 border-b border-border bg-surface px-3 tablet:gap-3 tablet:px-4",
         className,
       )}
     >
       {/* Workspace switcher (stub) */}
-      <Button variant="ghost" size="sm" className="gap-1 font-medium">
+      <Button variant="ghost" size="sm" className="hidden gap-1 font-medium tablet:inline-flex">
         Veritax Group
         <ChevronDown size={14} className="text-muted-foreground" />
       </Button>
 
-      <div className="mx-1 h-4 w-px bg-border" />
+      <div className="mx-1 hidden h-4 w-px bg-border tablet:block" />
 
       {/* FY Lens */}
-      <div className="flex items-center gap-1.5">
+      <div className="flex min-w-0 items-center gap-1.5">
         <Select value={fy} onValueChange={setFY}>
           <SelectTrigger className="h-8 w-auto gap-1 border-0 bg-transparent px-2 text-sm font-medium shadow-none focus:ring-0">
             <SelectValue />
@@ -85,7 +85,7 @@ export function TopBar({
         </Select>
 
         <Select defaultValue="Full year">
-          <SelectTrigger className="h-8 w-auto gap-1 border-0 bg-transparent px-2 text-sm text-muted-foreground shadow-none focus:ring-0">
+          <SelectTrigger className="hidden h-8 w-auto gap-1 border-0 bg-transparent px-2 text-sm text-muted-foreground shadow-none focus:ring-0 tablet:flex">
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
@@ -111,7 +111,7 @@ export function TopBar({
       >
         <Command size={13} />
         <span className="hidden text-sm tablet:block">Ask</span>
-        <kbd className="hidden rounded border border-border bg-muted px-1 text-[10px] tablet:block">
+        <kbd className="hidden rounded border border-border bg-secondary px-1 text-[10px] tablet:block">
           ⌘K
         </kbd>
       </Button>
@@ -121,7 +121,7 @@ export function TopBar({
         <Button
           variant="outline"
           size="sm"
-          className="h-8 gap-1.5 text-amber-600 hover:text-amber-700 dark:text-amber-400"
+          className="h-8 gap-1.5 text-muted-foreground hover:text-foreground"
           aria-label={`${gateCount} pending gates`}
         >
           <Shield size={13} />

@@ -67,16 +67,18 @@ export function LeftRail({ badges = {} }: LeftRailProps) {
     <TooltipProvider>
       <aside
         className={cn(
-          "flex h-[100dvh] shrink-0 flex-col border-r border-border bg-slate-100 dark:bg-slate-900",
+          "flex h-[100dvh] shrink-0 flex-col border-r border-sidebar-border bg-sidebar text-sidebar-foreground",
           "sticky top-0 transition-all duration-300 ease-in-out",
-          collapsed ? "w-14" : "w-52",
+          collapsed ? "w-14" : "w-14 tablet:w-52",
         )}
       >
         {/* Logo / brand */}
         <div className={cn("flex h-14 items-center border-b border-border px-3", collapsed && "justify-center")}>
-          <FileText className="h-5 w-5 shrink-0 text-primary" />
+          <FileText className="h-5 w-5 shrink-0 text-sidebar-primary" />
           {!collapsed && (
-            <span className="ml-2 text-sm font-semibold tracking-tight">Veritax</span>
+            <span className="ml-2 hidden text-sm font-semibold tracking-tight tablet:inline">
+              Veritax
+            </span>
           )}
         </div>
 
@@ -93,32 +95,31 @@ export function LeftRail({ badges = {} }: LeftRailProps) {
                 href={item.href}
                 aria-current={isActive ? "page" : undefined}
                 className={cn(
-                  "flex items-center rounded-md px-2 py-1.5 transition-colors",
-                  "hover:bg-slate-200 dark:hover:bg-slate-800",
+                  "flex items-center justify-center rounded-md px-2 py-1.5 transition-colors tablet:justify-start",
+                  "hover:bg-sidebar-accent hover:text-sidebar-accent-foreground",
                   isActive
-                    ? "bg-slate-200 text-foreground dark:bg-slate-800"
-                    : "text-slate-700 dark:text-slate-300",
+                    ? "bg-sidebar-accent text-sidebar-accent-foreground shadow-hairline"
+                    : "text-sidebar-foreground/75",
                   collapsed && "justify-center",
                 )}
               >
                 <Icon size={16} className="shrink-0" />
                 {!collapsed && (
                   <>
-                    <span className="ml-2 text-sm">{item.label}</span>
-                    {count > 0 && (
-                      <Badge
-                        variant="destructive"
-                        className="ml-auto h-4 min-w-4 px-1 text-[10px]"
-                      >
-                        {count}
-                      </Badge>
-                    )}
+                    <span className="ml-2 hidden text-sm tablet:inline">{item.label}</span>
                   </>
                 )}
-                {collapsed && count > 0 && (
-                  <span className="absolute right-1 top-1 flex h-3 w-3 items-center justify-center rounded-full bg-destructive text-[8px] text-destructive-foreground">
+                {count > 0 && (
+                  <Badge
+                    variant="destructive"
+                    className={cn(
+                      "absolute right-1 top-1 h-3 min-w-3 px-0 text-[8px] tablet:static tablet:ml-auto tablet:h-4 tablet:min-w-4 tablet:px-1 tablet:text-[10px]",
+                      collapsed &&
+                        "tablet:absolute tablet:right-1 tablet:top-1 tablet:ml-0 tablet:h-3 tablet:min-w-3 tablet:px-0 tablet:text-[8px]",
+                    )}
+                  >
                     {count}
-                  </span>
+                  </Badge>
                 )}
               </Link>
             );
@@ -139,11 +140,11 @@ export function LeftRail({ badges = {} }: LeftRailProps) {
         </nav>
 
         {/* Collapse toggle */}
-        <div className="border-t border-border p-2">
+        <div className="hidden border-t border-border p-2 tablet:block">
           <Button
             variant="ghost"
             size="icon"
-            className="h-8 w-full justify-center rounded-md text-slate-500 hover:bg-slate-200 dark:hover:bg-slate-800"
+            className="h-8 w-full justify-center rounded-md text-sidebar-foreground/65 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
             onClick={() => setCollapsed((c) => !c)}
             aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
           >

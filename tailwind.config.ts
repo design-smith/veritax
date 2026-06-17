@@ -23,9 +23,9 @@ const config = {
     },
     extend: {
       fontFamily: {
-        sans: ["var(--font-instrument)", "Instrument Sans", ...fontFamily.sans],
-        display: ["var(--font-instrument-serif)", "Instrument Serif", "Georgia", ...fontFamily.serif],
-        mono: ["var(--font-jetbrains)", "JetBrains Mono", ...fontFamily.mono],
+        sans: ["var(--font-sans)", ...fontFamily.sans],
+        display: ["var(--font-sans)", ...fontFamily.sans],
+        mono: ["var(--font-mono)", ...fontFamily.mono],
       },
       screens: {
         phone: "370px",
@@ -35,10 +35,21 @@ const config = {
       },
       colors: {
         border: oklch("--border"),
+        "border-subtle": oklch("--border-subtle"),
+        "border-strong": oklch("--border-strong"),
         input: oklch("--input"),
         ring: oklch("--ring"),
         background: oklch("--background"),
         foreground: oklch("--foreground"),
+        default: {
+          foreground: oklch("--foreground"),
+        },
+        surface: {
+          DEFAULT: oklch("--surface"),
+          secondary: oklch("--surface-secondary"),
+          tertiary: oklch("--surface-tertiary"),
+          elevated: oklch("--surface-elevated"),
+        },
         primary: {
           DEFAULT: oklch("--primary"),
           foreground: oklch("--primary-foreground"),
@@ -50,6 +61,36 @@ const config = {
         destructive: {
           DEFAULT: oklch("--destructive"),
           foreground: oklch("--destructive-foreground"),
+        },
+        danger: {
+          DEFAULT: oklch("--danger"),
+          foreground: oklch("--danger-foreground"),
+          soft: oklch("--danger-soft"),
+          "soft-foreground": oklch("--danger-soft-foreground"),
+        },
+        info: {
+          DEFAULT: oklch("--info"),
+          foreground: oklch("--info-foreground"),
+          soft: oklch("--info-soft"),
+          "soft-foreground": oklch("--info-soft-foreground"),
+        },
+        success: {
+          DEFAULT: oklch("--success"),
+          foreground: oklch("--success-foreground"),
+          soft: oklch("--success-soft"),
+          "soft-foreground": oklch("--success-soft-foreground"),
+        },
+        warning: {
+          DEFAULT: oklch("--warning"),
+          foreground: oklch("--warning-foreground"),
+          soft: oklch("--warning-soft"),
+          "soft-foreground": oklch("--warning-soft-foreground"),
+        },
+        discovery: {
+          DEFAULT: oklch("--discovery"),
+          foreground: oklch("--discovery-foreground"),
+          soft: oklch("--discovery-soft"),
+          "soft-foreground": oklch("--discovery-soft-foreground"),
         },
         muted: {
           DEFAULT: oklch("--muted"),

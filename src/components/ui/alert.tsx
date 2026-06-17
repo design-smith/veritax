@@ -3,17 +3,19 @@ import { cva, type VariantProps } from "class-variance-authority"
 import { cn } from "@/lib/utils"
 
 const alertVariants = cva(
-  "relative w-full rounded-lg border p-4 text-sm [&>svg~*]:pl-7 [&>svg+div]:translate-y-[-3px] [&>svg]:absolute [&>svg]:left-4 [&>svg]:top-4 [&>svg]:text-foreground",
+  "relative w-full rounded-xl border p-4 text-sm shadow-hairline [&>svg~*]:pl-7 [&>svg+div]:translate-y-[-3px] [&>svg]:absolute [&>svg]:left-4 [&>svg]:top-4",
   {
     variants: {
       variant: {
-        default: "border-border bg-background text-foreground",
+        default: "border-border bg-surface text-foreground [&>svg]:text-muted-foreground",
         destructive:
-          "border-destructive/40 bg-destructive/5 text-destructive [&>svg]:text-destructive",
+          "border-danger-soft bg-danger-soft text-danger-soft-foreground [&>svg]:text-danger-soft-foreground",
         success:
-          "border-emerald-500/40 bg-emerald-50 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300 [&>svg]:text-emerald-600",
+          "border-success-soft bg-success-soft text-success-soft-foreground [&>svg]:text-success-soft-foreground",
         warning:
-          "border-amber-500/40 bg-amber-50 text-amber-800 dark:bg-amber-950 dark:text-amber-300 [&>svg]:text-amber-600",
+          "border-warning-soft bg-warning-soft text-warning-soft-foreground [&>svg]:text-warning-soft-foreground",
+        info:
+          "border-info-soft bg-info-soft text-info-soft-foreground [&>svg]:text-info-soft-foreground",
       },
     },
     defaultVariants: {
