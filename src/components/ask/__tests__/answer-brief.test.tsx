@@ -1,6 +1,10 @@
-import { describe, it, expect, vi } from "vitest";
+import { afterEach, describe, it, expect, vi } from "vitest";
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import {
+  clearRecordedFrontendTelemetryEvents,
+  getRecordedFrontendTelemetryEvents,
+} from "@/lib/telemetry/product-telemetry";
 import { AnswerBrief } from "../answer-brief";
 
 const exhibits = [
@@ -9,6 +13,10 @@ const exhibits = [
 ];
 
 describe("AnswerBrief", () => {
+  afterEach(() => {
+    clearRecordedFrontendTelemetryEvents();
+  });
+
   const base = {
     question: "What is the royalty rate for Veritax UK?",
     answer: "The royalty rate charged to Veritax UK Ltd is 18%, which exceeds the arm's length range of 10-14% established by the CUT benchmark study.",
@@ -53,6 +61,31 @@ describe("AnswerBrief", () => {
     render(<AnswerBrief {...base} onSave={onSave} />);
     await userEvent.click(screen.getByRole("button", { name: /save/i }));
     expect(onSave).toHaveBeenCalledOnce();
+  });
+
+  it("records Ask answer acceptance when opened as a view", async () => {
+    const actions: string[] = [];
+    render(
+      <AnswerBrief
+        {...base}
+        answerId="ask-answer-1"
+        onOpenAsView={() => actions.push("opened")}
+      />,
+    );
+
+    await userEvent.click(screen.getByRole("button", { name: /open as view/i }));
+
+    expect(actions).toEqual(["opened"]);
+    expect(getRecordedFrontendTelemetryEvents()).toMatchObject([
+      {
+        name: "adoption.ask_answer_accepted",
+        surface: "ask",
+        objectRef: { objectType: "ask-answer", objectId: "ask-answer-1" },
+        metadata: { answerId: "ask-answer-1", confidenceBand: "medium" },
+      },
+    ]);
+    expect(JSON.stringify(getRecordedFrontendTelemetryEvents())).not.toContain("royalty rate");
+    expect(JSON.stringify(getRecordedFrontendTelemetryEvents())).not.toContain("arm's length");
   });
 
   it("renders the original question", () => {

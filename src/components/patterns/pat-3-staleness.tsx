@@ -11,6 +11,11 @@ import {
   SheetTitle,
 } from "@/components/ui/sheet";
 import { Separator } from "@/components/ui/separator";
+import {
+  createRebuildProposalDecisionEvent,
+  DEMO_FRONTEND_TELEMETRY_CONTEXT,
+  recordFrontendTelemetryEvent,
+} from "@/lib/telemetry/product-telemetry";
 
 // ── StaleBadge ────────────────────────────────────────────────────────────────
 
@@ -24,7 +29,7 @@ export function StaleBadge({ whatChanged, onViewDiff }: StaleBadgeProps) {
     <span className="inline-flex items-center gap-1.5">
       <Badge
         variant="warning"
-        className="gap-1 border-amber-300 bg-amber-50 text-amber-700 dark:border-amber-700 dark:bg-amber-950 dark:text-amber-300"
+        className="gap-1 border-transparent bg-warning-soft text-warning-soft-foreground"
       >
         <RefreshCw className="h-3 w-3" />
         stale
@@ -32,6 +37,7 @@ export function StaleBadge({ whatChanged, onViewDiff }: StaleBadgeProps) {
       {onViewDiff && (
         <button
           onClick={onViewDiff}
+          title={whatChanged}
           className="text-xs text-primary underline-offset-2 hover:underline"
         >
           what changed
@@ -52,10 +58,10 @@ export function SurfaceStalenessBar({ count, onReview }: SurfaceStalenessBarProp
   if (count === 0) return null;
 
   return (
-    <Alert className="rounded-none border-x-0 border-t-0 border-amber-300 bg-amber-50 dark:border-amber-700 dark:bg-amber-950">
-      <TriangleAlert className="h-4 w-4 text-amber-600" />
+    <Alert className="rounded-none border-x-0 border-t-0 border-warning/25 bg-warning-soft dark:border-warning/30 dark:bg-warning-soft">
+      <TriangleAlert className="h-4 w-4 text-warning-soft-foreground" />
       <AlertDescription className="flex items-center justify-between">
-        <span className="text-amber-900 dark:text-amber-100">
+        <span className="text-warning-soft-foreground dark:text-warning-soft-foreground">
           <strong>{count} artifacts</strong> affected by changes since last build
         </span>
         <Button size="sm" variant="outline" onClick={onReview} className="ml-4 shrink-0">
@@ -89,6 +95,28 @@ export function StalenessProposalSheet({
   onSkip,
   onClose,
 }: StalenessProposalSheetProps) {
+  function handleAccept(id: string) {
+    recordFrontendTelemetryEvent(
+      createRebuildProposalDecisionEvent({
+        ...DEMO_FRONTEND_TELEMETRY_CONTEXT,
+        proposalId: id,
+        decision: "accepted",
+      }),
+    );
+    onAccept(id);
+  }
+
+  function handleSkip(id: string) {
+    recordFrontendTelemetryEvent(
+      createRebuildProposalDecisionEvent({
+        ...DEMO_FRONTEND_TELEMETRY_CONTEXT,
+        proposalId: id,
+        decision: "skipped",
+      }),
+    );
+    onSkip(id);
+  }
+
   return (
     <Sheet open={open} onOpenChange={(o) => !o && onClose()}>
       <SheetContent side="right" className="w-96">
@@ -107,10 +135,10 @@ export function StalenessProposalSheet({
                 <p className="text-sm font-medium">{target.name}</p>
                 <p className="text-xs text-muted-foreground">{target.changeDescription}</p>
                 <div className="flex gap-2">
-                  <Button size="sm" onClick={() => onAccept(target.id)}>
+                  <Button size="sm" onClick={() => handleAccept(target.id)}>
                     Accept
                   </Button>
-                  <Button size="sm" variant="outline" onClick={() => onSkip(target.id)}>
+                  <Button size="sm" variant="outline" onClick={() => handleSkip(target.id)}>
                     Skip
                   </Button>
                 </div>

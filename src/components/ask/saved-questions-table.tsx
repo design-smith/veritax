@@ -48,7 +48,7 @@ export function SavedQuestionsTable({
           data-testid={`question-row-${q.id}`}
           className={cn(
             "flex items-start gap-4 px-4 py-4 transition-colors",
-            q.hasChanged && "changed bg-amber-50/60 dark:bg-amber-950/30",
+            q.hasChanged && "changed bg-warning-soft dark:bg-warning-soft",
           )}
         >
           {/* Monitor toggle */}
@@ -67,7 +67,7 @@ export function SavedQuestionsTable({
               <p className="text-sm font-medium">{q.question}</p>
               <div className="flex shrink-0 items-center gap-1">
                 {q.hasChanged && (
-                  <Badge variant="warning" className="text-[10px] border-amber-300 bg-amber-50 text-amber-700">
+                  <Badge variant="warning" className="text-[10px] border-transparent bg-warning-soft text-warning-soft-foreground">
                     Changed
                   </Badge>
                 )}

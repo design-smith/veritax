@@ -14,6 +14,8 @@ const alertVariants = cva(
           "border-success-soft bg-success-soft text-success-soft-foreground [&>svg]:text-success-soft-foreground",
         warning:
           "border-warning-soft bg-warning-soft text-warning-soft-foreground [&>svg]:text-warning-soft-foreground",
+        caution:
+          "border-caution-soft bg-caution-soft text-caution-soft-foreground [&>svg]:text-caution-soft-foreground",
         info:
           "border-info-soft bg-info-soft text-info-soft-foreground [&>svg]:text-info-soft-foreground",
       },

@@ -8,10 +8,10 @@ import type { Obligation } from "@/lib/mock/types";
 import { cn } from "@/lib/utils";
 
 function dayChipColor(days: number): string {
-  if (days <= 0)  return "bg-red-100 text-red-700";
-  if (days <= 7)  return "bg-red-100 text-red-700";
-  if (days <= 30) return "bg-amber-100 text-amber-700";
-  return "bg-green-100 text-green-700";
+  if (days <= 0)  return "bg-danger-soft text-danger-soft-foreground";
+  if (days <= 7)  return "bg-danger-soft text-danger-soft-foreground";
+  if (days <= 30) return "bg-warning-soft text-warning-soft-foreground";
+  return "bg-success-soft text-success-soft-foreground";
 }
 
 interface ObligationsTableProps {
@@ -28,8 +28,8 @@ export function ObligationsTable({
   className,
 }: ObligationsTableProps) {
   return (
-    <div className={cn("rounded-lg border border-border overflow-hidden", className)}>
-      <table className="w-full text-sm">
+    <div className={cn("rounded-lg border border-border overflow-x-auto", className)}>
+      <table className="min-w-[720px] w-full text-sm">
         <thead>
           <tr className="border-b border-border bg-muted/30">
             {["Obligation", "Jurisdiction", "Due", "Status", "Actions"].map((h) => (
@@ -65,8 +65,8 @@ export function ObligationsTable({
                     data-testid={`status-${ob.id}`}
                     className={cn(
                       "text-xs capitalize",
-                      isOverdue ? "overdue border-red-300 bg-red-50 text-red-700" :
-                      ob.status === "filed" ? "border-green-300 bg-green-50 text-green-700" :
+                      isOverdue ? "overdue border-transparent bg-danger-soft text-danger-soft-foreground" :
+                      ob.status === "filed" ? "border-transparent bg-success-soft text-success-soft-foreground" :
                       "border-border text-muted-foreground"
                     )}
                   >

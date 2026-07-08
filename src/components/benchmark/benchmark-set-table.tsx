@@ -41,7 +41,7 @@ export function BenchmarkSetTable({ comparables, onToggleStatus, className }: Be
                   <p className="text-xs text-muted-foreground">{comp.rejectionReason}</p>
                 )}
                 {comp.delistedFlag && (
-                  <Badge variant="outline" className="text-[10px] border-amber-300 text-amber-700 mt-0.5">
+                  <Badge variant="outline" className="text-[10px] border-warning/25 text-warning-soft-foreground mt-0.5">
                     Delisted
                   </Badge>
                 )}
@@ -52,7 +52,7 @@ export function BenchmarkSetTable({ comparables, onToggleStatus, className }: Be
                   variant="outline"
                   className={cn(
                     "text-xs",
-                    comp.status === "accepted" ? "border-green-300 bg-green-50 text-green-700" : "border-red-300 bg-red-50 text-red-700"
+                    comp.status === "accepted" ? "border-transparent bg-success-soft text-success-soft-foreground" : "border-transparent bg-danger-soft text-danger-soft-foreground"
                   )}
                 >
                   {comp.status}

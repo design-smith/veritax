@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { describe, it, expect, vi } from "vitest";
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
@@ -93,5 +94,34 @@ describe("CommentThread", () => {
     );
     expect(screen.getByText(/1 resolved/i)).toBeInTheDocument();
     expect(screen.queryByText(/significantly above/)).not.toBeInTheDocument();
+  });
+
+  it("shows the anchor object and resolves typed mentions to user ids", async () => {
+    function CommentHarness() {
+      const [notification, setNotification] = useState("No mentions");
+
+      return (
+        <>
+          <CommentThread
+            objectRef="findings/fn1"
+            comments={[]}
+            users={mockUsers}
+            onAdd={(payload) => setNotification(payload.mentions.join(","))}
+            onResolve={(commentId) => setNotification(`resolved ${commentId}`)}
+            onUnresolve={(commentId) => setNotification(`unresolved ${commentId}`)}
+          />
+          <p aria-label="mention notification">{notification}</p>
+        </>
+      );
+    }
+
+    render(<CommentHarness />);
+
+    expect(screen.getByText(/Anchor: findings\/fn1/i)).toBeInTheDocument();
+
+    await userEvent.type(screen.getByPlaceholderText(/add a comment/i), "@Ikaika please check the citation");
+    await userEvent.click(screen.getByRole("button", { name: /post/i }));
+
+    expect(screen.getByLabelText("mention notification")).toHaveTextContent("u3");
   });
 });

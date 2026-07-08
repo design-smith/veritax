@@ -1,20 +1,30 @@
-import { describe, it, expect, vi } from "vitest";
+import { describe, expect, it } from "vitest";
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { useState, type ReactNode } from "react";
 import { TopBar } from "../top-bar";
+import { AppFrameProvider, createDefaultAppFrameState } from "@/contexts/app-frame-context";
 import { PermissionsProvider } from "@/contexts/permissions-context";
 import { FYLensProvider } from "@/contexts/fy-lens-context";
 
-vi.mock("next/navigation", () => ({
-  usePathname: () => "/briefing",
-  useRouter: () => ({ push: vi.fn() }),
-}));
-
-function Wrapper({ children }: { children: React.ReactNode }) {
+function Wrapper({ children }: { children: ReactNode }) {
   return (
     <PermissionsProvider role="manager">
-      <FYLensProvider>{children}</FYLensProvider>
+      <FYLensProvider>
+        <AppFrameProvider initialState={createDefaultAppFrameState()}>{children}</AppFrameProvider>
+      </FYLensProvider>
     </PermissionsProvider>
+  );
+}
+
+function AskHarness() {
+  const [opened, setOpened] = useState(false);
+
+  return (
+    <>
+      <TopBar onAskOpen={() => setOpened(true)} />
+      {opened && <p>Ask opened</p>}
+    </>
   );
 }
 
@@ -25,7 +35,7 @@ describe("TopBar", () => {
     expect(screen.getByText(currentFY)).toBeInTheDocument();
   });
 
-  it("renders the Ask/⌘K button", () => {
+  it("renders the Ask button", () => {
     render(<TopBar />, { wrapper: ({ children }) => <Wrapper>{children}</Wrapper> });
     expect(screen.getByRole("button", { name: /ask/i })).toBeInTheDocument();
   });
@@ -55,17 +65,17 @@ describe("TopBar", () => {
       <TopBar
         user={{ name: "Marcus Webb", email: "m.webb@veritax.io", role: "manager", id: "u2" }}
       />,
-      { wrapper: ({ children }) => <Wrapper>{children}</Wrapper> }
+      { wrapper: ({ children }) => <Wrapper>{children}</Wrapper> },
     );
     expect(screen.getByText("MW")).toBeInTheDocument();
   });
 
-  it("calls onAskOpen when Ask button is clicked", async () => {
-    const onAskOpen = vi.fn();
-    render(<TopBar onAskOpen={onAskOpen} />, {
+  it("opens Ask through a real state transition when Ask is clicked", async () => {
+    const user = userEvent.setup();
+    render(<AskHarness />, {
       wrapper: ({ children }) => <Wrapper>{children}</Wrapper>,
     });
-    await userEvent.click(screen.getByRole("button", { name: /ask/i }));
-    expect(onAskOpen).toHaveBeenCalledOnce();
+    await user.click(screen.getByRole("button", { name: /ask/i }));
+    expect(screen.getByText("Ask opened")).toBeInTheDocument();
   });
 });

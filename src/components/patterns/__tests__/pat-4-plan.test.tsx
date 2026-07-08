@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { describe, it, expect, vi } from "vitest";
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
@@ -80,5 +81,34 @@ describe("PlanConfirmationModal", () => {
     render(<PlanConfirmationModal {...base} onCancel={onCancel} />);
     await userEvent.click(screen.getByRole("button", { name: /cancel/i }));
     expect(onCancel).toHaveBeenCalledOnce();
+  });
+
+  it("shows the run drawer link returned by the run action", async () => {
+    function PlanRunHarness() {
+      const [runCount, setRunCount] = useState(0);
+
+      return (
+        <>
+          <PlanConfirmationModal
+            {...base}
+            onRun={() => {
+              setRunCount((count) => count + 1);
+              return { id: "run-418", href: "/runs?run=run-418" };
+            }}
+          />
+          <p aria-label="run count">{runCount}</p>
+        </>
+      );
+    }
+
+    render(<PlanRunHarness />);
+
+    await userEvent.click(screen.getByRole("button", { name: /^run$/i }));
+
+    expect(screen.getByLabelText("run count")).toHaveTextContent("1");
+    expect(screen.getByRole("link", { name: /open run run-418/i })).toHaveAttribute(
+      "href",
+      "/runs?run=run-418",
+    );
   });
 });

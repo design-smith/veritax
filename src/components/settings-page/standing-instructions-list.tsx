@@ -8,9 +8,9 @@ import { cn } from "@/lib/utils";
 type InstructionTier = "style" | "run" | "methodology";
 
 const TIER_COLORS: Record<InstructionTier, string> = {
-  style:       "border-green-300 bg-green-50 text-green-700",
-  run:         "border-blue-300 bg-blue-50 text-blue-700",
-  methodology: "border-amber-300 bg-amber-50 text-amber-700",
+  style:       "border-transparent bg-success-soft text-success-soft-foreground",
+  run:         "border-transparent bg-info-soft text-info-soft-foreground",
+  methodology: "border-transparent bg-warning-soft text-warning-soft-foreground",
 };
 
 export interface StandingInstruction {
@@ -43,7 +43,7 @@ export function StandingInstructionsList({ instructions, onDelete, className }: 
               )}
             </div>
           </div>
-          <Button size="icon" variant="ghost" className="h-7 w-7 shrink-0 text-muted-foreground hover:text-destructive"
+          <Button size="icon" variant="ghost" className="h-7 w-7 shrink-0 text-muted-foreground hover:text-danger-soft-foreground"
             aria-label="Delete instruction"
             onClick={() => onDelete(inst.id)}>
             <Trash2 className="h-3.5 w-3.5" />

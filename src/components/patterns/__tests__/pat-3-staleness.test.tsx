@@ -1,7 +1,15 @@
-import { describe, it, expect, vi } from "vitest";
+import { afterEach, describe, it, expect, vi } from "vitest";
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import {
+  clearRecordedFrontendTelemetryEvents,
+  getRecordedFrontendTelemetryEvents,
+} from "@/lib/telemetry/product-telemetry";
 import { StaleBadge, StalenessProposalSheet, SurfaceStalenessBar } from "../pat-3-staleness";
+
+afterEach(() => {
+  clearRecordedFrontendTelemetryEvents();
+});
 
 describe("StaleBadge", () => {
   it("renders a stale label and what-changed link", () => {
@@ -81,5 +89,29 @@ describe("StalenessProposalSheet", () => {
       />
     );
     expect(onAccept).not.toHaveBeenCalled();
+  });
+
+  it("records rebuild proposal decisions for accept and skip actions", async () => {
+    const decisions: string[] = [];
+    render(
+      <StalenessProposalSheet
+        open
+        targets={targets}
+        onAccept={(id) => decisions.push(`accepted:${id}`)}
+        onSkip={(id) => decisions.push(`skipped:${id}`)}
+        onClose={() => undefined}
+      />
+    );
+
+    await userEvent.click(screen.getAllByRole("button", { name: /accept/i })[0]);
+    await userEvent.click(screen.getAllByRole("button", { name: /skip/i })[1]);
+
+    expect(decisions).toEqual(["accepted:t1", "skipped:t2"]);
+    expect(getRecordedFrontendTelemetryEvents().map((event) => event.metadata.decision)).toEqual([
+      "accepted",
+      "skipped",
+    ]);
+    expect(JSON.stringify(getRecordedFrontendTelemetryEvents())).not.toContain("UK Local File");
+    expect(JSON.stringify(getRecordedFrontendTelemetryEvents())).not.toContain("Entity profile");
   });
 });

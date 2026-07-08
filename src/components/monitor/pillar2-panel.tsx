@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { Fragment, useState } from "react";
 import { ChevronDown, ChevronRight } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
@@ -36,8 +36,8 @@ export function Pillar2Panel({ rows, className }: Pillar2PanelProps) {
   }
 
   return (
-    <div className={cn("rounded-lg border border-border overflow-hidden", className)}>
-      <table className="w-full text-sm">
+    <div className={cn("rounded-lg border border-border overflow-x-auto", className)}>
+      <table className="min-w-[700px] w-full text-sm">
         <thead>
           <tr className="border-b border-border bg-muted/30">
             <th className="px-4 py-2.5 text-left text-xs font-medium text-muted-foreground">Jurisdiction</th>
@@ -52,8 +52,8 @@ export function Pillar2Panel({ rows, className }: Pillar2PanelProps) {
             const isExpanded = expandedRows.has(row.jurisdictionCode);
 
             return (
-              <>
-                <tr key={row.jurisdictionCode} className="bg-card hover:bg-muted/20 transition-colors">
+              <Fragment key={row.jurisdictionCode}>
+                <tr className="bg-card hover:bg-muted/20 transition-colors">
                   <td className="px-4 py-3">
                     <span className="font-mono text-xs font-bold">{row.jurisdictionCode}</span>
                     <span className="ml-2 text-muted-foreground">{row.jurisdiction}</span>
@@ -61,7 +61,7 @@ export function Pillar2Panel({ rows, className }: Pillar2PanelProps) {
                   <td className="px-4 py-3">
                     <span className={cn(
                       "font-semibold",
-                      row.globeETR < 0.15 ? "text-destructive" : "text-foreground"
+                      row.globeETR < 0.15 ? "text-danger-soft-foreground" : "text-foreground"
                     )}>
                       {(row.globeETR * 100).toFixed(1)}%
                     </span>
@@ -75,8 +75,8 @@ export function Pillar2Panel({ rows, className }: Pillar2PanelProps) {
                           className={cn(
                             "text-[10px]",
                             test.passed
-                              ? "border-green-300 bg-green-50 text-green-700"
-                              : "border-red-300 bg-red-50 text-red-700"
+                              ? "border-transparent bg-success-soft text-success-soft-foreground"
+                              : "border-transparent bg-danger-soft text-danger-soft-foreground"
                           )}
                         >
                           {test.passed ? "pass" : "fail"}
@@ -86,7 +86,7 @@ export function Pillar2Panel({ rows, className }: Pillar2PanelProps) {
                   </td>
                   <td className="px-4 py-3">
                     <div className="flex items-center gap-2">
-                      <span className={row.qdmttAccrual > 0 ? "font-semibold text-destructive" : "text-muted-foreground"}>
+                      <span className={row.qdmttAccrual > 0 ? "font-semibold text-danger-soft-foreground" : "text-muted-foreground"}>
                         {row.qdmttAccrual > 0
                           ? row.qdmttAccrual.toLocaleString()
                           : "—"}
@@ -120,7 +120,7 @@ export function Pillar2Panel({ rows, className }: Pillar2PanelProps) {
                     </td>
                   </tr>
                 )}
-              </>
+              </Fragment>
             );
           })}
         </tbody>

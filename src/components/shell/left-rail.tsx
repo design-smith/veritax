@@ -42,9 +42,10 @@ const NAV_ITEMS: NavItem[] = [
   { label: "Briefing",     href: "/briefing",     icon: Gauge,        badgeKey: "gates" },
   { label: "Graph",        href: "/graph",         icon: Network },
   { label: "Findings",     href: "/findings",      icon: TriangleAlert, badgeKey: "findings" },
-  { label: "Library",      href: "/library",       icon: BookOpen },
+  { label: "Documents",    href: "/documents",     icon: FileText,     badgeKey: "queue" },
   { label: "Monitor",      href: "/monitor",       icon: BarChart3 },
   { label: "Calendar",     href: "/calendar",      icon: CalendarDays, badgeKey: "obligations" },
+  { label: "Library",      href: "/library",       icon: BookOpen },
   { label: "Commitments",  href: "/commitments",   icon: Bell },
   { label: "Runs",         href: "/runs",          icon: Cpu },
   { label: "Connectors",   href: "/connectors",    icon: Building2 },
@@ -54,11 +55,13 @@ const ADMIN_ITEM: NavItem = { label: "Admin", href: "/admin", icon: Settings };
 
 interface LeftRailProps {
   badges?: LeftRailBadges;
+  currentPath?: string;
 }
 
-export function LeftRail({ badges = {} }: LeftRailProps) {
+export function LeftRail({ badges = {}, currentPath }: LeftRailProps) {
   const [collapsed, setCollapsed] = useState(false);
   const pathname = usePathname();
+  const activePath = currentPath ?? pathname;
   const adminPermission = usePermission("view_admin");
 
   const items = adminPermission === "allowed" ? [...NAV_ITEMS, ADMIN_ITEM] : NAV_ITEMS;
@@ -83,10 +86,10 @@ export function LeftRail({ badges = {} }: LeftRailProps) {
         </div>
 
         {/* Nav */}
-        <nav className="flex flex-1 flex-col gap-y-0.5 overflow-y-auto p-2">
+        <nav aria-label="Primary" className="flex flex-1 flex-col gap-y-0.5 overflow-y-auto p-2">
           {items.map((item) => {
             const Icon = item.icon;
-            const isActive = pathname === item.href || pathname.startsWith(item.href + "/");
+            const isActive = activePath === item.href || activePath.startsWith(item.href + "/");
             const count = item.badgeKey ? (badges[item.badgeKey] ?? 0) : 0;
 
             const linkContent = (

@@ -12,10 +12,10 @@ type ClassificationChip = "ingested" | "commitments-only" | "excluded" | "privil
 type TranscriptCustody = "allowed" | "commitments-only" | "excluded";
 
 const CLASSIFICATION_COLORS: Record<ClassificationChip, string> = {
-  ingested:          "border-green-300 bg-green-50 text-green-700",
-  "commitments-only":"border-blue-300 bg-blue-50 text-blue-700",
+  ingested:          "border-transparent bg-success-soft text-success-soft-foreground",
+  "commitments-only":"border-transparent bg-info-soft text-info-soft-foreground",
   excluded:          "border-border text-muted-foreground",
-  "privilege-gated": "border-red-300 bg-red-50 text-red-700",
+  "privilege-gated": "border-transparent bg-danger-soft text-danger-soft-foreground",
 };
 
 interface ExtractedCommitment { id: string; text: string; ownerId: string; }
@@ -117,11 +117,23 @@ export function MeetingDetail({
               Extracted assertions ({meeting.extractedAssertions.length})
             </p>
             <div className="space-y-2">
-              {meeting.extractedAssertions.map((as) => (
-                <div key={as.id} className="flex items-start justify-between gap-3 rounded-lg border border-border bg-card p-3">
-                  <p className="text-sm">{as.text}</p>
-                  <Badge variant="secondary" className="text-[10px] shrink-0">{as.confidenceLabel}</Badge>
-                </div>
+              {meeting.extractedAssertions.map((assertion) => (
+                <article
+                  key={assertion.id}
+                  aria-label={assertion.text}
+                  className="flex items-start justify-between gap-3 rounded-lg border border-border bg-card p-3"
+                >
+                  <div className="min-w-0">
+                    <p className="text-sm">{assertion.text}</p>
+                    <a
+                      href={`/verification-queue?assertion=${assertion.id}`}
+                      className="mt-2 inline-flex text-xs text-primary hover:underline"
+                    >
+                      Open in verification queue
+                    </a>
+                  </div>
+                  <Badge variant="secondary" className="text-[10px] shrink-0">{assertion.confidenceLabel}</Badge>
+                </article>
               ))}
             </div>
           </section>
@@ -155,8 +167,8 @@ export function MeetingDetail({
             <p className="text-sm text-muted-foreground">Full transcript renders here when custody permits.</p>
           </div>
         ) : (
-          <div className="rounded-lg border border-amber-200 bg-amber-50 p-4 dark:border-amber-800 dark:bg-amber-950">
-            <p className="text-sm text-amber-800 dark:text-amber-200">
+          <div className="rounded-lg border border-warning/25 bg-warning-soft p-4 dark:border-warning/30 dark:bg-warning-soft">
+            <p className="text-sm text-warning-soft-foreground dark:text-warning-soft-foreground">
               Transcript not available — custody is{" "}
               <span className="font-medium">{meeting.transcriptCustody}</span>.
               Only commitment extractions are accessible for this meeting.

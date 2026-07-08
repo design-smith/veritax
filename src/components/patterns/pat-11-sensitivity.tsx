@@ -24,8 +24,8 @@ export function SensitivityChip({ tier, className }: SensitivityChipProps) {
       className={cn(
         "gap-1 text-xs font-medium",
         tier === "privileged"
-          ? "border-red-300 bg-red-50 text-red-700 dark:border-red-800 dark:bg-red-950 dark:text-red-300"
-          : "border-amber-300 bg-amber-50 text-amber-700 dark:border-amber-800 dark:bg-amber-950 dark:text-amber-300",
+          ? "border-transparent bg-danger-soft text-danger-soft-foreground"
+          : "border-transparent bg-warning-soft text-warning-soft-foreground",
         className,
       )}
     >
@@ -47,11 +47,11 @@ export function SensitivityNotice({ tier, className }: SensitivityNoticeProps) {
     <Alert
       role="alert"
       className={cn(
-        "border-amber-300 bg-amber-50 text-amber-900 dark:border-amber-700 dark:bg-amber-950 dark:text-amber-100",
+        "border-transparent bg-warning-soft text-warning-soft-foreground",
         className,
       )}
     >
-      <Lock className="h-4 w-4 text-amber-600" />
+      <Lock className="h-4 w-4 text-warning-soft-foreground" />
       <AlertDescription>
         <span className="font-medium capitalize">{tier}</span> object — views are logged. Access is subject to policy review.
       </AlertDescription>
@@ -68,18 +68,18 @@ interface VaultLockedEntryProps {
 
 export function VaultLockedEntry({ label, onContactCounsel }: VaultLockedEntryProps) {
   return (
-    <div className="flex items-center justify-between rounded-lg border border-red-200 bg-red-50 p-3 dark:border-red-800 dark:bg-red-950">
+    <div className="flex items-center justify-between rounded-lg border border-danger/25 bg-danger-soft p-3 dark:border-danger/30 dark:bg-danger-soft">
       <div className="flex items-center gap-2">
         <Lock
           aria-label="locked"
-          className="h-4 w-4 shrink-0 text-red-500"
+          className="h-4 w-4 shrink-0 text-danger-soft-foreground"
         />
-        <span className="text-sm font-medium text-red-800 dark:text-red-200">{label}</span>
+        <span className="text-sm font-medium text-danger-soft-foreground dark:text-danger-soft-foreground">{label}</span>
       </div>
       <Button
         variant="outline"
         size="sm"
-        className="border-red-300 text-red-700 hover:bg-red-100 dark:border-red-700 dark:text-red-300"
+        className="border-danger/25 text-danger-soft-foreground hover:bg-danger-soft dark:border-danger/30 dark:text-danger-soft-foreground"
         onClick={onContactCounsel}
       >
         Contact counsel

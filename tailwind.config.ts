@@ -5,7 +5,7 @@ import { fontFamily } from "tailwindcss/defaultTheme";
 const oklch = (name: string) => `oklch(var(${name}) / <alpha-value>)`;
 
 const config = {
-  darkMode: ["class"],
+  darkMode: ["variant", "&:where([data-theme=dark], [data-theme=dark] *, .dark, .dark *)"],
   content: [
     "./pages/**/*.{ts,tsx}",
     "./components/**/*.{ts,tsx}",
@@ -49,6 +49,7 @@ const config = {
           secondary: oklch("--surface-secondary"),
           tertiary: oklch("--surface-tertiary"),
           elevated: oklch("--surface-elevated"),
+          "elevated-secondary": oklch("--surface-elevated-secondary"),
         },
         primary: {
           DEFAULT: oklch("--primary"),
@@ -85,6 +86,12 @@ const config = {
           foreground: oklch("--warning-foreground"),
           soft: oklch("--warning-soft"),
           "soft-foreground": oklch("--warning-soft-foreground"),
+        },
+        caution: {
+          DEFAULT: oklch("--caution"),
+          foreground: oklch("--caution-foreground"),
+          soft: oklch("--caution-soft"),
+          "soft-foreground": oklch("--caution-soft-foreground"),
         },
         discovery: {
           DEFAULT: oklch("--discovery"),

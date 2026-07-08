@@ -34,7 +34,7 @@ export function RetentionScheduleEditor({ schedules, onChange, className }: Rete
   return (
     <div className={cn("space-y-3", className)}>
       {anyHold && (
-        <div className="flex items-center gap-2 rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-800 dark:border-amber-700 dark:bg-amber-950 dark:text-amber-200">
+        <div className="flex items-center gap-2 rounded-md border border-warning/25 bg-warning-soft px-3 py-2 text-xs text-warning-soft-foreground dark:border-warning/30 dark:bg-warning-soft dark:text-warning-soft-foreground">
           <AlertTriangle className="h-3.5 w-3.5 shrink-0" />
           Legal hold active — overrides normal retention schedule for flagged classes.
         </div>
@@ -51,12 +51,12 @@ export function RetentionScheduleEditor({ schedules, onChange, className }: Rete
           </thead>
           <tbody className="divide-y divide-border">
             {local.map((s) => (
-              <tr key={s.id} className={cn("bg-card", s.legalHold && "bg-amber-50/40 dark:bg-amber-950/30")}>
+              <tr key={s.id} className={cn("bg-card", s.legalHold && "bg-warning-soft dark:bg-warning-soft")}>
                 <td className="px-4 py-3 capitalize font-medium">{s.docClass}</td>
                 <td className="px-4 py-3 font-mono text-xs">{s.jurisdiction}</td>
                 <td className="px-4 py-3 text-xs">
                   {s.legalHold ? (
-                    <span className="font-medium text-amber-700 dark:text-amber-400">∞ (hold active)</span>
+                    <span className="font-medium text-warning-soft-foreground dark:text-warning-soft-foreground">∞ (hold active)</span>
                   ) : (
                     `${s.daysToRetain} days`
                   )}

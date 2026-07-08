@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button";
 import {
   Dialog,
   DialogContent,
+  DialogDescription,
   DialogFooter,
   DialogHeader,
   DialogTitle,
@@ -42,17 +43,22 @@ interface RunPayload {
   instruction: string;
 }
 
+interface RunReference {
+  id: string;
+  href: string;
+}
+
 interface PlanConfirmationModalProps {
   open: boolean;
   plan: PlanSpec;
-  onRun: (payload: RunPayload) => void;
+  onRun: (payload: RunPayload) => RunReference | void;
   onCancel: () => void;
 }
 
 const PERMISSION_CONFIG = {
-  allowed: { label: "Allowed", color: "text-green-600 dark:text-green-400" },
-  "requires-approval": { label: "Approval required — request will route to manager", color: "text-amber-600 dark:text-amber-400" },
-  denied: { label: "Denied — insufficient permissions", color: "text-destructive" },
+  allowed: { label: "Allowed", color: "text-success-soft-foreground dark:text-success-soft-foreground" },
+  "requires-approval": { label: "Approval required — request will route to manager", color: "text-warning-soft-foreground dark:text-warning-soft-foreground" },
+  denied: { label: "Denied — insufficient permissions", color: "text-danger-soft-foreground" },
 };
 
 const COST_LABELS: Record<CostClass, string> = {
@@ -63,20 +69,24 @@ const COST_LABELS: Record<CostClass, string> = {
 };
 
 const TIER_COLORS: Record<InstructionTier, string> = {
-  style: "border-green-300 bg-green-50 text-green-700",
-  run: "border-blue-300 bg-blue-50 text-blue-700",
-  methodology: "border-amber-300 bg-amber-50 text-amber-700",
+  style: "border-transparent bg-success-soft text-success-soft-foreground",
+  run: "border-transparent bg-info-soft text-info-soft-foreground",
+  methodology: "border-transparent bg-warning-soft text-warning-soft-foreground",
 };
 
 export function PlanConfirmationModal({ open, plan, onRun, onCancel }: PlanConfirmationModalProps) {
   const [instruction, setInstruction] = useState(plan.instruction);
+  const [runReference, setRunReference] = useState<RunReference | null>(null);
 
   const canRun =
     plan.permissionCheck === "allowed" && plan.tier !== "methodology";
 
   function handleRun() {
     if (!canRun) return;
-    onRun({ instruction });
+    const result = onRun({ instruction });
+    if (result) {
+      setRunReference(result);
+    }
   }
 
   const permConfig = PERMISSION_CONFIG[plan.permissionCheck];
@@ -89,6 +99,9 @@ export function PlanConfirmationModal({ open, plan, onRun, onCancel }: PlanConfi
             <Zap className="h-4 w-4 text-primary" />
             Confirm action
           </DialogTitle>
+          <DialogDescription>
+            Review the plan, permissions, cost class, and record effects before running.
+          </DialogDescription>
         </DialogHeader>
 
         <div className="space-y-4 py-1">
@@ -121,7 +134,7 @@ export function PlanConfirmationModal({ open, plan, onRun, onCancel }: PlanConfi
           {/* (c) Produces / Invalidates */}
           <div className="grid grid-cols-2 gap-3">
             <div className="space-y-1">
-              <div className="flex items-center gap-1 text-xs font-medium text-green-600">
+              <div className="flex items-center gap-1 text-xs font-medium text-success-soft-foreground">
                 <Package className="h-3 w-3" />Produces
               </div>
               {plan.produces.map((p) => (
@@ -129,7 +142,7 @@ export function PlanConfirmationModal({ open, plan, onRun, onCancel }: PlanConfi
               ))}
             </div>
             <div className="space-y-1">
-              <div className="flex items-center gap-1 text-xs font-medium text-destructive">
+              <div className="flex items-center gap-1 text-xs font-medium text-danger-soft-foreground">
                 <Trash2 className="h-3 w-3" />Invalidates
               </div>
               {plan.invalidates.map((inv) => (
@@ -170,9 +183,21 @@ export function PlanConfirmationModal({ open, plan, onRun, onCancel }: PlanConfi
           </div>
 
           {plan.permissionCheck === "requires-approval" && (
-            <p className="text-xs text-amber-700 dark:text-amber-400">
+            <p className="text-xs text-warning-soft-foreground dark:text-warning-soft-foreground">
               <strong>Approval required</strong> — submitting will route this to your manager for gate review.
             </p>
+          )}
+
+          {runReference && (
+            <div className="rounded-md border border-success/25 bg-success-soft p-2 text-xs text-success-soft-foreground">
+              Run created:{" "}
+              <a
+                href={runReference.href}
+                className="font-medium underline underline-offset-2"
+              >
+                Open run {runReference.id}
+              </a>
+            </div>
           )}
         </div>
 

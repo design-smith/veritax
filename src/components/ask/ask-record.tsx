@@ -31,9 +31,9 @@ const DEMO_STAGES: AskStage[] = [
 const MODE_LABELS = { ask: "ask", goto: "go-to", run: "run", create: "create" } as const;
 const MODE_COLORS = {
   ask: "border-primary/30 bg-primary/5 text-primary",
-  goto: "border-blue-300 bg-blue-50 text-blue-700",
-  run: "border-green-300 bg-green-50 text-green-700",
-  create: "border-purple-300 bg-purple-50 text-purple-700",
+  goto: "border-transparent bg-info-soft text-info-soft-foreground",
+  run: "border-transparent bg-success-soft text-success-soft-foreground",
+  create: "border-transparent bg-discovery-soft text-discovery-soft-foreground",
 } as const;
 
 const DEMO_ANSWER = {
@@ -86,8 +86,8 @@ export function AskRecord({ open, onClose, initialQuery = "" }: AskRecordProps) 
 
   return (
     <div className="fixed inset-0 z-50 flex items-start justify-center pt-20">
-      <div className="absolute inset-0 bg-black/50" onClick={onClose} />
-      <div className="relative z-10 w-full max-w-2xl rounded-xl border border-border bg-background shadow-2xl overflow-hidden">
+      <div className="absolute inset-0 bg-sdk-overlay" onClick={onClose} />
+      <div className="relative z-10 w-full max-w-2xl rounded-xl border border-border bg-background shadow-elevation-400 overflow-hidden">
         {/* Input */}
         <form onSubmit={handleAskSubmit}>
           <div className="flex items-center gap-2 px-4 py-3 border-b border-border">

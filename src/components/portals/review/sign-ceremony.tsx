@@ -1,8 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { CheckCircle, ShieldCheck } from "lucide-react";
-import { Badge } from "@/components/ui/badge";
+import { CheckCircle } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Label } from "@/components/ui/label";
@@ -45,11 +44,11 @@ export function SignCeremony({
   if (sealed && manifestHash) {
     return (
       <div data-testid="manifest-receipt" className={cn("space-y-4", className)}>
-        <div className="flex items-center gap-3 rounded-lg border border-green-300 bg-green-50 p-4 dark:border-green-700 dark:bg-green-950">
-          <CheckCircle className="h-6 w-6 text-green-600 shrink-0" />
+        <div className="flex items-center gap-3 rounded-lg border border-success/25 bg-success-soft p-4 dark:border-success/30 dark:bg-success-soft">
+          <CheckCircle className="h-6 w-6 text-success-soft-foreground shrink-0" />
           <div>
-            <p className="text-sm font-semibold text-green-800 dark:text-green-200">Document signed and sealed</p>
-            <p className="text-xs text-green-700 dark:text-green-300 mt-0.5">Receipt generated</p>
+            <p className="text-sm font-semibold text-success-soft-foreground dark:text-success-soft-foreground">Document signed and sealed</p>
+            <p className="text-xs text-success-soft-foreground dark:text-success-soft-foreground mt-0.5">Receipt generated</p>
           </div>
         </div>
         <div className="rounded-lg border border-border bg-card p-4 space-y-2 text-xs">

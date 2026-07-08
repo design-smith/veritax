@@ -1,18 +1,19 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useMemo } from "react";
+import { ProvenanceChip } from "@/components/patterns/pat-2-provenance";
 import { Badge } from "@/components/ui/badge";
 import { DataTable } from "@/components/patterns/pat-8-data-table";
 import type { Column } from "@/components/patterns/pat-8-data-table";
-import type { Finding } from "@/lib/mock/types";
+import type { Entity, Finding, Flow, User } from "@/lib/mock/types";
 import { cn } from "@/lib/utils";
 
 const SEVERITY_ORDER = { critical: 0, high: 1, medium: 2, low: 3 };
 
 const SEVERITY_VARIANTS: Record<Finding["severity"], string> = {
-  critical: "bg-red-100 text-red-700 dark:bg-red-950 dark:text-red-300",
-  high: "bg-amber-100 text-amber-700 dark:bg-amber-950 dark:text-amber-300",
-  medium: "bg-blue-100 text-blue-700 dark:bg-blue-950 dark:text-blue-300",
+  critical: "bg-danger-soft text-danger-soft-foreground dark:bg-danger-soft dark:text-danger-soft-foreground",
+  high: "bg-warning-soft text-warning-soft-foreground dark:bg-warning-soft dark:text-warning-soft-foreground",
+  medium: "bg-info-soft text-info-soft-foreground dark:bg-info-soft dark:text-info-soft-foreground",
   low: "bg-muted text-muted-foreground",
 };
 
@@ -31,16 +32,62 @@ function formatExposure(n: number) {
 
 interface FindingsListProps {
   findings: Finding[];
+  flows?: Flow[];
+  entities?: Entity[];
+  users?: User[];
   onRowOpen: (finding: Finding) => void;
   onRowSelect?: (findings: Finding[]) => void;
   className?: string;
 }
 
-export function FindingsList({ findings, onRowOpen, onRowSelect, className }: FindingsListProps) {
+function flowLabel(finding: Finding, flowById: Map<string, Flow>, entityById: Map<string, Entity>) {
+  const flow = flowById.get(finding.flowId);
+  if (!flow) return finding.flowId;
+  const from = entityById.get(flow.fromEntityId)?.jurisdictionCode ?? flow.fromEntityId;
+  const to = entityById.get(flow.toEntityId)?.jurisdictionCode ?? flow.toEntityId;
+  return `${from} to ${to} ${flow.kind}`;
+}
+
+function reviewerStateLabel(state: Finding["reviewerState"]) {
+  return state.replace(/-/g, " ");
+}
+
+function TrendSparkline() {
+  return (
+    <svg
+      role="img"
+      aria-label="Finding trend sparkline"
+      viewBox="0 0 96 28"
+      className="h-7 w-24 text-primary"
+    >
+      <polyline
+        points="2,22 18,19 34,17 50,11 66,14 82,8 94,6"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="3"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+}
+
+export function FindingsList({
+  findings,
+  flows = [],
+  entities = [],
+  users = [],
+  onRowOpen,
+  onRowSelect,
+  className,
+}: FindingsListProps) {
   const sorted = useMemo(
     () => [...findings].sort((a, b) => SEVERITY_ORDER[a.severity] - SEVERITY_ORDER[b.severity]),
     [findings]
   );
+  const flowById = useMemo(() => new Map(flows.map((flow) => [flow.id, flow])), [flows]);
+  const entityById = useMemo(() => new Map(entities.map((entity) => [entity.id, entity])), [entities]);
+  const userById = useMemo(() => new Map(users.map((user) => [user.id, user])), [users]);
 
   const openCount = findings.filter(
     (f) => f.status !== "resolved" && f.status !== "verify-next-cycle"
@@ -74,6 +121,11 @@ export function FindingsList({ findings, onRowOpen, onRowSelect, className }: Fi
       render: (f) => <span className="text-sm font-medium line-clamp-1">{f.title}</span>,
     },
     {
+      key: "flow",
+      header: "Flow",
+      render: (f) => <span className="text-xs text-muted-foreground">{flowLabel(f, flowById, entityById)}</span>,
+    },
+    {
       key: "status",
       header: "Status",
       render: (f) => (
@@ -89,6 +141,24 @@ export function FindingsList({ findings, onRowOpen, onRowSelect, className }: Fi
         <span className="text-sm tabular-nums">
           {formatExposure(f.exposure)} <span className="text-muted-foreground text-xs">{f.currency}</span>
         </span>
+      ),
+    },
+    {
+      key: "assignee",
+      header: "Assignee",
+      render: (f) => (
+        <span className="text-xs text-muted-foreground">
+          {f.assigneeId ? userById.get(f.assigneeId)?.name ?? f.assigneeId : "Unassigned"}
+        </span>
+      ),
+    },
+    {
+      key: "reviewerState",
+      header: "Reviewer state",
+      render: (f) => (
+        <Badge variant="secondary" className="text-xs capitalize">
+          {reviewerStateLabel(f.reviewerState)}
+        </Badge>
       ),
     },
     {
@@ -109,9 +179,19 @@ export function FindingsList({ findings, onRowOpen, onRowSelect, className }: Fi
         <div className="h-8 w-px bg-border" />
         <div>
           <p className="text-xs text-muted-foreground">Total exposure</p>
-          <p className="text-xl font-semibold tabular-nums" data-testid="rollup-exposure">
-            {formatExposure(totalExposure)}
-          </p>
+          <div className="flex items-center gap-2">
+            <p className="text-xl font-semibold tabular-nums" data-testid="rollup-exposure">
+              {formatExposure(totalExposure)}
+            </p>
+            <ProvenanceChip
+              asOf="2024-12-31"
+              source="findings exposure rollup"
+              hops={[
+                { label: "Open finding exposures", type: "metric" },
+                { label: "Rulepack severity output", type: "mapping" },
+              ]}
+            />
+          </div>
         </div>
         <div className="h-8 w-px bg-border" />
         <div>
@@ -119,6 +199,10 @@ export function FindingsList({ findings, onRowOpen, onRowSelect, className }: Fi
           <p className="text-sm font-medium">
             {[...new Set(findings.map((f) => f.currency))].join(", ")}
           </p>
+        </div>
+        <div className="ml-auto">
+          <p className="text-xs text-muted-foreground">Trend</p>
+          <TrendSparkline />
         </div>
       </div>
 

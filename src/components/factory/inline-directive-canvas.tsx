@@ -19,6 +19,7 @@ interface InlineDirectiveCanvasProps {
   status?: SelfCheckStatus;
   conflictRef?: string;
   onInstruct: (sectionId: string, selectedText: string) => void;
+  onDirectiveSubmit?: (sectionId: string, selectedText: string, instruction: string) => void;
   className?: string;
 }
 
@@ -35,6 +36,7 @@ export function InlineDirectiveCanvas({
   status = "idle",
   conflictRef,
   onInstruct,
+  onDirectiveSubmit,
   className,
 }: InlineDirectiveCanvasProps) {
   // In JSDOM, real text selection isn't possible. We simulate it with a test helper button.
@@ -51,6 +53,7 @@ export function InlineDirectiveCanvas({
 
   function handleInstructSubmit(payload: { text: string }) {
     onInstruct(sectionId, DEMO_SELECTED_TEXT);
+    onDirectiveSubmit?.(sectionId, DEMO_SELECTED_TEXT, payload.text);
     setShowInstructInput(false);
   }
 
@@ -63,9 +66,9 @@ export function InlineDirectiveCanvas({
             data-testid="self-check-indicator"
             className={cn(
               "inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium",
-              status === "pending-self-check" && "pending bg-amber-100 text-amber-700",
-              status === "self-check-pass" && "pass bg-green-100 text-green-700",
-              status === "self-check-fail" && "fail bg-red-100 text-red-700",
+              status === "pending-self-check" && "pending bg-warning-soft text-warning-soft-foreground",
+              status === "self-check-pass" && "pass bg-success-soft text-success-soft-foreground",
+              status === "self-check-fail" && "fail bg-danger-soft text-danger-soft-foreground",
             )}
           >
             <selfCheck.icon className={cn("h-3.5 w-3.5", status === "pending-self-check" && "animate-spin")} />

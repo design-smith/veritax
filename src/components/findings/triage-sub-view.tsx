@@ -3,7 +3,6 @@
 import { useState } from "react";
 import { AlertTriangle, ArrowUpCircle } from "lucide-react";
 import { Alert, AlertDescription } from "@/components/ui/alert";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Separator } from "@/components/ui/separator";
@@ -17,9 +16,9 @@ interface TriageSubViewProps {
 }
 
 const SEVERITY_COLORS: Record<Finding["severity"], string> = {
-  critical: "bg-red-100 text-red-700",
-  high: "bg-amber-100 text-amber-700",
-  medium: "bg-blue-100 text-blue-700",
+  critical: "bg-danger-soft text-danger-soft-foreground",
+  high: "bg-warning-soft text-warning-soft-foreground",
+  medium: "bg-info-soft text-info-soft-foreground",
   low: "bg-muted text-muted-foreground",
 };
 
@@ -37,9 +36,9 @@ export function TriageSubView({ candidates, onPromote, className }: TriageSubVie
   return (
     <div className={cn("space-y-4", className)}>
       {/* Persistent banner */}
-      <Alert className="border-amber-300 bg-amber-50 dark:border-amber-700 dark:bg-amber-950">
-        <AlertTriangle className="h-4 w-4 text-amber-600" />
-        <AlertDescription className="text-amber-900 dark:text-amber-100 font-medium">
+      <Alert className="border-warning/25 bg-warning-soft dark:border-warning/30 dark:bg-warning-soft">
+        <AlertTriangle className="h-4 w-4 text-warning-soft-foreground" />
+        <AlertDescription className="text-warning-soft-foreground dark:text-warning-soft-foreground font-medium">
           Candidates — not yet findings
         </AlertDescription>
       </Alert>

@@ -1,6 +1,10 @@
-import { describe, it, expect, vi } from "vitest";
+import { afterEach, describe, it, expect, vi } from "vitest";
 import { render, screen, fireEvent } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import {
+  clearRecordedFrontendTelemetryEvents,
+  getRecordedFrontendTelemetryEvents,
+} from "@/lib/telemetry/product-telemetry";
 import { VerificationQueue } from "../verification-queue";
 
 const questions = [
@@ -31,6 +35,10 @@ const questions = [
 ];
 
 describe("VerificationQueue", () => {
+  afterEach(() => {
+    clearRecordedFrontendTelemetryEvents();
+  });
+
   it("renders the current question card", () => {
     render(<VerificationQueue questions={questions} answeredCount={0} targetCount={40} onAnswer={vi.fn()} onSkip={vi.fn()} onUndo={vi.fn()} />);
     expect(screen.getByText(/Veritax Corp.*Veritax Holdings/)).toBeInTheDocument();
@@ -63,6 +71,31 @@ describe("VerificationQueue", () => {
     render(<VerificationQueue questions={questions} answeredCount={0} targetCount={40} onAnswer={onAnswer} onSkip={vi.fn()} onUndo={vi.fn()} />);
     await userEvent.click(screen.getByText("1. Same entity"));
     expect(onAnswer).toHaveBeenCalledWith("q1", "Same entity");
+  });
+
+  it("records verification-answer throughput telemetry when an option is selected", async () => {
+    const answers: string[] = [];
+    render(
+      <VerificationQueue
+        questions={questions}
+        answeredCount={0}
+        targetCount={40}
+        onAnswer={(questionId, option) => answers.push(`${questionId}:${option}`)}
+        onSkip={() => undefined}
+        onUndo={() => undefined}
+      />,
+    );
+
+    await userEvent.click(screen.getByText("2. Different entities"));
+
+    expect(answers).toEqual(["q1:Different entities"]);
+    expect(getRecordedFrontendTelemetryEvents()).toMatchObject([
+      {
+        name: "throughput.verification_answer_submitted",
+        surface: "verification-queue",
+        metadata: { category: "entity-merge", answerIndex: 2 },
+      },
+    ]);
   });
 
   it("selects option 1 on key '1'", () => {

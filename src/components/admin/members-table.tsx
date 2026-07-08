@@ -3,11 +3,11 @@ import type { User } from "@/lib/mock/types";
 import { cn } from "@/lib/utils";
 
 const ROLE_COLORS: Record<User["role"], string> = {
-  vp:       "border-purple-300 bg-purple-50 text-purple-700",
-  manager:  "border-blue-300 bg-blue-50 text-blue-700",
-  analyst:  "border-green-300 bg-green-50 text-green-700",
-  adjacent: "border-slate-300 bg-slate-50 text-slate-700",
-  admin:    "border-red-300 bg-red-50 text-red-700",
+  vp:       "border-transparent bg-discovery-soft text-discovery-soft-foreground",
+  manager:  "border-transparent bg-info-soft text-info-soft-foreground",
+  analyst:  "border-transparent bg-success-soft text-success-soft-foreground",
+  adjacent: "border-border bg-surface-secondary text-muted-foreground",
+  admin:    "border-transparent bg-danger-soft text-danger-soft-foreground",
 };
 
 interface MembersTableProps {

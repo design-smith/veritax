@@ -57,7 +57,7 @@ export function BreakGlassDialog({ open, onClose, onConfirm }: BreakGlassDialogP
     <Dialog open={open} onOpenChange={(o) => !o && handleClose()}>
       <DialogContent className="max-w-md">
         <DialogHeader>
-          <DialogTitle className="flex items-center gap-2 text-destructive">
+          <DialogTitle className="flex items-center gap-2 text-danger-soft-foreground">
             <ShieldAlert className="h-5 w-5" />
             Break-glass initiation
           </DialogTitle>
@@ -65,11 +65,11 @@ export function BreakGlassDialog({ open, onClose, onConfirm }: BreakGlassDialogP
 
         {step === "done" ? (
           <div className="space-y-4 py-2">
-            <div className="flex items-center gap-3 rounded-lg border border-green-300 bg-green-50 p-4 dark:border-green-700 dark:bg-green-950">
-              <CheckCircle className="h-5 w-5 text-green-600 shrink-0" />
+            <div className="flex items-center gap-3 rounded-lg border border-success/25 bg-success-soft p-4 dark:border-success/30 dark:bg-success-soft">
+              <CheckCircle className="h-5 w-5 text-success-soft-foreground shrink-0" />
               <div>
-                <p className="text-sm font-semibold text-green-800 dark:text-green-200">Break-glass initiated</p>
-                <p className="text-xs text-green-700 dark:text-green-300 mt-0.5">
+                <p className="text-sm font-semibold text-success-soft-foreground dark:text-success-soft-foreground">Break-glass initiated</p>
+                <p className="text-xs text-success-soft-foreground dark:text-success-soft-foreground mt-0.5">
                   Auto-review ticket created: <strong>{ticketId}</strong>
                 </p>
               </div>

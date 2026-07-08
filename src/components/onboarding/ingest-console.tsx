@@ -1,6 +1,6 @@
 "use client";
 
-import { AlertTriangle, FileText, RefreshCw, SkipForward, Tag, X } from "lucide-react";
+import { AlertTriangle, FileText, RefreshCw, SkipForward, Tag } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -41,11 +41,11 @@ interface IngestConsoleProps {
 }
 
 const TYPE_COLORS: Record<DocType, string> = {
-  "local-file": "border-blue-300 bg-blue-50 text-blue-700",
-  "master-file": "border-purple-300 bg-purple-50 text-purple-700",
-  ica: "border-green-300 bg-green-50 text-green-700",
-  benchmark: "border-amber-300 bg-amber-50 text-amber-700",
-  memo: "border-slate-300 bg-slate-50 text-slate-700",
+  "local-file": "border-transparent bg-info-soft text-info-soft-foreground",
+  "master-file": "border-transparent bg-discovery-soft text-discovery-soft-foreground",
+  ica: "border-transparent bg-success-soft text-success-soft-foreground",
+  benchmark: "border-transparent bg-warning-soft text-warning-soft-foreground",
+  memo: "border-border bg-surface-secondary text-muted-foreground",
   other: "border-border text-muted-foreground",
 };
 
@@ -129,7 +129,7 @@ export function IngestConsole({
                 {problemItems.map((item) => (
                   <div key={item.id} className="rounded-md border border-border bg-card p-2 space-y-1.5">
                     <div className="flex items-start gap-2">
-                      <AlertTriangle className="h-3.5 w-3.5 shrink-0 text-amber-600 mt-0.5" />
+                      <AlertTriangle className="h-3.5 w-3.5 shrink-0 text-warning-soft-foreground mt-0.5" />
                       <div className="flex-1 min-w-0">
                         <p className="text-xs font-medium truncate">{item.name}</p>
                         <Badge variant="outline" className="text-[10px] mt-0.5">{item.issue}</Badge>

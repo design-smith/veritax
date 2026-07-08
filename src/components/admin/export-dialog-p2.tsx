@@ -14,7 +14,6 @@ import {
 import { Label } from "@/components/ui/label";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { Separator } from "@/components/ui/separator";
-import { cn } from "@/lib/utils";
 
 type ArtifactClass = "record" | "communication";
 type DestinationId = "download" | "sharepoint" | "email";
@@ -94,9 +93,9 @@ export function ExportDialogP2({
 
           {/* DRAFT watermark notice */}
           {!isSigned && (
-            <Alert className="border-amber-300 bg-amber-50 dark:border-amber-700 dark:bg-amber-950">
-              <Shield className="h-4 w-4 text-amber-600" />
-              <AlertDescription className="text-amber-900 dark:text-amber-100">
+            <Alert className="border-warning/25 bg-warning-soft dark:border-warning/30 dark:bg-warning-soft">
+              <Shield className="h-4 w-4 text-warning-soft-foreground" />
+              <AlertDescription className="text-warning-soft-foreground dark:text-warning-soft-foreground">
                 <strong>DRAFT — not for reliance</strong> watermark will be applied.
               </AlertDescription>
             </Alert>
@@ -115,7 +114,7 @@ export function ExportDialogP2({
                 </code>
                 <Button size="sm" variant="outline" className="h-6 gap-1 px-2 text-[10px] shrink-0"
                   aria-label="Copy hash" onClick={copyHash}>
-                  {hashCopied ? <Check className="h-3 w-3 text-green-600" /> : <Copy className="h-3 w-3" />}
+                  {hashCopied ? <Check className="h-3 w-3 text-success-soft-foreground" /> : <Copy className="h-3 w-3" />}
                   {hashCopied ? "Copied" : "Copy hash"}
                 </Button>
               </div>

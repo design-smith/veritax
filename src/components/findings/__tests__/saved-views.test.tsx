@@ -1,6 +1,10 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { afterEach, describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import {
+  clearRecordedFrontendTelemetryEvents,
+  getRecordedFrontendTelemetryEvents,
+} from "@/lib/telemetry/product-telemetry";
 import { SavedViewsBar, useSavedViews } from "../saved-views";
 
 // Stub localStorage
@@ -23,6 +27,9 @@ vi.mock("next/navigation", () => ({
 
 describe("SavedViewsBar", () => {
   beforeEach(() => localStorageMock.clear());
+  afterEach(() => {
+    clearRecordedFrontendTelemetryEvents();
+  });
 
   it("renders the default Open view as active", () => {
     render(
@@ -86,5 +93,31 @@ describe("SavedViewsBar", () => {
     expect(onSaveView).toHaveBeenCalledWith(
       expect.objectContaining({ label: "My custom view" })
     );
+  });
+
+  it("records saved-view adoption telemetry without the view label", async () => {
+    const savedViews: unknown[] = [];
+    render(
+      <SavedViewsBar
+        currentViewId="open"
+        views={[{ id: "open", label: "Open", filters: { status: "open", severity: "high" } }]}
+        onSwitchView={() => undefined}
+        onSaveView={(view) => savedViews.push(view)}
+      />
+    );
+
+    await userEvent.click(screen.getByRole("button", { name: /save view/i }));
+    await userEvent.type(screen.getByPlaceholderText(/view name/i), "High-risk open findings");
+    await userEvent.click(screen.getByRole("button", { name: /^save$/i }));
+
+    expect(savedViews).toHaveLength(1);
+    expect(getRecordedFrontendTelemetryEvents()).toMatchObject([
+      {
+        name: "adoption.saved_view_created",
+        surface: "findings",
+        metadata: { filterCount: 2 },
+      },
+    ]);
+    expect(JSON.stringify(getRecordedFrontendTelemetryEvents())).not.toContain("High-risk open findings");
   });
 });

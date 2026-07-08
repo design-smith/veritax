@@ -1,10 +1,68 @@
 "use client";
 
+import type * as React from "react";
 import { AlertTriangle, FileX, Lock, RefreshCw, ServerOff } from "lucide-react";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { cn } from "@/lib/utils";
+
+export type SurfaceState =
+  | { kind: "empty"; heading: string; description: string; action?: React.ReactNode; className?: string }
+  | { kind: "loading"; rows?: number; className?: string }
+  | { kind: "degraded"; affectedSources: string[]; className?: string }
+  | {
+      kind: "denied";
+      tierName: string;
+      reason: string;
+      onRequestAccess?: () => void;
+      className?: string;
+    }
+  | { kind: "error"; incidentId?: string; onRetry?: () => void; className?: string };
+
+interface SurfaceStateViewProps {
+  state: SurfaceState;
+  children?: React.ReactNode;
+}
+
+export function SurfaceStateView({ state, children }: SurfaceStateViewProps) {
+  switch (state.kind) {
+    case "empty":
+      return (
+        <EmptyState
+          heading={state.heading}
+          description={state.description}
+          action={state.action}
+          className={state.className}
+        />
+      );
+    case "loading":
+      return <LoadingState rows={state.rows} className={state.className} />;
+    case "degraded":
+      return (
+        <DegradedState affectedSources={state.affectedSources} className={state.className}>
+          {children}
+        </DegradedState>
+      );
+    case "denied":
+      return (
+        <DeniedState
+          tierName={state.tierName}
+          reason={state.reason}
+          onRequestAccess={state.onRequestAccess}
+          className={state.className}
+        />
+      );
+    case "error":
+      return (
+        <ErrorState
+          incidentId={state.incidentId}
+          onRetry={state.onRetry}
+          className={state.className}
+        />
+      );
+  }
+}
 
 // ── EmptyState ───────────────────────────────────────────────────────────────
 
@@ -117,8 +175,8 @@ interface ErrorStateProps {
 export function ErrorState({ incidentId, onRetry, className }: ErrorStateProps) {
   return (
     <div className={cn("flex flex-col items-center justify-center gap-4 py-24 text-center", className)}>
-      <div className="flex h-14 w-14 items-center justify-center rounded-full bg-destructive/10">
-        <AlertTriangle className="h-7 w-7 text-destructive" />
+      <div className="flex h-14 w-14 items-center justify-center rounded-full bg-danger/[0.10]">
+        <AlertTriangle className="h-7 w-7 text-danger-soft-foreground" />
       </div>
       <div className="space-y-1">
         <p className="text-base font-medium">Something went wrong</p>

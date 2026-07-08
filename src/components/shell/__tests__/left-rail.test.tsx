@@ -20,6 +20,33 @@ function Wrapper({ role = "manager", children }: { role?: "vp" | "manager" | "an
 }
 
 describe("LeftRail", () => {
+  it("renders the PRD shell order with Documents and queue badge slots", () => {
+    render(<LeftRail currentPath="/documents" badges={{ queue: 4 }} />, {
+      wrapper: ({ children }) => <Wrapper>{children}</Wrapper>,
+    });
+
+    const nav = screen.getByRole("navigation", { name: "Primary" });
+    const labels = screen
+      .getAllByRole("link")
+      .map((link) => link.textContent?.replace(/\d+/g, "").trim())
+      .filter(Boolean);
+
+    expect(labels).toEqual([
+      "Briefing",
+      "Graph",
+      "Findings",
+      "Documents",
+      "Monitor",
+      "Calendar",
+      "Library",
+      "Commitments",
+      "Runs",
+      "Connectors",
+    ]);
+    expect(screen.getByRole("link", { name: /documents/i })).toHaveAttribute("aria-current", "page");
+    expect(nav).toHaveTextContent("4");
+  });
+
   it("renders all core nav items in fixed order", () => {
     render(<LeftRail />, { wrapper: ({ children }) => <Wrapper>{children}</Wrapper> });
 

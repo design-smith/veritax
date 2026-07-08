@@ -13,9 +13,9 @@ export interface DocumentMention {
 }
 
 const TYPE_STYLES: Record<MentionObjectType, string> = {
-  finding: "border-red-200 bg-red-50 text-red-700",
-  run: "border-blue-200 bg-blue-50 text-blue-700",
-  commitment: "border-amber-200 bg-amber-50 text-amber-700",
+  finding: "border-transparent bg-danger-soft text-danger-soft-foreground",
+  run: "border-transparent bg-info-soft text-info-soft-foreground",
+  commitment: "border-transparent bg-warning-soft text-warning-soft-foreground",
   document: "border-border text-muted-foreground",
 };
 

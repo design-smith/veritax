@@ -9,9 +9,9 @@ import { cn } from "@/lib/utils";
 type EffortClass = "low" | "medium" | "high" | "requires-external";
 
 const EFFORT_COLORS: Record<string, string> = {
-  low: "border-green-300 bg-green-50 text-green-700",
-  medium: "border-amber-300 bg-amber-50 text-amber-700",
-  high: "border-red-300 bg-red-50 text-red-700",
+  low: "border-transparent bg-success-soft text-success-soft-foreground",
+  medium: "border-transparent bg-warning-soft text-warning-soft-foreground",
+  high: "border-transparent bg-danger-soft text-danger-soft-foreground",
 };
 
 export interface RemediationPath {

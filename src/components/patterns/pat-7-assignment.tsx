@@ -10,6 +10,7 @@ import { Separator } from "@/components/ui/separator";
 import {
   Sheet,
   SheetContent,
+  SheetDescription,
   SheetFooter,
   SheetHeader,
   SheetTitle,
@@ -49,12 +50,28 @@ export function AssignControl({
   const [selectedUserId, setSelectedUserId] = useState(currentAssigneeId ?? "");
   const [dueDate, setDueDate] = useState("");
   const [note, setNote] = useState("");
+  const [pendingConfirmation, setPendingConfirmation] = useState<"assign" | "unassign" | null>(null);
 
   const selectedUser = users.find((u) => u.id === selectedUserId);
 
   function handleAssign() {
     if (!selectedUserId) return;
+    setPendingConfirmation("assign");
+  }
+
+  function confirmAssign() {
+    if (!selectedUserId) return;
     onAssign({ userId: selectedUserId, dueDate: dueDate || undefined, note: note || undefined });
+    setPendingConfirmation(null);
+  }
+
+  function handleUnassign() {
+    setPendingConfirmation("unassign");
+  }
+
+  function confirmUnassign() {
+    onUnassign?.();
+    setPendingConfirmation(null);
   }
 
   return (
@@ -62,6 +79,9 @@ export function AssignControl({
       <SheetContent side="right" className="flex w-96 flex-col">
         <SheetHeader>
           <SheetTitle>Assign</SheetTitle>
+          <SheetDescription>
+            Assign work and confirm the resulting access change.
+          </SheetDescription>
         </SheetHeader>
 
         <div className="flex-1 space-y-4 overflow-y-auto py-2">
@@ -119,16 +139,63 @@ export function AssignControl({
             <span className="font-medium text-foreground">{objectScope}</span>{" "}
             (read), proposal rights.
           </div>
+
+          {pendingConfirmation === "assign" && (
+            <div className="rounded-md border border-primary/25 bg-primary/5 p-2.5 text-xs text-muted-foreground">
+              <p className="font-medium text-foreground">Confirm access grant</p>
+              <p>
+                Assigning this item grants{" "}
+                <span className="font-medium text-foreground">
+                  {selectedUser?.name ?? "the selected assignee"}
+                </span>{" "}
+                read access and proposal rights for{" "}
+                <span className="font-medium text-foreground">{objectScope}</span>.
+              </p>
+            </div>
+          )}
+
+          {pendingConfirmation === "unassign" && (
+            <div className="rounded-md border border-destructive/25 bg-destructive/5 p-2.5 text-xs text-muted-foreground">
+              <p className="font-medium text-foreground">Confirm access revoke</p>
+              <p>
+                Unassigning revokes delegated access to{" "}
+                <span className="font-medium text-foreground">{objectScope}</span>{" "}
+                after confirmation.
+              </p>
+            </div>
+          )}
         </div>
 
         <SheetFooter className="flex-col gap-2 sm:flex-col">
-          <Button onClick={handleAssign} disabled={!selectedUserId} className="w-full">
-            Assign
-          </Button>
-          {onUnassign && currentAssigneeId && (
-            <Button variant="outline" onClick={onUnassign} className="w-full">
-              Unassign
-            </Button>
+          {pendingConfirmation === "assign" ? (
+            <>
+              <Button onClick={confirmAssign} disabled={!selectedUserId} className="w-full">
+                Confirm assignment
+              </Button>
+              <Button variant="outline" onClick={() => setPendingConfirmation(null)} className="w-full">
+                Back
+              </Button>
+            </>
+          ) : pendingConfirmation === "unassign" ? (
+            <>
+              <Button variant="destructive" onClick={confirmUnassign} className="w-full">
+                Confirm unassign
+              </Button>
+              <Button variant="outline" onClick={() => setPendingConfirmation(null)} className="w-full">
+                Back
+              </Button>
+            </>
+          ) : (
+            <>
+              <Button onClick={handleAssign} disabled={!selectedUserId} className="w-full">
+                Assign
+              </Button>
+              {onUnassign && currentAssigneeId && (
+                <Button variant="outline" onClick={handleUnassign} className="w-full">
+                  Unassign
+                </Button>
+              )}
+            </>
           )}
         </SheetFooter>
       </SheetContent>

@@ -1,21 +1,13 @@
 "use client";
 
-import Link from "next/link";
-import { Copy, ExternalLink, X } from "lucide-react";
+import { X } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Separator } from "@/components/ui/separator";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { CopyLinkButton } from "@/components/patterns/copy-link-button";
 import { EmptyState } from "@/components/surface-states";
 import type { Entity } from "@/lib/mock/types";
 import { cn } from "@/lib/utils";
-
-const ROLE_LABELS: Record<Entity["role"], string> = {
-  principal: "Principal",
-  "limited-risk": "Limited-risk",
-  commissionnaire: "Commissionnaire",
-  "services-hub": "Services hub",
-};
 
 const TAB_NAMES = ["Overview", "Financials", "Substance", "Pillar 2", "Agreements", "Findings", "Filings", "Audit history"] as const;
 
@@ -31,7 +23,7 @@ export function EntityInspector({ entity, onClose, className }: EntityInspectorP
       {/* Header */}
       <div className="flex items-start justify-between gap-2 border-b border-border px-4 py-3">
         <div className="space-y-1 min-w-0">
-          <p className="text-base font-semibold leading-tight truncate">{entity.name}</p>
+          <h2 className="truncate text-base font-semibold leading-tight">{entity.name}</h2>
           <div className="flex flex-wrap items-center gap-1.5">
             <Badge variant="secondary" className="text-xs">
               {entity.role}
@@ -43,22 +35,7 @@ export function EntityInspector({ entity, onClose, className }: EntityInspectorP
           </div>
         </div>
         <div className="flex shrink-0 items-center gap-1">
-          <Button
-            size="icon"
-            variant="ghost"
-            className="h-7 w-7"
-            aria-label="Copy link"
-            onClick={() => navigator.clipboard?.writeText(`/graph/entities/${entity.id}`)}
-          >
-            <Copy className="h-3.5 w-3.5" />
-          </Button>
-          <Link
-            href={`/graph/entities/${entity.id}`}
-            aria-label="Open full page"
-            className="inline-flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground transition-colors"
-          >
-            <ExternalLink className="h-3.5 w-3.5" />
-          </Link>
+          <CopyLinkButton target={{ type: "entity", id: entity.id }} className="h-7 w-7" />
           <Button size="icon" variant="ghost" className="h-7 w-7" aria-label="Close" onClick={onClose}>
             <X className="h-3.5 w-3.5" />
           </Button>

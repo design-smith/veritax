@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { FYLensProvider, useFYLens, PastFYBanner } from "../fy-lens-context";
+import { FYLensProvider, useFYLens, PastFYBanner, SealedMutationGuard } from "../fy-lens-context";
 
 function LensDisplay() {
   const { fy, isPast } = useFYLens();
@@ -19,6 +19,16 @@ function LensChanger() {
     <div>
       <span data-testid="fy">{fy}</span>
       <button onClick={() => setFY("FY2023")}>Go to FY2023</button>
+    </div>
+  );
+}
+
+function PeriodChanger() {
+  const { period, setPeriod } = useFYLens();
+  return (
+    <div>
+      <span data-testid="period">{period ?? "Full year"}</span>
+      <button onClick={() => setPeriod("Q2")}>Set Q2</button>
     </div>
   );
 }
@@ -45,6 +55,18 @@ describe("useFYLens", () => {
     await userEvent.click(screen.getByRole("button", { name: "Go to FY2023" }));
     expect(screen.getAllByTestId("fy")[0]).toHaveTextContent("FY2023");
     expect(screen.getByTestId("is-past")).toHaveTextContent("true");
+  });
+
+  it("stores the selected fiscal period in the global FY Lens", async () => {
+    render(
+      <FYLensProvider>
+        <PeriodChanger />
+      </FYLensProvider>
+    );
+
+    expect(screen.getByTestId("period")).toHaveTextContent("Full year");
+    await userEvent.click(screen.getByRole("button", { name: "Set Q2" }));
+    expect(screen.getByTestId("period")).toHaveTextContent("Q2");
   });
 });
 
@@ -82,5 +104,27 @@ describe("PastFYBanner", () => {
     );
     await userEvent.click(screen.getByRole("button", { name: "Go to FY2023" }));
     expect(screen.getByRole("alert")).toHaveTextContent(/sealed/i);
+  });
+});
+
+describe("SealedMutationGuard", () => {
+  it("allows actions in the current FY and disables them in a sealed FY", async () => {
+    const user = userEvent.setup();
+
+    render(
+      <FYLensProvider>
+        <LensChanger />
+        <SealedMutationGuard>
+          <button type="button">Approve gate</button>
+        </SealedMutationGuard>
+      </FYLensProvider>,
+    );
+
+    expect(screen.getByRole("button", { name: "Approve gate" })).toBeEnabled();
+
+    await user.click(screen.getByRole("button", { name: "Go to FY2023" }));
+
+    expect(screen.getByRole("button", { name: "Approve gate" })).toBeDisabled();
+    expect(screen.getByTitle("FY2023 is sealed. Open the current FY to act.")).toBeInTheDocument();
   });
 });

@@ -16,17 +16,17 @@ export default function Navigation() {
             key={navigation.name}
             href={navigation.href}
             className={cn(
-              "flex items-center rounded-md px-2 py-1.5 hover:bg-slate-200 dark:hover:bg-slate-800",
+              "flex items-center rounded-md px-2 py-1.5 hover:bg-surface-secondary dark:hover:bg-surface-secondary",
               pathname === navigation.href
-                ? "bg-slate-200 dark:bg-slate-800"
+                ? "bg-surface-secondary dark:bg-surface-secondary"
                 : "bg-transparent",
             )}
           >
             <Icon
               size={16}
-              className="mr-2 text-slate-800 dark:text-slate-200"
+              className="mr-2 text-muted-foreground dark:text-muted-foreground"
             />
-            <span className="text-sm text-slate-700 dark:text-slate-300">
+            <span className="text-sm text-muted-foreground dark:text-muted-foreground">
               {navigation.name}
             </span>
           </Link>

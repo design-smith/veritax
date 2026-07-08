@@ -5,7 +5,7 @@ import { cva, type VariantProps } from "class-variance-authority"
 import { cn } from "@/lib/utils"
 
 const buttonVariants = cva(
-  "inline-flex shrink-0 items-center justify-center whitespace-nowrap rounded-md text-sm font-medium outline-none transition-[background-color,border-color,color,box-shadow,opacity] duration-150 focus-visible:ring-2 focus-visible:ring-ring/35 disabled:pointer-events-none disabled:opacity-45 [&_svg]:pointer-events-none [&_svg:not([class*='size-'])]:size-4 [&_svg]:shrink-0",
+  "inline-flex shrink-0 items-center justify-center whitespace-nowrap rounded-md text-sm font-medium outline-none transition-[background-color,border-color,color,box-shadow,opacity,transform] duration-150 focus-visible:ring-2 focus-visible:ring-ring/35 disabled:pointer-events-none disabled:opacity-45 active:scale-[0.985] [&_svg]:pointer-events-none [&_svg:not([class*='size-'])]:size-4 [&_svg]:shrink-0",
   {
     variants: {
       variant: {
@@ -16,7 +16,7 @@ const buttonVariants = cva(
           "border border-border-strong bg-surface text-foreground hover:bg-accent hover:text-accent-foreground active:bg-secondary",
         secondary:
           "bg-secondary text-secondary-foreground hover:bg-secondary/75 active:bg-secondary/90",
-        soft: "bg-primary/8 text-foreground hover:bg-primary/12 active:bg-primary/16",
+        soft: "bg-primary/[0.08] text-foreground hover:bg-primary/[0.12] active:bg-primary/[0.16]",
         ghost: "text-muted-foreground hover:bg-accent hover:text-foreground active:bg-secondary",
         link: "h-auto gap-1 rounded-sm px-0 text-foreground underline-offset-4 hover:underline focus-visible:ring-offset-2",
       },

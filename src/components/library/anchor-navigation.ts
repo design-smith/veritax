@@ -11,8 +11,9 @@ export interface AnchorNavigationState {
   jumpTo: (anchorId: string) => void;
 }
 
-export function useAnchorNavigation(anchors: string[]): AnchorNavigationState {
-  const [index, setIndex] = useState(0);
+export function useAnchorNavigation(anchors: string[], initialAnchorId?: string): AnchorNavigationState {
+  const initialIndex = initialAnchorId ? anchors.indexOf(initialAnchorId) : 0;
+  const [index, setIndex] = useState(initialIndex >= 0 ? initialIndex : 0);
 
   if (anchors.length === 0) {
     return {

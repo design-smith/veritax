@@ -7,7 +7,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Separator } from "@/components/ui/separator";
-import type { AdvisorRequest, DataRequestField } from "./advisor-requests-list";
+import type { AdvisorRequest } from "./advisor-requests-list";
 import { cn } from "@/lib/utils";
 
 interface SubmitPayload {
@@ -60,7 +60,7 @@ export function AdvisorRequestForm({ request, onSubmit, onUpload, className }: A
           <div key={field.id} className="space-y-1.5">
             <Label htmlFor={`field-${field.id}`}>
               {field.label}
-              {field.required && <span className="ml-1 text-destructive">*</span>}
+              {field.required && <span className="ml-1 text-danger-soft-foreground">*</span>}
             </Label>
             {field.type === "textarea" ? (
               <Textarea

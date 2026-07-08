@@ -46,9 +46,9 @@ export function SensitivityAccessManager({
   return (
     <div className={cn("space-y-4", className)}>
       <div className="flex items-center gap-2">
-        <Lock className="h-4 w-4 text-amber-600" />
+        <Lock className="h-4 w-4 text-warning-soft-foreground" />
         <p className="text-sm font-medium capitalize">{tier}-tier named access</p>
-        <Badge variant="outline" className="text-[10px] border-amber-300 bg-amber-50 text-amber-700 capitalize">
+        <Badge variant="outline" className="text-[10px] border-transparent bg-warning-soft text-warning-soft-foreground capitalize">
           {tier}
         </Badge>
       </div>
@@ -69,7 +69,7 @@ export function SensitivityAccessManager({
             <Button
               size="sm"
               variant="ghost"
-              className="h-7 gap-1 px-2 text-xs text-muted-foreground hover:text-destructive"
+              className="h-7 gap-1 px-2 text-xs text-muted-foreground hover:text-danger-soft-foreground"
               aria-label={`Remove ${user.name}`}
               onClick={() => onRemove(user.id)}
             >

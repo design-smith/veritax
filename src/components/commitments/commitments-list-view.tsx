@@ -12,11 +12,11 @@ import { cn } from "@/lib/utils";
 type FilterMode = "all" | "mine" | "by-me" | "team";
 
 const PLAN_STATE_COLORS: Record<Commitment["planState"], string> = {
-  pending:   "border-amber-300 bg-amber-50 text-amber-700",
-  approved:  "border-green-300 bg-green-50 text-green-700",
+  pending:   "border-transparent bg-warning-soft text-warning-soft-foreground",
+  approved:  "border-transparent bg-success-soft text-success-soft-foreground",
   dismissed: "border-border text-muted-foreground",
-  completed: "border-green-300 bg-green-50 text-green-700",
-  external:  "border-blue-300 bg-blue-50 text-blue-700",
+  completed: "border-transparent bg-success-soft text-success-soft-foreground",
+  external:  "border-transparent bg-info-soft text-info-soft-foreground",
 };
 
 const SOURCE_ICONS = { meeting: MessageSquare, email: Mail };

@@ -57,9 +57,9 @@ const TIER_CONSEQUENCE: Record<InstructionTier, string> = {
 };
 
 const TIER_COLORS: Record<InstructionTier, string> = {
-  style: "border-green-300 bg-green-50 text-green-700 dark:border-green-700 dark:bg-green-950 dark:text-green-300",
-  run: "border-blue-300 bg-blue-50 text-blue-700 dark:border-blue-700 dark:bg-blue-950 dark:text-blue-300",
-  methodology: "border-amber-300 bg-amber-50 text-amber-700 dark:border-amber-700 dark:bg-amber-950 dark:text-amber-300",
+  style: "border-transparent bg-success-soft text-success-soft-foreground",
+  run: "border-transparent bg-info-soft text-info-soft-foreground",
+  methodology: "border-transparent bg-warning-soft text-warning-soft-foreground",
 };
 
 export function InstructionInput({
@@ -102,12 +102,21 @@ export function InstructionInput({
       </div>
 
       {conflict && (
-        <div className="flex items-start gap-1.5 rounded-md border border-amber-300 bg-amber-50 p-2 text-xs text-amber-800 dark:border-amber-700 dark:bg-amber-950 dark:text-amber-200">
-          <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
-          <span>
-            <span className="font-medium">Conflict detected</span> — existing instruction:{" "}
-            <em>&quot;{conflict}&quot;</em>
-          </span>
+        <div className="space-y-2 rounded-md border border-warning/25 bg-warning-soft p-2 text-xs text-warning-soft-foreground dark:border-warning/30 dark:bg-warning-soft dark:text-warning-soft-foreground">
+          <div className="flex items-start gap-1.5">
+            <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+            <span>
+              <span className="font-medium">Conflict detected</span> - existing instruction:{" "}
+              <em>&quot;{conflict}&quot;</em>
+            </span>
+          </div>
+          <div className="rounded border border-warning/25 bg-background/60 p-2 text-muted-foreground">
+            <p className="font-medium text-foreground">Precedence preview</p>
+            <p>
+              Inline instruction will be reviewed against standing instruction
+              before this {tier} tier change is applied.
+            </p>
+          </div>
         </div>
       )}
 

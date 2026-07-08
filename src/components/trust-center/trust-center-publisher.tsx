@@ -60,8 +60,8 @@ export function TrustCenterPublisher({
                   className={cn(
                     "text-[10px]",
                     status === "published"
-                      ? "border-green-300 bg-green-50 text-green-700"
-                      : "border-amber-300 bg-amber-50 text-amber-700",
+                      ? "border-transparent bg-success-soft text-success-soft-foreground"
+                      : "border-transparent bg-warning-soft text-warning-soft-foreground",
                   )}
                 >
                   {status}

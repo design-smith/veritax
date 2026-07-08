@@ -54,4 +54,20 @@ describe("InstructionInput", () => {
     await userEvent.type(screen.getByRole("textbox"), "Use bullet points");
     expect(await screen.findByText(/conflict/i)).toBeInTheDocument();
   });
+
+  it("shows the precedence preview for a conflicting instruction", async () => {
+    render(
+      <InstructionInput
+        onSubmit={(payload) => {
+          document.body.dataset.lastInstruction = `${payload.tier}:${payload.text}`;
+        }}
+        existingInstructions={["Standing instruction: always use bullet points for lists"]}
+      />
+    );
+
+    await userEvent.type(screen.getByRole("textbox"), "Use bullet points for the record");
+
+    expect(await screen.findByText(/precedence preview/i)).toBeInTheDocument();
+    expect(screen.getByText(/inline instruction will be reviewed against standing instruction/i)).toBeInTheDocument();
+  });
 });

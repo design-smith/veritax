@@ -1,6 +1,10 @@
-import { describe, it, expect, vi } from "vitest";
+import { afterEach, describe, it, expect, vi } from "vitest";
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import {
+  clearRecordedFrontendTelemetryEvents,
+  getRecordedFrontendTelemetryEvents,
+} from "@/lib/telemetry/product-telemetry";
 import { CommitmentsLane } from "../commitments-lane";
 import type { Commitment } from "@/lib/mock/types";
 
@@ -37,6 +41,10 @@ const commitments: Commitment[] = [
 ];
 
 describe("CommitmentsLane", () => {
+  afterEach(() => {
+    clearRecordedFrontendTelemetryEvents();
+  });
+
   it("renders all commitments with text", () => {
     render(<CommitmentsLane commitments={commitments} onApproveRun={vi.fn()} onDismiss={vi.fn()} />);
     expect(screen.getByText(/Refresh benchmark study/)).toBeInTheDocument();
@@ -66,6 +74,28 @@ describe("CommitmentsLane", () => {
     render(<CommitmentsLane commitments={commitments} onApproveRun={onApproveRun} onDismiss={vi.fn()} />);
     await userEvent.click(screen.getByRole("button", { name: /approve & run/i }));
     expect(onApproveRun).toHaveBeenCalledWith("cm3");
+  });
+
+  it("records commitment approved-plan telemetry when Approve & run is clicked", async () => {
+    const approvedRuns: string[] = [];
+    render(
+      <CommitmentsLane
+        commitments={commitments}
+        onApproveRun={(commitmentId) => approvedRuns.push(commitmentId)}
+        onDismiss={() => undefined}
+      />,
+    );
+
+    await userEvent.click(screen.getByRole("button", { name: /approve & run/i }));
+
+    expect(approvedRuns).toEqual(["cm3"]);
+    expect(getRecordedFrontendTelemetryEvents()).toMatchObject([
+      {
+        name: "adoption.commitment_plan_approved",
+        surface: "briefing",
+        objectRef: { objectType: "commitment", objectId: "cm3" },
+      },
+    ]);
   });
 
   it("calls onDismiss with commitment id when Dismiss clicked", async () => {

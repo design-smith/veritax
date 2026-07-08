@@ -1,58 +1,59 @@
-import { describe, it, expect, vi } from "vitest";
+import { useState } from "react";
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { describe, expect, it } from "vitest";
+
 import { RevealMoment } from "../reveal-moment";
 
+function RevealHarness({ isAdmin = false }: { isAdmin?: boolean }) {
+  const [unlockedExternally, setUnlockedExternally] = useState(false);
+  const [replayed, setReplayed] = useState(false);
+
+  return (
+    <>
+      <RevealMoment
+        findingCount={15}
+        exposureRollup="$4.2M"
+        isAdmin={isAdmin}
+        onUnlock={() => setUnlockedExternally(true)}
+        onReplay={() => setReplayed(true)}
+      />
+      <p>Record unlocked: {unlockedExternally ? "yes" : "no"}</p>
+      <p>Replay requested: {replayed ? "yes" : "no"}</p>
+    </>
+  );
+}
+
 describe("RevealMoment", () => {
-  it("renders the locked card with blurred finding count", () => {
-    render(<RevealMoment findingCount={15} exposureRollup="$4.2M" onUnlock={vi.fn()} />);
+  it("shows the locked examination card with findings, exposure, and unlock control", () => {
+    render(<RevealHarness />);
+
     expect(screen.getByTestId("reveal-locked-card")).toBeInTheDocument();
     expect(screen.getByText(/examination complete/i)).toBeInTheDocument();
-  });
-
-  it("shows finding count on the locked card", () => {
-    render(<RevealMoment findingCount={15} exposureRollup="$4.2M" onUnlock={vi.fn()} />);
     expect(screen.getByText(/15 findings/i)).toBeInTheDocument();
-  });
-
-  it("shows exposure rollup on the locked card", () => {
-    render(<RevealMoment findingCount={15} exposureRollup="$4.2M" onUnlock={vi.fn()} />);
     expect(screen.getByText(/\$4\.2M/)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /unlock results/i })).toBeInTheDocument();
   });
 
-  it("renders the Unlock button", () => {
-    render(<RevealMoment findingCount={15} exposureRollup="$4.2M" onUnlock={vi.fn()} />);
-    expect(screen.getByRole("button", { name: /unlock/i })).toBeInTheDocument();
-  });
+  it("unlocks the record and reveals the seeded findings state", async () => {
+    const user = userEvent.setup();
+    render(<RevealHarness />);
 
-  it("calls onUnlock when the Unlock button is clicked", async () => {
-    const onUnlock = vi.fn();
-    render(<RevealMoment findingCount={15} exposureRollup="$4.2M" onUnlock={onUnlock} />);
-    await userEvent.click(screen.getByRole("button", { name: /unlock/i }));
-    expect(onUnlock).toHaveBeenCalledOnce();
-  });
+    await user.click(screen.getByRole("button", { name: /unlock results/i }));
 
-  it("shows unlocked state after unlock with findings revealed", async () => {
-    render(<RevealMoment findingCount={15} exposureRollup="$4.2M" onUnlock={vi.fn()} />);
-    await userEvent.click(screen.getByRole("button", { name: /unlock/i }));
+    expect(screen.getByText("Record unlocked: yes")).toBeInTheDocument();
     expect(screen.getByTestId("reveal-unlocked")).toBeInTheDocument();
     expect(screen.getByText(/15 findings/i)).toBeInTheDocument();
   });
 
-  it("shows a Replay button when isAdmin is true", () => {
-    render(<RevealMoment findingCount={15} exposureRollup="$4.2M" onUnlock={vi.fn()} isAdmin />);
-    expect(screen.getByRole("button", { name: /replay/i })).toBeInTheDocument();
-  });
+  it("lets an admin replay the journey back to the locked state", async () => {
+    const user = userEvent.setup();
+    render(<RevealHarness isAdmin />);
 
-  it("calls onReplay when Replay clicked and resets to locked state", async () => {
-    const onReplay = vi.fn();
-    render(<RevealMoment findingCount={15} exposureRollup="$4.2M" onUnlock={vi.fn()} onReplay={onReplay} isAdmin />);
-    // First unlock
-    await userEvent.click(screen.getByRole("button", { name: /unlock/i }));
-    // Then replay
-    await userEvent.click(screen.getByRole("button", { name: /replay/i }));
-    expect(onReplay).toHaveBeenCalledOnce();
-    // Should return to locked state
+    await user.click(screen.getByRole("button", { name: /unlock results/i }));
+    await user.click(screen.getByRole("button", { name: /replay journey/i }));
+
+    expect(screen.getByText("Replay requested: yes")).toBeInTheDocument();
     expect(screen.getByTestId("reveal-locked-card")).toBeInTheDocument();
   });
 });

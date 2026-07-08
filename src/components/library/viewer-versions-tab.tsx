@@ -36,7 +36,7 @@ export function ViewerVersionsTab({ versions, currentVersionId, onSelectVersion 
             <div className="flex items-center gap-2">
               <span className="font-mono text-sm font-medium">v{v.number}</span>
               {v.isExecuted && (
-                <Badge variant="outline" className="text-[10px] border-green-300 bg-green-50 text-green-700">
+                <Badge variant="outline" className="text-[10px] border-transparent bg-success-soft text-success-soft-foreground">
                   executed
                 </Badge>
               )}
@@ -45,7 +45,7 @@ export function ViewerVersionsTab({ versions, currentVersionId, onSelectVersion 
               {format(parseISO(v.createdAt), "d MMM yyyy")} · {v.author}
             </span>
           </div>
-          {v.isExecuted && <CheckCircle className="h-4 w-4 shrink-0 text-green-600 mt-0.5" />}
+          {v.isExecuted && <CheckCircle className="h-4 w-4 shrink-0 text-success-soft-foreground mt-0.5" />}
         </button>
       ))}
     </div>

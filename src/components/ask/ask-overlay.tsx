@@ -14,9 +14,9 @@ const MODE_LABELS: Record<AskMode, string> = {
 
 const MODE_COLORS: Record<AskMode, string> = {
   ask: "border-primary/30 bg-primary/5 text-primary",
-  goto: "border-blue-300 bg-blue-50 text-blue-700",
-  run: "border-green-300 bg-green-50 text-green-700",
-  create: "border-purple-300 bg-purple-50 text-purple-700",
+  goto: "border-transparent bg-info-soft text-info-soft-foreground",
+  run: "border-transparent bg-success-soft text-success-soft-foreground",
+  create: "border-transparent bg-discovery-soft text-discovery-soft-foreground",
 };
 
 interface AskOverlayProps {
@@ -59,10 +59,10 @@ export function AskOverlay({ open, onClose, initialQuery = "", className }: AskO
       onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}
     >
       {/* Backdrop */}
-      <div className="absolute inset-0 bg-black/40" onClick={onClose} />
+      <div className="absolute inset-0 bg-sdk-overlay" onClick={onClose} />
 
       {/* Panel */}
-      <div className="relative z-10 w-full max-w-2xl rounded-xl border border-border bg-background shadow-2xl overflow-hidden">
+      <div className="relative z-10 w-full max-w-2xl rounded-xl border border-border bg-background shadow-elevation-400 overflow-hidden">
         {/* Input row */}
         <div className="flex items-center gap-2 px-4 py-3 border-b border-border">
           <Badge

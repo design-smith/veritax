@@ -24,12 +24,12 @@ const makeObligation = (id: string, daysFromNow: number, status: Obligation["sta
 };
 
 const obligations = [
-  makeObligation("ob1", 40),   // green — >30 days
-  makeObligation("ob2", 20),   // amber — 8–30 days
-  makeObligation("ob3", 5),    // red — ≤7 days
-  makeObligation("ob4", 3),    // red
-  makeObligation("ob5", 12),   // amber
-  makeObligation("ob6", 60),   // green — would be 6th, should be trimmed
+  makeObligation("ob1", 40), // success, more than 30 days
+  makeObligation("ob2", 20), // warning, 8 to 30 days
+  makeObligation("ob3", 5), // danger, 7 days or fewer
+  makeObligation("ob4", 3), // danger
+  makeObligation("ob5", 12), // warning
+  makeObligation("ob6", 60), // success, would be 6th, should be trimmed
 ];
 
 describe("ObligationsStrip", () => {
@@ -41,22 +41,22 @@ describe("ObligationsStrip", () => {
     expect(items[0]).toHaveTextContent("Obligation ob4");
   });
 
-  it("shows a green chip for obligations more than 30 days away", () => {
+  it("shows a success chip for obligations more than 30 days away", () => {
     render(<ObligationsStrip obligations={[makeObligation("ob-green", 40)]} />);
     const chip = screen.getByTestId("day-chip-ob-green");
-    expect(chip).toHaveClass("bg-green-100");
+    expect(chip).toHaveClass("bg-success-soft");
   });
 
-  it("shows an amber chip for obligations 8–30 days away", () => {
+  it("shows a warning chip for obligations 8 to 30 days away", () => {
     render(<ObligationsStrip obligations={[makeObligation("ob-amber", 15)]} />);
     const chip = screen.getByTestId("day-chip-ob-amber");
-    expect(chip).toHaveClass("bg-amber-100");
+    expect(chip).toHaveClass("bg-warning-soft");
   });
 
-  it("shows a red chip for obligations 7 days or fewer away", () => {
+  it("shows a danger chip for obligations 7 days or fewer away", () => {
     render(<ObligationsStrip obligations={[makeObligation("ob-red", 5)]} />);
     const chip = screen.getByTestId("day-chip-ob-red");
-    expect(chip).toHaveClass("bg-red-100");
+    expect(chip).toHaveClass("bg-danger-soft");
   });
 
   it("navigates to /calendar?obligation=[id] on click", async () => {

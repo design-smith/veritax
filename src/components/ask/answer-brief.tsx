@@ -5,6 +5,11 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
 import { CitationChip } from "@/components/patterns/pat-1-citation-chip";
+import {
+  createAskAnswerAcceptedEvent,
+  DEMO_FRONTEND_TELEMETRY_CONTEXT,
+  recordFrontendTelemetryEvent,
+} from "@/lib/telemetry/product-telemetry";
 import { cn } from "@/lib/utils";
 
 const CONFIDENCE_THRESHOLD = 0.85;
@@ -23,6 +28,8 @@ interface AnswerBriefProps {
   answer: string;
   exhibits: AnswerExhibit[];
   confidence: number;
+  answerId?: string;
+  telemetrySurface?: string;
   isRefusal?: boolean;
   onOpenAsView: () => void;
   onExport: () => void;
@@ -36,6 +43,8 @@ export function AnswerBrief({
   answer,
   exhibits,
   confidence,
+  answerId = "ask-answer",
+  telemetrySurface = "ask",
   isRefusal = false,
   onOpenAsView,
   onExport,
@@ -45,6 +54,18 @@ export function AnswerBrief({
 }: AnswerBriefProps) {
   const showEscalate = confidence < CONFIDENCE_THRESHOLD && onEscalate;
 
+  function handleOpenAsView() {
+    recordFrontendTelemetryEvent(
+      createAskAnswerAcceptedEvent({
+        ...DEMO_FRONTEND_TELEMETRY_CONTEXT,
+        surface: telemetrySurface,
+        answerId,
+        confidenceBand: confidenceBandForAnswer(confidence, isRefusal),
+      }),
+    );
+    onOpenAsView();
+  }
+
   return (
     <div className={cn("space-y-4", className)}>
       {/* Question echo */}
@@ -52,7 +73,7 @@ export function AnswerBrief({
 
       {/* Refusal notice */}
       {isRefusal && (
-        <div className="flex items-center gap-2 rounded-md border border-amber-300 bg-amber-50 p-2 text-xs text-amber-800 dark:border-amber-700 dark:bg-amber-950 dark:text-amber-200">
+        <div className="flex items-center gap-2 rounded-md border border-warning/25 bg-warning-soft p-2 text-xs text-warning-soft-foreground dark:border-warning/30 dark:bg-warning-soft dark:text-warning-soft-foreground">
           <AlertTriangle className="h-3.5 w-3.5 shrink-0" />
           <span>No source found — absence-evidence answer</span>
         </div>
@@ -76,6 +97,8 @@ export function AnswerBrief({
                 confidence={ex.confidence}
                 extractorVersion={ex.extractorVersion}
                 snippet={ex.snippet}
+                telemetrySurface={telemetrySurface}
+                telemetryObjectRef={{ objectType: "ask-answer", objectId: answerId }}
               />
             ))}
           </div>
@@ -91,10 +114,10 @@ export function AnswerBrief({
           className={cn(
             "text-xs",
             confidence >= 0.9
-              ? "border-green-300 bg-green-50 text-green-700"
+              ? "border-transparent bg-success-soft text-success-soft-foreground"
               : confidence >= CONFIDENCE_THRESHOLD
-                ? "border-amber-300 bg-amber-50 text-amber-700"
-                : "border-red-300 bg-red-50 text-red-700",
+                ? "border-transparent bg-warning-soft text-warning-soft-foreground"
+                : "border-transparent bg-danger-soft text-danger-soft-foreground",
           )}
         >
           {Math.round(confidence * 100)}% confidence
@@ -103,7 +126,7 @@ export function AnswerBrief({
 
       {/* Actions row */}
       <div className="flex flex-wrap gap-2">
-        <Button size="sm" variant="outline" className="gap-1.5" onClick={onOpenAsView}>
+        <Button size="sm" variant="outline" className="gap-1.5" onClick={handleOpenAsView}>
           <ExternalLink className="h-3.5 w-3.5" />
           Open as view
         </Button>
@@ -119,7 +142,7 @@ export function AnswerBrief({
           <Button
             size="sm"
             variant="outline"
-            className="gap-1.5 text-amber-700 border-amber-300 hover:bg-amber-50"
+            className="gap-1.5 text-warning-soft-foreground border-warning/25 hover:bg-warning-soft"
             onClick={onEscalate}
           >
             <ArrowUpRight className="h-3.5 w-3.5" />
@@ -129,4 +152,11 @@ export function AnswerBrief({
       </div>
     </div>
   );
+}
+
+function confidenceBandForAnswer(confidence: number, isRefusal: boolean) {
+  if (isRefusal) return "refusal";
+  if (confidence >= 0.9) return "high";
+  if (confidence >= CONFIDENCE_THRESHOLD) return "medium";
+  return "low";
 }

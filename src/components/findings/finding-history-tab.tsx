@@ -31,9 +31,9 @@ const GATE_DECISION_VARIANTS: Record<GateDecision, "success" | "destructive" | "
 };
 
 const TIER_COLORS: Record<InstructionTier, string> = {
-  style: "border-green-300 bg-green-50 text-green-700",
-  run: "border-blue-300 bg-blue-50 text-blue-700",
-  methodology: "border-amber-300 bg-amber-50 text-amber-700",
+  style: "border-transparent bg-success-soft text-success-soft-foreground",
+  run: "border-transparent bg-info-soft text-info-soft-foreground",
+  methodology: "border-transparent bg-warning-soft text-warning-soft-foreground",
 };
 
 export function FindingHistoryTab({ events, className }: FindingHistoryTabProps) {
@@ -99,6 +99,12 @@ export function FindingHistoryTab({ events, className }: FindingHistoryTabProps)
                 </div>
                 <p className="italic text-foreground">{event.instructionEcho}</p>
               </div>
+            )}
+
+            {event.reason && (
+              <p className="rounded-md border border-border bg-muted/30 p-2 text-xs text-muted-foreground">
+                Reason: <span className="font-medium text-foreground">{event.reason}</span>
+              </p>
             )}
           </div>
         </li>

@@ -36,11 +36,31 @@ function initials(name: string) {
   return name.split(" ").map((p) => p[0]).join("").toUpperCase().slice(0, 2);
 }
 
-function extractMentions(text: string): string[] {
-  return (text.match(/@\w+/g) ?? []).map((m) => m.slice(1));
+function normalizeMention(value: string) {
+  return value.toLowerCase().replace(/[^a-z0-9]/g, "");
+}
+
+function extractMentions(text: string, users: User[]): string[] {
+  const rawMentions = (text.match(/@[a-zA-Z0-9._-]+/g) ?? []).map((m) => m.slice(1));
+  const resolved = rawMentions.map((mention) => {
+    const normalized = normalizeMention(mention);
+    const user = users.find((candidate) => {
+      const firstName = candidate.name.split(" ")[0] ?? "";
+      return [
+        candidate.id,
+        candidate.email.split("@")[0] ?? "",
+        firstName,
+        candidate.name,
+      ].some((value) => normalizeMention(value) === normalized);
+    });
+    return user?.id ?? mention;
+  });
+
+  return Array.from(new Set(resolved));
 }
 
 export function CommentThread({
+  objectRef,
   comments,
   users,
   onAdd,
@@ -55,12 +75,16 @@ export function CommentThread({
 
   function handlePost() {
     if (!draft.trim()) return;
-    onAdd({ text: draft.trim(), mentions: extractMentions(draft) });
+    onAdd({ text: draft.trim(), mentions: extractMentions(draft, users) });
     setDraft("");
   }
 
   return (
     <div className="space-y-3">
+      <div className="rounded-md border border-border bg-muted/30 px-2 py-1 text-xs text-muted-foreground">
+        <span className="font-medium text-foreground">Anchor: {objectRef}</span>
+      </div>
+
       {/* Open comments */}
       {open.map((comment, i) => (
         <div key={comment.id}>

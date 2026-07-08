@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { describe, it, expect, vi } from "vitest";
 import { render, screen, fireEvent } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
@@ -82,5 +83,67 @@ describe("DataTable", () => {
     expect(screen.getByTestId(`row-${rows[1].id}`)).toHaveClass("focused");
     fireEvent.keyDown(table, { key: "k" });
     expect(screen.getByTestId(`row-${rows[0].id}`)).toHaveClass("focused");
+  });
+
+  it("filters rows and restores the filter from a saved view", async () => {
+    const localRows: Row[] = [
+      { id: "r1", title: "Royalty benchmark finding", severity: "high", status: "detected" },
+      { id: "r2", title: "Services agreement review", severity: "low", status: "reviewed" },
+    ];
+
+    render(
+      <DataTable
+        columns={columns}
+        data={localRows}
+        enableFiltering
+        enableSavedViews
+      />,
+    );
+
+    await userEvent.type(screen.getByLabelText(/filter table/i), "royalty");
+
+    expect(screen.getByTestId("row-r1")).toBeInTheDocument();
+    expect(screen.queryByTestId("row-r2")).not.toBeInTheDocument();
+
+    await userEvent.click(screen.getByRole("button", { name: /save view/i }));
+    await userEvent.clear(screen.getByLabelText(/filter table/i));
+    expect(screen.getByTestId("row-r2")).toBeInTheDocument();
+
+    await userEvent.click(screen.getByRole("button", { name: /view 1/i }));
+    expect(screen.getByTestId("row-r1")).toBeInTheDocument();
+    expect(screen.queryByTestId("row-r2")).not.toBeInTheDocument();
+  });
+
+  it("uses table keyboard shortcuts for edit, comment, and jump", async () => {
+    function TableShortcutHarness() {
+      const [lastAction, setLastAction] = useState("No action");
+
+      return (
+        <>
+          <DataTable
+            columns={columns}
+            data={rows}
+            onRowEdit={(row) => setLastAction(`edit ${row.id}`)}
+            onRowComment={(row) => setLastAction(`comment ${row.id}`)}
+            onRowJump={(row) => setLastAction(`jump ${row.id}`)}
+          />
+          <p aria-label="table action">{lastAction}</p>
+        </>
+      );
+    }
+
+    render(<TableShortcutHarness />);
+
+    const table = screen.getByRole("table");
+    table.focus();
+    fireEvent.keyDown(table, { key: "j" });
+    fireEvent.keyDown(table, { key: "e" });
+    expect(screen.getByLabelText("table action")).toHaveTextContent(`edit ${rows[0].id}`);
+
+    fireEvent.keyDown(table, { key: "c" });
+    expect(screen.getByLabelText("table action")).toHaveTextContent(`comment ${rows[0].id}`);
+
+    fireEvent.keyDown(table, { key: "g" });
+    expect(screen.getByLabelText("table action")).toHaveTextContent(`jump ${rows[0].id}`);
   });
 });

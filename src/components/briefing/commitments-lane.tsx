@@ -8,6 +8,11 @@ import {
   Card,
   CardContent,
 } from "@/components/ui/card";
+import {
+  createCommitmentPlanApprovedEvent,
+  DEMO_FRONTEND_TELEMETRY_CONTEXT,
+  recordFrontendTelemetryEvent,
+} from "@/lib/telemetry/product-telemetry";
 import { cn } from "@/lib/utils";
 import type { Commitment } from "@/lib/mock/types";
 
@@ -39,6 +44,17 @@ export function CommitmentsLane({
   onMarkDone,
   className,
 }: CommitmentsLaneProps) {
+  function handleApproveRun(commitmentId: string) {
+    recordFrontendTelemetryEvent(
+      createCommitmentPlanApprovedEvent({
+        ...DEMO_FRONTEND_TELEMETRY_CONTEXT,
+        surface: "briefing",
+        commitmentId,
+      }),
+    );
+    onApproveRun(commitmentId);
+  }
+
   return (
     <div className={cn("space-y-3", className)}>
       {commitments.map((commitment) => {
@@ -82,7 +98,7 @@ export function CommitmentsLane({
                     <Button
                       size="sm"
                       className="h-7 gap-1.5 px-2.5 text-xs"
-                      onClick={() => onApproveRun(commitment.id)}
+                      onClick={() => handleApproveRun(commitment.id)}
                     >
                       <Play className="h-3 w-3" />
                       Approve & run

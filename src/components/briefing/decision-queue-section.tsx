@@ -36,7 +36,7 @@ export function DecisionQueueSection({
   if (visible.length === 0) {
     return (
       <div className={cn("flex flex-col items-center gap-2 py-8 text-center", className)}>
-        <CheckCircle className="h-8 w-8 text-green-500" />
+        <CheckCircle className="h-8 w-8 text-success-soft-foreground" />
         <p className="text-sm font-medium">No pending decisions</p>
         <p className="text-xs text-muted-foreground">All gates have been resolved.</p>
       </div>

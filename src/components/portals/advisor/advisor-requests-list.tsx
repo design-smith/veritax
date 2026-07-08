@@ -24,10 +24,10 @@ export interface AdvisorRequest {
 }
 
 const STATUS_COLORS: Record<RequestStatus, string> = {
-  pending:   "border-amber-300 bg-amber-50 text-amber-700",
-  submitted: "border-blue-300 bg-blue-50 text-blue-700",
-  accepted:  "border-green-300 bg-green-50 text-green-700",
-  rejected:  "border-red-300 bg-red-50 text-red-700",
+  pending:   "border-transparent bg-warning-soft text-warning-soft-foreground",
+  submitted: "border-transparent bg-info-soft text-info-soft-foreground",
+  accepted:  "border-transparent bg-success-soft text-success-soft-foreground",
+  rejected:  "border-transparent bg-danger-soft text-danger-soft-foreground",
 };
 
 interface AdvisorRequestsListProps {

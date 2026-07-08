@@ -81,9 +81,9 @@ export function ExportDialog({
 
           {/* DRAFT watermark notice */}
           {artifactClass === "record" && !isSigned && (
-            <Alert className="border-amber-300 bg-amber-50 dark:border-amber-700 dark:bg-amber-950">
-              <Shield className="h-4 w-4 text-amber-600" />
-              <AlertDescription className="text-amber-900 dark:text-amber-100">
+            <Alert className="border-warning/25 bg-warning-soft dark:border-warning/30 dark:bg-warning-soft">
+              <Shield className="h-4 w-4 text-warning-soft-foreground" />
+              <AlertDescription className="text-warning-soft-foreground dark:text-warning-soft-foreground">
                 Export will include a non-removable <strong>DRAFT — not for reliance</strong> watermark.
               </AlertDescription>
             </Alert>

@@ -1,16 +1,10 @@
-import { describe, it, expect, vi } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { EntityInspector } from "../entity-inspector";
 import { mockEntities } from "@/lib/mock";
 
-vi.mock("next/link", () => ({
-  default: ({ href, children, ...p }: { href: string; children: React.ReactNode; [k: string]: unknown }) => (
-    <a href={href} {...p}>{children}</a>
-  ),
-}));
-
-const entity = mockEntities[0]; // Veritax Corp (US)
+const entity = mockEntities[0];
 
 describe("EntityInspector", () => {
   it("renders entity name, role, and jurisdiction", () => {
@@ -28,21 +22,14 @@ describe("EntityInspector", () => {
   it("renders all required tab stubs", () => {
     render(<EntityInspector entity={entity} onClose={vi.fn()} />);
     ["Overview", "Financials", "Substance", "Pillar 2", "Agreements", "Findings", "Filings"].forEach(
-      (tab) => expect(screen.getByRole("tab", { name: tab })).toBeInTheDocument()
+      (tab) => expect(screen.getByRole("tab", { name: tab })).toBeInTheDocument(),
     );
   });
 
-  it("renders copy-link button", () => {
+  it("keeps entity detail inside the graph inspector", () => {
     render(<EntityInspector entity={entity} onClose={vi.fn()} />);
     expect(screen.getByRole("button", { name: /copy link/i })).toBeInTheDocument();
-  });
-
-  it("renders a link to the full entity page", () => {
-    render(<EntityInspector entity={entity} onClose={vi.fn()} />);
-    expect(screen.getByRole("link", { name: /open full page/i })).toHaveAttribute(
-      "href",
-      `/graph/entities/${entity.id}`
-    );
+    expect(screen.queryByRole("link", { name: /open full page/i })).not.toBeInTheDocument();
   });
 
   it("calls onClose when close button clicked", async () => {

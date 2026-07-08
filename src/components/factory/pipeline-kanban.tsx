@@ -16,6 +16,7 @@ import {
 interface PipelineKanbanProps {
   documents: PipelineDocument[];
   onMoveStage: (docId: string, toStage: PipelineStageId) => void;
+  onBatchMoveStage?: (docIds: string[], toStage: PipelineStageId) => void;
   onOpenWorkspace: (docId: string) => void;
   className?: string;
 }
@@ -23,12 +24,18 @@ interface PipelineKanbanProps {
 export function PipelineKanban({
   documents,
   onMoveStage,
+  onBatchMoveStage,
   onOpenWorkspace,
   className,
 }: PipelineKanbanProps) {
   const [selectedCard, setSelectedCard] = useState<string | null>(null);
   const [dragIllegal, setDragIllegal] = useState(false);
   const [draggingId, setDraggingId] = useState<string | null>(null);
+  const [batchTarget, setBatchTarget] = useState<{
+    stage: PipelineStageId;
+    nextStage: PipelineStageId;
+    documentIds: string[];
+  } | null>(null);
 
   function handleDrop(targetStage: PipelineStageId) {
     if (!draggingId) return;
@@ -54,6 +61,14 @@ export function PipelineKanban({
       <div className="flex gap-3 overflow-x-auto pb-2">
         {PIPELINE_STAGES.map((stage) => {
           const stageDocs = documents.filter((d) => d.stage === stage.id);
+          const batchEligibleDocs = stage.nextStage
+            ? stageDocs.filter((doc) => doc.blockerChips.length === 0 && isLegalTransition(doc.stage, stage.nextStage!))
+            : [];
+          const showBatchAction =
+            onBatchMoveStage &&
+            stage.id === "internal-review" &&
+            stage.nextStage &&
+            batchEligibleDocs.length > 0;
           return (
             <div
               key={stage.id}
@@ -63,15 +78,34 @@ export function PipelineKanban({
               className="flex w-52 shrink-0 flex-col gap-2"
             >
               {/* Column header */}
-              <div className="flex items-center justify-between rounded-md bg-muted/50 px-3 py-2">
-                <p className="text-xs font-semibold">{stage.label}</p>
-                <Badge variant="secondary" className="text-[10px]">{stageDocs.length}</Badge>
+              <div className="space-y-2 rounded-md bg-muted/50 px-3 py-2">
+                <div className="flex items-center justify-between">
+                  <p className="text-xs font-semibold">{stage.label}</p>
+                  <Badge variant="secondary" className="text-[10px]">{stageDocs.length}</Badge>
+                </div>
+                {showBatchAction && (
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="h-7 w-full text-[11px]"
+                    onClick={() =>
+                      setBatchTarget({
+                        stage: stage.id,
+                        nextStage: stage.nextStage!,
+                        documentIds: batchEligibleDocs.map((doc) => doc.id),
+                      })
+                    }
+                  >
+                    Send all internal-approved to external review
+                  </Button>
+                )}
               </div>
 
               {/* Cards */}
               {stageDocs.map((doc) => {
                 const stageConfig = PIPELINE_STAGES.find((s) => s.id === doc.stage)!;
                 const isSelected = selectedCard === doc.id;
+                const actionBlocked = doc.blockerChips.length > 0;
                 return (
                   <div
                     key={doc.id}
@@ -91,7 +125,7 @@ export function PipelineKanban({
                       <Badge variant="outline" className="font-mono text-[10px]">{doc.jurisdiction}</Badge>
                       <Badge variant="outline" className="text-[10px]">v{doc.version}</Badge>
                       {doc.redlineCount > 0 && (
-                        <Badge variant="outline" className="text-[10px] border-amber-300 text-amber-700">
+                        <Badge variant="outline" className="text-[10px] border-warning/25 text-warning-soft-foreground">
                           {doc.redlineCount} changes
                         </Badge>
                       )}
@@ -107,12 +141,14 @@ export function PipelineKanban({
                       <Button
                         size="sm"
                         className="w-full text-xs h-7"
+                        disabled={actionBlocked}
                         onClick={(e) => {
                           e.stopPropagation();
+                          if (actionBlocked) return;
                           onMoveStage(doc.id, stageConfig.nextStage!);
                         }}
                       >
-                        {stageConfig.actionLabel}
+                        {actionBlocked ? "Resolve blockers first" : stageConfig.actionLabel}
                       </Button>
                     )}
                     {isSelected && (
@@ -133,6 +169,35 @@ export function PipelineKanban({
           );
         })}
       </div>
+
+      {batchTarget && (
+        <div role="dialog" aria-label="Batch stage confirmation" className="rounded-lg border border-border bg-card p-3">
+          <p className="text-sm font-medium">Confirm batch stage move</p>
+          <p className="mt-1 text-xs text-muted-foreground">
+            The following documents will move from Internal review to External review.
+          </p>
+          <ul className="mt-2 space-y-1 text-xs">
+            {batchTarget.documentIds.map((id) => {
+              const doc = documents.find((item) => item.id === id);
+              return doc ? <li key={id}>{doc.name}</li> : null;
+            })}
+          </ul>
+          <div className="mt-3 flex gap-2">
+            <Button
+              size="sm"
+              onClick={() => {
+                onBatchMoveStage?.(batchTarget.documentIds, batchTarget.nextStage);
+                setBatchTarget(null);
+              }}
+            >
+              Confirm batch move
+            </Button>
+            <Button size="sm" variant="outline" onClick={() => setBatchTarget(null)}>
+              Cancel
+            </Button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

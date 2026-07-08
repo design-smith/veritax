@@ -81,7 +81,7 @@ export function BulkActionsBar({
 
       <Popover open={triageOpen} onOpenChange={setTriageOpen}>
         <PopoverTrigger asChild>
-          <Button size="sm" variant="ghost" className="h-7 px-2.5 text-xs text-amber-600 hover:text-amber-700">
+          <Button size="sm" variant="ghost" className="h-7 px-2.5 text-xs text-warning-soft-foreground hover:text-warning-soft-foreground">
             Move to triage
           </Button>
         </PopoverTrigger>

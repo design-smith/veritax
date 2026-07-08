@@ -13,9 +13,9 @@ export interface AskStage {
 }
 
 const TIER_COLORS: Record<StageTier, string> = {
-  style: "border-green-300 bg-green-50 text-green-700",
-  run: "border-blue-300 bg-blue-50 text-blue-700",
-  methodology: "border-amber-300 bg-amber-50 text-amber-700",
+  style: "border-transparent bg-success-soft text-success-soft-foreground",
+  run: "border-transparent bg-info-soft text-info-soft-foreground",
+  methodology: "border-transparent bg-warning-soft text-warning-soft-foreground",
 };
 
 interface RunModePanelProps {

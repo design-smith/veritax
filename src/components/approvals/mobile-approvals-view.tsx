@@ -59,7 +59,7 @@ export function MobileApprovalsView({
       <div className="flex-1 overflow-y-auto">
         {visible.length === 0 && (
           <div className="flex flex-col items-center gap-3 py-16 text-center px-6">
-            <CheckCircle className="h-10 w-10 text-green-500" />
+            <CheckCircle className="h-10 w-10 text-success-soft-foreground" />
             <p className="text-sm font-medium">No pending approvals — all clear</p>
           </div>
         )}
@@ -126,7 +126,7 @@ export function MobileApprovalsView({
                   </Button>
                   <Button
                     variant="outline"
-                    className="flex-1 gap-1.5 text-sm text-destructive hover:text-destructive"
+                    className="flex-1 gap-1.5 text-sm text-danger-soft-foreground hover:text-danger-soft-foreground"
                     onClick={() => setRejectingId(gate.id)}
                   >
                     <X className="h-4 w-4" />

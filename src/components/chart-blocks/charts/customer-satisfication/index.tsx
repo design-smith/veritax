@@ -9,21 +9,21 @@ import LinearProgress from "./components/linear-progress";
 const customerSatisficationOptions = [
   {
     label: "Positive",
-    color: "#5fb67a",
+    colorToken: "--success",
     percentage: customerSatisfication.positive,
-    icon: <ThumbsUp className="h-6 w-6" stroke="#5fb67a" fill="#5fb67a" />,
+    icon: <ThumbsUp className="h-6 w-6 fill-success stroke-success" />,
   },
   {
     label: "Neutral",
-    color: "#f5c36e",
+    colorToken: "--caution",
     percentage: customerSatisfication.neutral,
-    icon: <ThumbsUp className="h-6 w-6" stroke="#f5c36e" fill="#f5c36e" />,
+    icon: <ThumbsUp className="h-6 w-6 fill-caution stroke-caution" />,
   },
   {
     label: "Negative",
-    color: "#da6d67",
+    colorToken: "--danger",
     percentage: customerSatisfication.negative,
-    icon: <ThumbsDown className="h-6 w-6" stroke="#da6d67" fill="#da6d67" />,
+    icon: <ThumbsDown className="h-6 w-6 fill-danger stroke-danger" />,
   },
 ];
 
@@ -38,7 +38,7 @@ export default function CustomerSatisfication() {
             <LinearProgress
               key={option.label}
               label={option.label}
-              color={option.color}
+              colorToken={option.colorToken}
               percentage={option.percentage}
               icon={option.icon}
             />

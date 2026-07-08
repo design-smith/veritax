@@ -2,9 +2,9 @@
 
 import { format, parseISO } from "date-fns";
 import { AlertTriangle, FileText, Plus } from "lucide-react";
+import { DataTable, type Column } from "@/components/patterns/pat-8-data-table";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Separator } from "@/components/ui/separator";
 import { cn } from "@/lib/utils";
 
 export type AgreementStatus = "executed" | "expired" | "missing" | "draft-only";
@@ -29,11 +29,16 @@ interface ICARegisterProps {
 }
 
 const STATUS_CONFIG: Record<AgreementStatus, { label: string; cls: string }> = {
-  executed:   { label: "Executed",   cls: "border-green-300 bg-green-50 text-green-700" },
-  expired:    { label: "Expired",    cls: "border-red-300 bg-red-50 text-red-700" },
-  missing:    { label: "Missing",    cls: "border-amber-300 bg-amber-50 text-amber-700" },
-  "draft-only": { label: "Draft only", cls: "border-blue-300 bg-blue-50 text-blue-700" },
+  executed: { label: "Executed", cls: "border-transparent bg-success-soft text-success-soft-foreground" },
+  expired: { label: "Expired", cls: "border-transparent bg-danger-soft text-danger-soft-foreground" },
+  missing: { label: "Missing", cls: "border-transparent bg-warning-soft text-warning-soft-foreground" },
+  "draft-only": { label: "Draft only", cls: "border-transparent bg-info-soft text-info-soft-foreground" },
 };
+
+function renewalLabel(agreement: ICAgreement) {
+  if (!agreement.renewalDate) return "No renewal date";
+  return format(parseISO(agreement.renewalDate), "dd MMM yyyy");
+}
 
 export function ICARegister({
   agreements,
@@ -44,108 +49,122 @@ export function ICARegister({
   className,
 }: ICARegisterProps) {
   const counts = agreements.reduce<Record<AgreementStatus, number>>(
-    (acc, a) => { acc[a.status] = (acc[a.status] ?? 0) + 1; return acc; },
+    (acc, agreement) => {
+      acc[agreement.status] = (acc[agreement.status] ?? 0) + 1;
+      return acc;
+    },
     { executed: 0, expired: 0, missing: 0, "draft-only": 0 },
   );
 
+  const columns: Column<ICAgreement>[] = [
+    {
+      key: "agreement",
+      header: "Agreement",
+      sortable: true,
+      render: (agreement) => (
+        <div className="min-w-0">
+          <div className="flex flex-wrap items-center gap-2">
+            {agreement.isGapRow ? (
+              <AlertTriangle className="h-4 w-4 shrink-0 text-warning-soft-foreground" />
+            ) : (
+              <FileText className="h-4 w-4 shrink-0 text-muted-foreground" />
+            )}
+            <span className="truncate text-sm font-medium">
+              {agreement.isGapRow ? "Flow without agreement" : agreement.name}
+            </span>
+          </div>
+          {agreement.isGapRow && <p className="text-xs text-muted-foreground">{agreement.name}</p>}
+        </div>
+      ),
+    },
+    {
+      key: "status",
+      header: "Status",
+      sortable: true,
+      render: (agreement) => (
+        <Badge variant="outline" className={cn("text-xs", STATUS_CONFIG[agreement.status].cls)}>
+          {STATUS_CONFIG[agreement.status].label}
+        </Badge>
+      ),
+    },
+    {
+      key: "counterparties",
+      header: "Counterparties",
+      render: (agreement) => <span className="text-xs text-muted-foreground">{agreement.parties.join(" -> ")}</span>,
+    },
+    {
+      key: "renewal",
+      header: "Renewal date",
+      sortable: true,
+      render: (agreement) => (
+        <span className={cn("text-xs text-muted-foreground", agreement.status === "expired" && "font-medium text-danger-soft-foreground")}>
+          {renewalLabel(agreement)}
+        </span>
+      ),
+    },
+    {
+      key: "flows",
+      header: "Linked flows",
+      render: (agreement) => <span className="font-mono text-xs text-muted-foreground">{agreement.linkedFlowIds.join(", ")}</span>,
+    },
+    {
+      key: "actions",
+      header: "Actions",
+      render: (agreement) => (
+        <div className="flex flex-wrap items-center gap-1" onClick={(event) => event.stopPropagation()}>
+          {agreement.isGapRow ? (
+            <Button
+              size="sm"
+              variant="outline"
+              className="h-7 gap-1 px-2 text-xs"
+              onClick={() => onCreateDraft?.(agreement.linkedFlowIds[0])}
+            >
+              <Plus className="h-3 w-3" />
+              Create agreement draft
+            </Button>
+          ) : (
+            <>
+              <Button size="sm" variant="ghost" className="h-7 px-2 text-xs" onClick={() => onOpen(agreement.id)}>
+                Open
+              </Button>
+              {agreement.status === "executed" && (
+                <Button size="sm" variant="outline" className="h-7 px-2 text-xs" onClick={() => onDraftRenewal(agreement.id)}>
+                  Draft renewal
+                </Button>
+              )}
+              {(agreement.status === "expired" || agreement.status === "missing") && (
+                <Button size="sm" variant="outline" className="h-7 px-2 text-xs" onClick={() => onRequestExecution(agreement.id)}>
+                  Request execution
+                </Button>
+              )}
+            </>
+          )}
+        </div>
+      ),
+    },
+  ];
+
   return (
     <div className={cn("space-y-4", className)}>
-      {/* Rollup header */}
-      <div className="flex flex-wrap gap-4">
-        {(["executed", "expired", "missing", "draft-only"] as AgreementStatus[]).map((s) => (
-          <div key={s} className={cn("rounded-lg border px-3 py-2 text-center", STATUS_CONFIG[s].cls)}>
-            <p
-              className="text-xl font-semibold"
-              data-testid={`rollup-${s}`}
-            >
-              {counts[s]}
+      <div className="flex flex-wrap gap-3">
+        {(["executed", "expired", "missing", "draft-only"] as AgreementStatus[]).map((status) => (
+          <div key={status} className="rounded-md border border-border bg-surface px-3 py-2">
+            <p className="text-xl font-semibold tabular-nums" data-testid={`rollup-${status}`}>
+              {counts[status]}
             </p>
-            <p className="text-xs">{STATUS_CONFIG[s].label}</p>
+            <p className="text-xs text-muted-foreground">{STATUS_CONFIG[status].label}</p>
           </div>
         ))}
       </div>
 
-      <Separator />
-
-      {/* Rows */}
-      <div className="space-y-2">
-        {agreements.map((ag) => {
-          const { label, cls } = STATUS_CONFIG[ag.status];
-
-          if (ag.isGapRow) {
-            return (
-              <div
-                key={ag.id}
-                className="flex items-center justify-between rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 dark:border-amber-800 dark:bg-amber-950"
-              >
-                <div className="flex items-center gap-2">
-                  <AlertTriangle className="h-4 w-4 text-amber-600" />
-                  <div>
-                    <p className="text-sm font-medium text-amber-800 dark:text-amber-200">
-                      Flow without agreement
-                    </p>
-                    <p className="text-xs text-amber-700 dark:text-amber-300">
-                      {ag.parties.join(" ↔ ")} — flows: {ag.linkedFlowIds.join(", ")}
-                    </p>
-                  </div>
-                </div>
-                <Button
-                  size="sm"
-                  variant="outline"
-                  className="gap-1.5 border-amber-300 text-amber-700 hover:bg-amber-100"
-                  onClick={() => onCreateDraft?.(ag.linkedFlowIds[0])}
-                >
-                  <Plus className="h-3.5 w-3.5" />
-                  Create agreement draft
-                </Button>
-              </div>
-            );
-          }
-
-          return (
-            <div
-              key={ag.id}
-              className="flex items-start justify-between gap-3 rounded-lg border border-border bg-card px-4 py-3"
-            >
-              <div className="flex min-w-0 flex-1 flex-col gap-1">
-                <div className="flex items-center gap-2 flex-wrap">
-                  <FileText className="h-4 w-4 shrink-0 text-muted-foreground" />
-                  <span className="text-sm font-medium truncate">{ag.name}</span>
-                  <Badge variant="outline" className={cn("text-xs shrink-0", cls)}>
-                    {label}
-                  </Badge>
-                </div>
-                <p className="text-xs text-muted-foreground">
-                  {ag.parties.join(" ↔ ")}
-                  {ag.renewalDate && (
-                    <span className={cn("ml-2", ag.status === "expired" ? "text-destructive font-medium" : "")}>
-                      · Renewal: {format(parseISO(ag.renewalDate), "dd MMM yyyy")}
-                    </span>
-                  )}
-                </p>
-              </div>
-              <div className="flex shrink-0 gap-1">
-                <Button size="sm" variant="ghost" className="h-7 px-2 text-xs"
-                  onClick={() => onOpen(ag.id)}>
-                  Open
-                </Button>
-                {ag.status === "executed" && (
-                  <Button size="sm" variant="outline" className="h-7 px-2 text-xs"
-                    onClick={() => onDraftRenewal(ag.id)}>
-                    Draft renewal
-                  </Button>
-                )}
-                {(ag.status === "expired" || ag.status === "missing") && (
-                  <Button size="sm" variant="outline" className="h-7 px-2 text-xs"
-                    onClick={() => onRequestExecution(ag.id)}>
-                    Request execution
-                  </Button>
-                )}
-              </div>
-            </div>
-          );
-        })}
-      </div>
+      <DataTable
+        columns={columns}
+        data={agreements}
+        onRowOpen={(agreement) => onOpen(agreement.id)}
+        enableFiltering
+        enableDensity
+        shareBasePath="/library?tab=ica"
+      />
     </div>
   );
 }

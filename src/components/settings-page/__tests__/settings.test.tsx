@@ -1,12 +1,13 @@
-import { describe, it, expect, vi } from "vitest";
+import { useState } from "react";
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { StandingInstructionsList } from "../standing-instructions-list";
-import { NotificationsSettings } from "../notifications-settings";
-import { DelegationSettings } from "../delegation-settings";
-import { mockUsers } from "@/lib/mock";
+import { describe, expect, it } from "vitest";
 
-// ── Standing Instructions ────────────────────────────────────────────────────
+import { mockUsers } from "@/lib/mock";
+import { DelegationSettings } from "../delegation-settings";
+import { NotificationsSettings } from "../notifications-settings";
+import { StandingInstructionsList } from "../standing-instructions-list";
+import type { NotificationCategory } from "../notifications-settings";
 
 const instructions = [
   { id: "si1", text: "Always use bullet points for lists", tier: "style" as const, scope: "global", createdBy: "u2" },
@@ -14,87 +15,116 @@ const instructions = [
   { id: "si3", text: "Use TNMM for all service flows", tier: "methodology" as const, scope: "Veritax UK Ltd", createdBy: "u1" },
 ];
 
+const categories: NotificationCategory[] = [
+  { id: "findings", label: "Findings", cadence: "realtime" },
+  { id: "runs", label: "Runs", cadence: "daily" },
+  { id: "gates", label: "Gate requests", cadence: "realtime" },
+  { id: "obligations", label: "Obligations", cadence: "weekly" },
+];
+
+function StandingInstructionsHarness() {
+  const [deletedInstructionId, setDeletedInstructionId] = useState("none");
+
+  return (
+    <>
+      <StandingInstructionsList instructions={instructions} onDelete={setDeletedInstructionId} />
+      <p>Deleted instruction: {deletedInstructionId}</p>
+    </>
+  );
+}
+
+function NotificationsHarness() {
+  const [lastChange, setLastChange] = useState("none");
+
+  return (
+    <>
+      <NotificationsSettings
+        categories={categories}
+        onChange={(categoryId, cadence) => setLastChange(`${categoryId}:${cadence}`)}
+      />
+      <p>Last cadence change: {lastChange}</p>
+    </>
+  );
+}
+
+function DelegationHarness() {
+  const [savedDelegate, setSavedDelegate] = useState("none");
+
+  return (
+    <>
+      <DelegationSettings
+        users={mockUsers}
+        currentDelegateId={null}
+        expiresAt={null}
+        onSave={(payload) => setSavedDelegate(payload.userId)}
+      />
+      <p>Saved delegate: {savedDelegate}</p>
+    </>
+  );
+}
+
 describe("StandingInstructionsList", () => {
   it("renders all instructions", () => {
-    render(<StandingInstructionsList instructions={instructions} onDelete={vi.fn()} />);
-    instructions.forEach((i) => expect(screen.getByText(i.text)).toBeInTheDocument());
+    render(<StandingInstructionsList instructions={instructions} onDelete={() => undefined} />);
+    instructions.forEach((instruction) => expect(screen.getByText(instruction.text)).toBeInTheDocument());
   });
 
-  it("renders tier badge on each instruction", () => {
-    render(<StandingInstructionsList instructions={instructions} onDelete={vi.fn()} />);
+  it("renders tier badges and scoped labels", () => {
+    render(<StandingInstructionsList instructions={instructions} onDelete={() => undefined} />);
     expect(screen.getByText("style")).toBeInTheDocument();
     expect(screen.getByText("run")).toBeInTheDocument();
     expect(screen.getByText("methodology")).toBeInTheDocument();
-  });
-
-  it("renders scope label", () => {
-    render(<StandingInstructionsList instructions={instructions} onDelete={vi.fn()} />);
     expect(screen.getByText("Veritax UK Ltd")).toBeInTheDocument();
   });
 
-  it("calls onDelete when delete button clicked", async () => {
-    const onDelete = vi.fn();
-    render(<StandingInstructionsList instructions={instructions} onDelete={onDelete} />);
-    const deleteButtons = screen.getAllByRole("button", { name: /delete|remove/i });
-    await userEvent.click(deleteButtons[0]);
-    expect(onDelete).toHaveBeenCalledWith("si1");
+  it("emits the deleted instruction through the public callback", async () => {
+    const user = userEvent.setup();
+    render(<StandingInstructionsHarness />);
+
+    await user.click(screen.getAllByRole("button", { name: /delete|remove/i })[0]);
+
+    expect(screen.getByText("Deleted instruction: si1")).toBeInTheDocument();
   });
 });
 
-// ── Notifications ────────────────────────────────────────────────────────────
-
-const categories = [
-  { id: "findings", label: "Findings", cadence: "realtime" as const },
-  { id: "runs", label: "Runs", cadence: "daily" as const },
-  { id: "gates", label: "Gate requests", cadence: "realtime" as const },
-  { id: "obligations", label: "Obligations", cadence: "weekly" as const },
-];
-
 describe("NotificationsSettings", () => {
-  it("renders all notification categories", () => {
-    render(<NotificationsSettings categories={categories} onChange={vi.fn()} />);
-    categories.forEach((c) => expect(screen.getByText(c.label)).toBeInTheDocument());
-  });
-
-  it("renders cadence selector for each category", () => {
-    render(<NotificationsSettings categories={categories} onChange={vi.fn()} />);
+  it("renders all notification categories and cadence selectors", () => {
+    render(<NotificationsSettings categories={categories} onChange={() => undefined} />);
+    categories.forEach((category) => expect(screen.getByText(category.label)).toBeInTheDocument());
     expect(screen.getAllByRole("combobox").length).toBe(categories.length);
   });
 
-  it("calls onChange with category id and new cadence when selector changes", async () => {
-    const onChange = vi.fn();
-    render(<NotificationsSettings categories={categories} onChange={onChange} />);
-    const selects = screen.getAllByRole("combobox");
-    await userEvent.selectOptions(selects[1], "weekly");
-    expect(onChange).toHaveBeenCalledWith("runs", "weekly");
+  it("emits category id and cadence through the public callback", async () => {
+    const user = userEvent.setup();
+    render(<NotificationsHarness />);
+
+    await user.selectOptions(screen.getAllByRole("combobox")[1], "weekly");
+
+    expect(screen.getByText("Last cadence change: runs:weekly")).toBeInTheDocument();
   });
 });
 
-// ── Delegation ───────────────────────────────────────────────────────────────
-
 describe("DelegationSettings", () => {
-  it("renders current delegate or 'None set' message", () => {
-    render(<DelegationSettings users={mockUsers} currentDelegateId={null} expiresAt={null} onSave={vi.fn()} />);
+  it("renders the empty and active delegate states", () => {
+    const { rerender } = render(
+      <DelegationSettings users={mockUsers} currentDelegateId={null} expiresAt={null} onSave={() => undefined} />
+    );
     expect(screen.getByText(/none set|no delegate/i)).toBeInTheDocument();
-  });
 
-  it("renders delegate name when set", () => {
-    render(<DelegationSettings users={mockUsers} currentDelegateId="u2" expiresAt="2025-12-31" onSave={vi.fn()} />);
-    // Name appears in current-delegate display and select options
+    rerender(
+      <DelegationSettings users={mockUsers} currentDelegateId="u2" expiresAt="2025-12-31" onSave={() => undefined} />
+    );
     expect(screen.getAllByText(/Marcus Webb/).length).toBeGreaterThan(0);
-  });
-
-  it("renders an expiry date when delegate is set", () => {
-    render(<DelegationSettings users={mockUsers} currentDelegateId="u2" expiresAt="2025-12-31" onSave={vi.fn()} />);
-    // format("2025-12-31") → "31 Dec 2025"
     expect(screen.getByText(/31 Dec 2025/)).toBeInTheDocument();
   });
 
-  it("calls onSave with userId and expiresAt on form submit", async () => {
-    const onSave = vi.fn();
-    render(<DelegationSettings users={mockUsers} currentDelegateId={null} expiresAt={null} onSave={onSave} />);
-    await userEvent.selectOptions(screen.getByRole("combobox", { name: /delegate/i }), "u3");
-    await userEvent.click(screen.getByRole("button", { name: /save/i }));
-    expect(onSave).toHaveBeenCalledWith(expect.objectContaining({ userId: "u3" }));
+  it("emits the saved delegate through the public callback", async () => {
+    const user = userEvent.setup();
+    render(<DelegationHarness />);
+
+    await user.selectOptions(screen.getByRole("combobox", { name: /delegate/i }), "u3");
+    await user.click(screen.getByRole("button", { name: /save/i }));
+
+    expect(screen.getByText("Saved delegate: u3")).toBeInTheDocument();
   });
 });

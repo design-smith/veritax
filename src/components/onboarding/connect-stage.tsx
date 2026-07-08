@@ -2,11 +2,9 @@
 
 import { useState } from "react";
 import { Check, Cloud, Copy, FileText, Upload } from "lucide-react";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Progress } from "@/components/ui/progress";
-import { Separator } from "@/components/ui/separator";
 import { cn } from "@/lib/utils";
 
 interface UploadedFile {
@@ -85,7 +83,7 @@ export function ConnectStage({
           <div className="flex items-center gap-3 rounded-lg border border-border bg-muted/30 px-4 py-3">
             <span className="flex-1 font-mono text-sm select-all">{forwardAddress}</span>
             <Button size="sm" variant="outline" className="gap-1.5 shrink-0" onClick={handleCopy}>
-              {copied ? <Check className="h-3.5 w-3.5 text-green-600" /> : <Copy className="h-3.5 w-3.5" />}
+              {copied ? <Check className="h-3.5 w-3.5 text-success-soft-foreground" /> : <Copy className="h-3.5 w-3.5" />}
               {copied ? "Copied" : "Copy"}
             </Button>
           </div>
@@ -126,7 +124,7 @@ export function ConnectStage({
                     <p className="text-sm truncate">{file.name}</p>
                     <Progress value={file.progress} className="h-1 mt-1" />
                   </div>
-                  {file.progress >= 100 && <Check className="h-4 w-4 text-green-600 shrink-0" />}
+                  {file.progress >= 100 && <Check className="h-4 w-4 text-success-soft-foreground shrink-0" />}
                 </div>
               ))}
             </div>

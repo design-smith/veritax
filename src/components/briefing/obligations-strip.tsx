@@ -16,9 +16,9 @@ function daysRemaining(due: string): number {
 }
 
 function chipColor(days: number): string {
-  if (days <= 7) return "bg-red-100 text-red-700 dark:bg-red-950 dark:text-red-300";
-  if (days <= 30) return "bg-amber-100 text-amber-700 dark:bg-amber-950 dark:text-amber-300";
-  return "bg-green-100 text-green-700 dark:bg-green-950 dark:text-green-300";
+  if (days <= 7) return "bg-danger-soft text-danger-soft-foreground dark:bg-danger-soft dark:text-danger-soft-foreground";
+  if (days <= 30) return "bg-warning-soft text-warning-soft-foreground dark:bg-warning-soft dark:text-warning-soft-foreground";
+  return "bg-success-soft text-success-soft-foreground dark:bg-success-soft dark:text-success-soft-foreground";
 }
 
 export function ObligationsStrip({ obligations, onNavigate, className }: ObligationsStripProps) {

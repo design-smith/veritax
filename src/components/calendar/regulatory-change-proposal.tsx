@@ -24,12 +24,12 @@ export function RegulatoryChangeProposal({ proposals, onAccept, onViewChangelog 
   return (
     <div className="space-y-2">
       {proposals.map((p) => (
-        <Alert key={p.id} className="border-blue-300 bg-blue-50 dark:border-blue-700 dark:bg-blue-950">
-          <Bell className="h-4 w-4 text-blue-600" />
+        <Alert key={p.id} className="border-info/25 bg-info-soft dark:border-info/30 dark:bg-info-soft">
+          <Bell className="h-4 w-4 text-info-soft-foreground" />
           <AlertDescription className="flex items-center justify-between gap-4">
-            <span className="text-blue-900 dark:text-blue-100">{p.description}</span>
+            <span className="text-info-soft-foreground dark:text-info-soft-foreground">{p.description}</span>
             <div className="flex shrink-0 gap-2">
-              <Button size="sm" variant="outline" className="h-7 text-xs border-blue-300 text-blue-700"
+              <Button size="sm" variant="outline" className="h-7 text-xs border-info/25 text-info-soft-foreground"
                 onClick={() => onViewChangelog(p.id)}>
                 View changelog
               </Button>

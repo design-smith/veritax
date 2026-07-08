@@ -7,8 +7,8 @@ type PolicyState = "self-serve" | "request" | "disabled";
 
 const POLICY_LABELS: Record<PolicyState, string> = { "self-serve": "Self-serve", request: "Request", disabled: "Disabled" };
 const POLICY_COLORS: Record<PolicyState, string> = {
-  "self-serve": "border-green-300 bg-green-50 text-green-700",
-  request:      "border-amber-300 bg-amber-50 text-amber-700",
+  "self-serve": "border-transparent bg-success-soft text-success-soft-foreground",
+  request:      "border-transparent bg-warning-soft text-warning-soft-foreground",
   disabled:     "border-border text-muted-foreground",
 };
 
@@ -25,7 +25,7 @@ interface ConnectorPolicyMatrixProps {
   className?: string;
 }
 
-export function ConnectorPolicyMatrix({ policies, onUpdatePolicy, className }: ConnectorPolicyMatrixProps) {
+export function ConnectorPolicyMatrix({ policies, onUpdatePolicy: _onUpdatePolicy, className }: ConnectorPolicyMatrixProps) {
   return (
     <div className={cn("rounded-lg border border-border overflow-hidden", className)}>
       <table className="w-full text-sm">
@@ -47,7 +47,7 @@ export function ConnectorPolicyMatrix({ policies, onUpdatePolicy, className }: C
               </td>
               <td className="px-4 py-3 text-xs text-muted-foreground">{p.scopeCeiling}</td>
               <td className="px-4 py-3">
-                <Badge variant="outline" className={p.allowWrite ? "border-green-300 text-green-700" : "border-border text-muted-foreground"}>
+                <Badge variant="outline" className={p.allowWrite ? "border-success/25 text-success-soft-foreground" : "border-border text-muted-foreground"}>
                   {p.allowWrite ? "Yes" : "No"}
                 </Badge>
               </td>

@@ -1,17 +1,17 @@
 "use client";
 
-import Link from "next/link";
-import { ArrowRight, Copy, ExternalLink, X } from "lucide-react";
+import { ArrowRight, X } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
+import { CopyLinkButton } from "@/components/patterns/copy-link-button";
 import type { Entity, Flow } from "@/lib/mock/types";
 import { cn } from "@/lib/utils";
 
 const STATUS_COLORS: Record<Flow["status"], string> = {
-  verified: "border-green-300 bg-green-50 text-green-700 dark:bg-green-950",
-  drift:    "border-amber-300 bg-amber-50 text-amber-700 dark:bg-amber-950",
-  exception:"border-red-300 bg-red-50 text-red-700 dark:bg-red-950",
+  verified: "border-transparent bg-success-soft text-success-soft-foreground",
+  drift:    "border-transparent bg-warning-soft text-warning-soft-foreground",
+  exception:"border-transparent bg-danger-soft text-danger-soft-foreground",
 };
 
 interface FlowInspectorProps {
@@ -49,14 +49,7 @@ export function FlowInspector({ flow, fromEntity, toEntity, onClose, className }
           </div>
         </div>
         <div className="flex shrink-0 items-center gap-1">
-          <Button size="icon" variant="ghost" className="h-7 w-7" aria-label="Copy link"
-            onClick={() => navigator.clipboard?.writeText(`/graph/flows/${flow.id}`)}>
-            <Copy className="h-3.5 w-3.5" />
-          </Button>
-          <Link href={`/graph/flows/${flow.id}`} aria-label="Open full page"
-            className="inline-flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground hover:bg-muted transition-colors">
-            <ExternalLink className="h-3.5 w-3.5" />
-          </Link>
+          <CopyLinkButton target={{ type: "flow", id: flow.id }} className="h-7 w-7" />
           <Button size="icon" variant="ghost" className="h-7 w-7" aria-label="Close" onClick={onClose}>
             <X className="h-3.5 w-3.5" />
           </Button>
@@ -74,7 +67,7 @@ export function FlowInspector({ flow, fromEntity, toEntity, onClose, className }
           </div>
           <div className="rounded-lg border border-border bg-card p-3">
             <p className="text-xs text-muted-foreground mb-1">Observed rate</p>
-            <p className={cn("text-lg font-semibold", flow.status === "exception" ? "text-destructive" : "")}>
+            <p className={cn("text-lg font-semibold", flow.status === "exception" ? "text-danger-soft-foreground" : "")}>
               {pct(flow.observedRate)}
             </p>
           </div>

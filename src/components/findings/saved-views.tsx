@@ -10,6 +10,11 @@ import {
   PopoverTrigger,
 } from "@/components/ui/popover";
 import { Separator } from "@/components/ui/separator";
+import {
+  createSavedViewCreatedEvent,
+  DEMO_FRONTEND_TELEMETRY_CONTEXT,
+  recordFrontendTelemetryEvent,
+} from "@/lib/telemetry/product-telemetry";
 import { cn } from "@/lib/utils";
 
 export interface SavedView {
@@ -23,6 +28,7 @@ interface SavedViewsBarProps {
   views: SavedView[];
   onSwitchView: (viewId: string) => void;
   onSaveView: (view: Omit<SavedView, "id"> & { id?: string }) => void;
+  telemetrySurface?: string;
   className?: string;
 }
 
@@ -31,6 +37,7 @@ export function SavedViewsBar({
   views,
   onSwitchView,
   onSaveView,
+  telemetrySurface = "findings",
   className,
 }: SavedViewsBarProps) {
   const [saveOpen, setSaveOpen] = useState(false);
@@ -39,7 +46,17 @@ export function SavedViewsBar({
   function handleSave() {
     if (!viewName.trim()) return;
     const current = views.find((v) => v.id === currentViewId);
-    onSaveView({ label: viewName.trim(), filters: current?.filters ?? {} });
+    const filters = current?.filters ?? {};
+    const viewId = `view-${Date.now()}`;
+    recordFrontendTelemetryEvent(
+      createSavedViewCreatedEvent({
+        ...DEMO_FRONTEND_TELEMETRY_CONTEXT,
+        surface: telemetrySurface,
+        viewId,
+        filterCount: Object.keys(filters).length,
+      }),
+    );
+    onSaveView({ id: viewId, label: viewName.trim(), filters });
     setViewName("");
     setSaveOpen(false);
   }

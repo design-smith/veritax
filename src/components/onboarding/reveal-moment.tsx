@@ -2,7 +2,6 @@
 
 import { useState } from "react";
 import { CheckCircle, Lock, RefreshCw, Sparkles, Unlock } from "lucide-react";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { cn } from "@/lib/utils";
@@ -42,8 +41,8 @@ export function RevealMoment({
         data-testid="reveal-unlocked"
         className={cn("flex flex-col items-center gap-6 py-12 text-center max-w-md mx-auto", className)}
       >
-        <div className="flex h-16 w-16 items-center justify-center rounded-full bg-green-100 dark:bg-green-950">
-          <CheckCircle className="h-8 w-8 text-green-600" />
+        <div className="flex h-16 w-16 items-center justify-center rounded-full bg-success-soft dark:bg-success-soft">
+          <CheckCircle className="h-8 w-8 text-success-soft-foreground" />
         </div>
         <div className="space-y-2">
           <h2 className="text-2xl font-bold">Examination complete</h2>
@@ -54,7 +53,7 @@ export function RevealMoment({
         <div className="flex gap-4">
           <Card className="w-40">
             <CardContent className="pt-4 text-center">
-              <p className="text-3xl font-bold text-destructive">{findingCount} findings</p>
+              <p className="text-3xl font-bold text-danger-soft-foreground">{findingCount} findings</p>
               <p className="text-xs text-muted-foreground mt-1">Requiring attention</p>
             </CardContent>
           </Card>

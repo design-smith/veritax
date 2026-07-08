@@ -32,8 +32,8 @@ function isOutOfRange(row: RangeWatchRow): boolean {
 
 export function RangeWatchPanel({ rows, onRetest, className }: RangeWatchPanelProps) {
   return (
-    <div className={cn("rounded-lg border border-border overflow-hidden", className)}>
-      <table className="w-full text-sm">
+    <div className={cn("rounded-lg border border-border overflow-x-auto", className)}>
+      <table className="min-w-[680px] w-full text-sm">
         <thead>
           <tr className="border-b border-border bg-muted/30">
             <th className="px-4 py-2.5 text-left text-xs font-medium text-muted-foreground">Tested party</th>
@@ -61,7 +61,7 @@ export function RangeWatchPanel({ rows, onRetest, className }: RangeWatchPanelPr
                       data-testid={`range-status-${row.id}`}
                       className={cn(
                         "inline-flex items-center gap-1 text-sm font-semibold",
-                        outOfRange ? "out-of-range text-destructive" : "in-range text-green-600",
+                        outOfRange ? "out-of-range text-danger-soft-foreground" : "in-range text-success-soft-foreground",
                       )}
                     >
                       {pct(row.ytdRate)}
@@ -71,7 +71,7 @@ export function RangeWatchPanel({ rows, onRetest, className }: RangeWatchPanelPr
                 <td className="px-4 py-3">
                   <span className={cn(
                     "text-sm font-semibold",
-                    row.trueUpAmount < 0 ? "text-destructive" : "text-green-600"
+                    row.trueUpAmount < 0 ? "text-danger-soft-foreground" : "text-success-soft-foreground"
                   )}>
                     {row.trueUpAmount.toLocaleString()} {row.currency}
                   </span>

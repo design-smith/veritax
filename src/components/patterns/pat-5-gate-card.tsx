@@ -15,15 +15,23 @@ import { Label } from "@/components/ui/label";
 import { Separator } from "@/components/ui/separator";
 import { Textarea } from "@/components/ui/textarea";
 import type { GateRequest, User } from "@/lib/mock/types";
+import {
+  createGateDecisionEvent,
+  DEMO_FRONTEND_TELEMETRY_CONTEXT,
+  recordFrontendTelemetryEvent,
+} from "@/lib/telemetry/product-telemetry";
 import { cn } from "@/lib/utils";
 
 type GateAction = "idle" | "changes" | "reject" | "delegate";
+type GateDecision = "approved" | "changes-requested" | "rejected" | "delegated";
 
 interface GateCardProps {
   gate: GateRequest;
   objectSummary: string;
   requester: User;
   diffSummary?: string;
+  delegateOptions?: User[];
+  defaultDelegateExpiresAt?: string;
   onApprove: () => void;
   onRequestChanges: (comment: string) => void;
   onReject: (reason: string) => void;
@@ -44,14 +52,23 @@ export function GateCard({
   objectSummary,
   requester,
   diffSummary,
+  delegateOptions = [],
+  defaultDelegateExpiresAt = "",
   onApprove,
   onRequestChanges,
   onReject,
+  onDelegate,
   className,
 }: GateCardProps) {
   const [action, setAction] = useState<GateAction>("idle");
   const [comment, setComment] = useState("");
   const [rejectReason, setRejectReason] = useState("");
+  const [delegateUserId, setDelegateUserId] = useState("");
+  const [delegateExpiresAt, setDelegateExpiresAt] = useState(defaultDelegateExpiresAt);
+
+  const delegatedTo = gate.delegateId
+    ? delegateOptions.find((user) => user.id === gate.delegateId)
+    : undefined;
 
   const slaStarted = new Date(gate.slaStarted);
   const slaDeadline = new Date(slaStarted.getTime() + gate.slaHours * 3600_000);
@@ -64,7 +81,18 @@ export function GateCard({
     ((gate.slaHours - hoursRemaining) / gate.slaHours) * 100,
   );
   const slaColor =
-    slaPercent >= 90 ? "text-destructive" : slaPercent >= 75 ? "text-amber-600" : "text-muted-foreground";
+    slaPercent >= 90 ? "text-danger-soft-foreground" : slaPercent >= 75 ? "text-warning-soft-foreground" : "text-muted-foreground";
+
+  function recordDecision(decision: GateDecision) {
+    recordFrontendTelemetryEvent(
+      createGateDecisionEvent({
+        ...DEMO_FRONTEND_TELEMETRY_CONTEXT,
+        gateId: gate.id,
+        decision,
+        latencyMs: Math.max(0, Date.now() - slaStarted.getTime()),
+      }),
+    );
+  }
 
   return (
     <Card className={cn("border-primary/20", className)}>
@@ -96,13 +124,24 @@ export function GateCard({
             <ShieldCheck className="h-3.5 w-3.5" />
             <span>Escalation: <span className="font-medium text-foreground">{gate.escalationPath}</span></span>
           </div>
+          {gate.delegateId && (
+            <div className="col-span-2 rounded-md border border-border bg-muted/30 p-2 text-muted-foreground">
+              Delegated to{" "}
+              <span className="font-medium text-foreground">
+                {delegatedTo?.name ?? gate.delegateId}
+              </span>
+            </div>
+          )}
         </div>
 
         {/* Inline action forms */}
         {action === "changes" && (
           <div className="space-y-2 rounded-md border border-border p-2">
-            <Label className="text-xs">Comment (required)</Label>
+            <Label htmlFor={`gate-comment-${gate.id}`} className="text-xs">
+              Comment (required)
+            </Label>
             <Textarea
+              id={`gate-comment-${gate.id}`}
               value={comment}
               onChange={(e) => setComment(e.target.value)}
               placeholder="Add a comment describing what changes are needed..."
@@ -112,7 +151,12 @@ export function GateCard({
             <div className="flex gap-2">
               <Button
                 size="sm"
-                onClick={() => { onRequestChanges(comment); setAction("idle"); setComment(""); }}
+                onClick={() => {
+                  recordDecision("changes-requested");
+                  onRequestChanges(comment);
+                  setAction("idle");
+                  setComment("");
+                }}
                 disabled={!comment.trim()}
               >
                 Send
@@ -140,7 +184,12 @@ export function GateCard({
                 size="sm"
                 variant="destructive"
                 aria-label="Confirm reject"
-                onClick={() => { onReject(rejectReason); setAction("idle"); setRejectReason(""); }}
+                onClick={() => {
+                  recordDecision("rejected");
+                  onReject(rejectReason);
+                  setAction("idle");
+                  setRejectReason("");
+                }}
                 disabled={!rejectReason}
               >
                 Confirm reject
@@ -151,12 +200,88 @@ export function GateCard({
             </div>
           </div>
         )}
+
+        {action === "delegate" && (
+          <div className="space-y-2 rounded-md border border-border p-2">
+            <div>
+              <p className="text-xs font-medium">Delegate gate</p>
+              <p className="text-xs text-muted-foreground">
+                Pick a reviewer and set a time box for the delegated gate.
+              </p>
+            </div>
+            <div className="grid gap-2 sm:grid-cols-2">
+              <div className="space-y-1.5">
+                <Label htmlFor={`delegate-user-${gate.id}`} className="text-xs">
+                  Delegate to
+                </Label>
+                <select
+                  id={`delegate-user-${gate.id}`}
+                  value={delegateUserId}
+                  onChange={(e) => setDelegateUserId(e.target.value)}
+                  className="h-8 w-full rounded-md border border-input bg-background px-2 text-sm"
+                >
+                  <option value="">Select a reviewer...</option>
+                  {delegateOptions.map((user) => (
+                    <option key={user.id} value={user.id}>
+                      {user.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor={`delegate-expiry-${gate.id}`} className="text-xs">
+                  Time box
+                </Label>
+                <input
+                  id={`delegate-expiry-${gate.id}`}
+                  type="datetime-local"
+                  value={delegateExpiresAt}
+                  onChange={(e) => setDelegateExpiresAt(e.target.value)}
+                  className="h-8 w-full rounded-md border border-input bg-background px-2 text-sm"
+                />
+              </div>
+            </div>
+            <div className="flex gap-2">
+              <Button
+                size="sm"
+                onClick={() => {
+                  recordDecision("delegated");
+                  onDelegate(delegateUserId, delegateExpiresAt);
+                  setAction("idle");
+                  setDelegateUserId("");
+                  setDelegateExpiresAt(defaultDelegateExpiresAt);
+                }}
+                disabled={!delegateUserId || !delegateExpiresAt}
+              >
+                Confirm delegation
+              </Button>
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => {
+                  setAction("idle");
+                  setDelegateUserId("");
+                  setDelegateExpiresAt(defaultDelegateExpiresAt);
+                }}
+              >
+                Cancel
+              </Button>
+            </div>
+          </div>
+        )}
       </CardContent>
 
       <Separator />
 
       <CardFooter className="flex flex-wrap gap-2 pt-3">
-        <Button size="sm" onClick={onApprove} className="gap-1.5">
+        <Button
+          size="sm"
+          onClick={() => {
+            recordDecision("approved");
+            onApprove();
+          }}
+          className="gap-1.5"
+        >
           <ShieldCheck className="h-4 w-4" />
           Approve & promote
         </Button>
@@ -170,12 +295,16 @@ export function GateCard({
         <Button
           size="sm"
           variant="outline"
-          className="text-destructive hover:text-destructive"
+          className="text-danger-soft-foreground hover:text-danger-soft-foreground"
           onClick={() => setAction(action === "reject" ? "idle" : "reject")}
         >
           Reject
         </Button>
-        <Button size="sm" variant="ghost" onClick={() => setAction("delegate")}>
+        <Button
+          size="sm"
+          variant="ghost"
+          onClick={() => setAction(action === "delegate" ? "idle" : "delegate")}
+        >
           Delegate
         </Button>
       </CardFooter>

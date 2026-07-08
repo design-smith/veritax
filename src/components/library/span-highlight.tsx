@@ -34,7 +34,7 @@ export function SpanHighlight({
       className={cn(
         "cursor-default rounded-sm px-0.5 transition-colors",
         isActive
-          ? "highlighted bg-amber-200 text-amber-900 dark:bg-amber-800 dark:text-amber-100"
+          ? "highlighted bg-warning-soft text-warning-soft-foreground dark:bg-warning-soft dark:text-warning-soft-foreground"
           : "bg-transparent",
         hasReverseCitations && "underline decoration-dotted decoration-muted-foreground cursor-pointer",
         className,

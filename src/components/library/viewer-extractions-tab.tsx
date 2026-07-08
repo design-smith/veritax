@@ -1,9 +1,7 @@
 "use client";
 
 import { Edit3 } from "lucide-react";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Separator } from "@/components/ui/separator";
 import { cn } from "@/lib/utils";
 
 export interface Extraction {
@@ -22,9 +20,9 @@ interface ViewerExtractionsTabProps {
 }
 
 function confidenceColor(conf: number): string {
-  if (conf >= 0.9) return "text-green-600";
-  if (conf >= 0.7) return "text-amber-600";
-  return "text-destructive";
+  if (conf >= 0.9) return "text-success-soft-foreground";
+  if (conf >= 0.7) return "text-warning-soft-foreground";
+  return "text-danger-soft-foreground";
 }
 
 export function ViewerExtractionsTab({ extractions, onFieldClick, onCorrect }: ViewerExtractionsTabProps) {

@@ -53,7 +53,7 @@ export function DeltaDigestSection({
   if (visible.length === 0) {
     return (
       <div className={cn("flex flex-col items-center gap-2 py-8 text-center", className)}>
-        <CheckCircle className="h-8 w-8 text-green-500" />
+        <CheckCircle className="h-8 w-8 text-success-soft-foreground" />
         <p className="text-sm font-medium">All caught up</p>
         <p className="text-xs text-muted-foreground">No new changes since your last visit.</p>
       </div>

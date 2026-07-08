@@ -1,21 +1,21 @@
 "use client";
 
-import { ArrowLeft, Hash, Shield } from "lucide-react";
+import { ArrowLeft, Hash } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import type { Document } from "@/lib/mock/types";
 import { cn } from "@/lib/utils";
 
 const CUSTODY_STYLES: Record<Document["custody"], string> = {
-  materialized: "border-green-300 bg-green-50 text-green-700",
-  "extract-only": "border-blue-300 bg-blue-50 text-blue-700",
+  materialized: "border-transparent bg-success-soft text-success-soft-foreground",
+  "extract-only": "border-transparent bg-info-soft text-info-soft-foreground",
   reference: "border-border text-muted-foreground",
 };
 
 const SENSITIVITY_STYLES: Record<Document["sensitivity"], string> = {
   standard: "",
-  sensitive: "border-amber-300 bg-amber-50 text-amber-700",
-  privileged: "border-red-300 bg-red-50 text-red-700",
+  sensitive: "border-transparent bg-warning-soft text-warning-soft-foreground",
+  privileged: "border-transparent bg-danger-soft text-danger-soft-foreground",
 };
 
 interface ViewerHeaderProps {

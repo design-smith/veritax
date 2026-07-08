@@ -9,13 +9,13 @@ import type { Event } from "@/lib/mock/types";
 import { cn } from "@/lib/utils";
 
 const TYPE_COLORS: Record<string, string> = {
-  finding_created:    "border-red-200 text-red-700",
-  finding_resolved:   "border-green-200 text-green-700",
-  run_completed:      "border-blue-200 text-blue-700",
-  gate_requested:     "border-amber-200 text-amber-700",
-  document_ingested:  "border-purple-200 text-purple-700",
-  staleness_detected: "border-amber-200 text-amber-700",
-  obligation_due:     "border-red-200 text-red-700",
+  finding_created:    "border-danger/25 text-danger-soft-foreground",
+  finding_resolved:   "border-success/25 text-success-soft-foreground",
+  run_completed:      "border-info/25 text-info-soft-foreground",
+  gate_requested:     "border-warning/25 text-warning-soft-foreground",
+  document_ingested:  "border-discovery/25 text-discovery-soft-foreground",
+  staleness_detected: "border-warning/25 text-warning-soft-foreground",
+  obligation_due:     "border-danger/25 text-danger-soft-foreground",
 };
 
 interface AuditLogExplorerProps {

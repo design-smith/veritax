@@ -52,7 +52,7 @@ export function PendingRequestsQueue({ requests, onApprove, onDeny, className }:
               <Check className="h-3 w-3" />
               Approve
             </Button>
-            <Button size="sm" variant="outline" className="h-7 gap-1 px-2.5 text-xs text-destructive border-destructive/30 hover:bg-destructive/5"
+            <Button size="sm" variant="outline" className="h-7 gap-1 px-2.5 text-xs text-danger-soft-foreground border-danger/30 hover:bg-danger/[0.05]"
               onClick={() => onDeny(req.id)}>
               <X className="h-3 w-3" />
               Deny

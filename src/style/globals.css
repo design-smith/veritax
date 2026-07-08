@@ -6,7 +6,7 @@
   :root {
     color-scheme: light;
 
-    /* OpenAI Apps SDK UI inspired foundation, adapted for Tailwind 3 OKLCH channels. */
+    /* OpenAI Apps SDK UI adapter, translated for Tailwind 3 OKLCH channel tokens. */
     --font-sans: ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans",
       Helvetica, Arial, "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol", sans-serif;
     --font-serif: Georgia, Cambria, "Times New Roman", Times, serif;
@@ -37,6 +37,7 @@
     --surface-secondary: 0.982 0 0;
     --surface-tertiary: 0.955 0 0;
     --surface-elevated: 1 0 0;
+    --surface-elevated-secondary: 0.982 0 0;
     --border-subtle: 0.94 0 0;
     --border-strong: 0.82 0 0;
 
@@ -52,6 +53,10 @@
     --warning-foreground: 1 0 0;
     --warning-soft: 0.96 0.04 70;
     --warning-soft-foreground: 0.46 0.11 58;
+    --caution: 0.74 0.15 86;
+    --caution-foreground: 0.14 0 0;
+    --caution-soft: 0.97 0.04 92;
+    --caution-soft-foreground: 0.42 0.10 86;
     --danger: 0.58 0.22 27;
     --danger-foreground: 1 0 0;
     --danger-soft: 0.96 0.04 27;
@@ -108,6 +113,7 @@
     --sidebar-ring: 0.56 0.18 255;
   }
 
+  [data-theme="dark"],
   .dark {
     color-scheme: dark;
     --background: 0.18 0 0;
@@ -134,6 +140,7 @@
     --surface-secondary: 0.25 0 0;
     --surface-tertiary: 0.30 0 0;
     --surface-elevated: 0.28 0 0;
+    --surface-elevated-secondary: 0.32 0 0;
     --border-subtle: 0.30 0 0;
     --border-strong: 0.43 0 0;
 
@@ -149,6 +156,10 @@
     --warning-foreground: 0.12 0 0;
     --warning-soft: 0.30 0.06 58;
     --warning-soft-foreground: 0.82 0.12 58;
+    --caution: 0.82 0.13 86;
+    --caution-foreground: 0.14 0 0;
+    --caution-soft: 0.31 0.06 86;
+    --caution-soft-foreground: 0.86 0.11 86;
     --danger: 0.68 0.20 27;
     --danger-foreground: 0.12 0 0;
     --danger-soft: 0.30 0.07 27;
@@ -260,6 +271,14 @@
     background-color: oklch(var(--surface-elevated));
   }
 
+  .bg-surface-elevated-secondary {
+    background-color: oklch(var(--surface-elevated-secondary));
+  }
+
+  .bg-sdk-overlay {
+    background-color: color-mix(in oklch, oklch(var(--foreground)) 42%, transparent);
+  }
+
   .border-subtle {
     border-color: oklch(var(--border-subtle));
   }
@@ -331,7 +350,31 @@
     box-shadow: var(--shadow-300);
   }
 
+  .shadow-elevation-400 {
+    box-shadow: var(--shadow-400);
+  }
+
   .control-ring {
+    @apply outline-none focus-visible:ring-2 focus-visible:ring-ring/35;
+  }
+
+  .sdk-card {
+    @apply rounded-xl border border-border bg-surface text-card-foreground shadow-hairline;
+  }
+
+  .sdk-panel {
+    @apply rounded-xl border border-border bg-surface-secondary text-foreground;
+  }
+
+  .sdk-row {
+    @apply border-border bg-surface transition-colors hover:bg-surface-secondary;
+  }
+
+  .sdk-icon-tile {
+    @apply inline-flex shrink-0 items-center justify-center rounded-md bg-primary/8 text-foreground;
+  }
+
+  .sdk-focus-ring {
     @apply outline-none focus-visible:ring-2 focus-visible:ring-ring/35;
   }
 

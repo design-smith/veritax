@@ -1,51 +1,65 @@
-import { describe, it, expect, vi } from "vitest";
+import { useState } from "react";
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { OnboardingRail } from "../onboarding-rail";
+import { describe, expect, it } from "vitest";
+
+import { OnboardingRail, type OnboardingStage } from "../onboarding-rail";
 
 const STAGES = ["Connect", "Ingest", "Teach", "Reveal"] as const;
 
+function RailHarness({ replayEnabled = true }: { replayEnabled?: boolean }) {
+  const [currentStage] = useState<OnboardingStage>("Reveal");
+  const [completedStages] = useState<OnboardingStage[]>(["Connect", "Ingest", "Teach"]);
+  const [replayed, setReplayed] = useState(false);
+
+  return (
+    <>
+      <OnboardingRail
+        currentStage={currentStage}
+        completedStages={completedStages}
+        onReplay={replayEnabled ? () => setReplayed(true) : undefined}
+      />
+      <p>Replay requested: {replayed ? "yes" : "no"}</p>
+    </>
+  );
+}
+
 describe("OnboardingRail", () => {
-  it("renders all four stage labels", () => {
-    render(<OnboardingRail currentStage="Connect" completedStages={[]} onReplay={undefined} />);
-    STAGES.forEach((s) => expect(screen.getByText(s)).toBeInTheDocument());
-  });
+  it("renders all stages with active and completed state", () => {
+    render(<RailHarness />);
 
-  it("marks the active stage with aria-current='step'", () => {
-    render(<OnboardingRail currentStage="Ingest" completedStages={["Connect"]} onReplay={undefined} />);
-    expect(screen.getByTestId("stage-Ingest")).toHaveAttribute("aria-current", "step");
-  });
-
-  it("marks completed stages with a completed class", () => {
-    render(<OnboardingRail currentStage="Teach" completedStages={["Connect", "Ingest"]} onReplay={undefined} />);
+    STAGES.forEach((stage) => expect(screen.getByText(stage)).toBeInTheDocument());
+    expect(screen.getByTestId("stage-Reveal")).toHaveAttribute("aria-current", "step");
     expect(screen.getByTestId("stage-Connect")).toHaveClass("completed");
     expect(screen.getByTestId("stage-Ingest")).toHaveClass("completed");
-    expect(screen.getByTestId("stage-Teach")).not.toHaveClass("completed");
-  });
-
-  it("does not mark future stages as completed", () => {
-    render(<OnboardingRail currentStage="Connect" completedStages={[]} onReplay={undefined} />);
+    expect(screen.getByTestId("stage-Teach")).toHaveClass("completed");
     expect(screen.getByTestId("stage-Reveal")).not.toHaveClass("completed");
   });
 
-  it("shows Replay button when onReplay is provided (admin flag)", () => {
+  it("does not mark future stages as completed", () => {
     render(
-      <OnboardingRail currentStage="Reveal" completedStages={["Connect","Ingest","Teach"]} onReplay={vi.fn()} />
+      <OnboardingRail
+        currentStage="Connect"
+        completedStages={[]}
+        onReplay={undefined}
+      />,
     );
-    expect(screen.getByRole("button", { name: /replay/i })).toBeInTheDocument();
+
+    expect(screen.getByTestId("stage-Reveal")).not.toHaveClass("completed");
   });
 
-  it("does not show Replay button when onReplay is undefined", () => {
-    render(<OnboardingRail currentStage="Connect" completedStages={[]} onReplay={undefined} />);
+  it("shows no replay control when replay is not available", () => {
+    render(<RailHarness replayEnabled={false} />);
+
     expect(screen.queryByRole("button", { name: /replay/i })).not.toBeInTheDocument();
   });
 
-  it("calls onReplay when Replay clicked", async () => {
-    const onReplay = vi.fn();
-    render(
-      <OnboardingRail currentStage="Reveal" completedStages={["Connect","Ingest","Teach"]} onReplay={onReplay} />
-    );
-    await userEvent.click(screen.getByRole("button", { name: /replay/i }));
-    expect(onReplay).toHaveBeenCalledOnce();
+  it("requests replay through the visible replay control", async () => {
+    const user = userEvent.setup();
+    render(<RailHarness />);
+
+    await user.click(screen.getByRole("button", { name: /replay journey/i }));
+
+    expect(screen.getByText("Replay requested: yes")).toBeInTheDocument();
   });
 });

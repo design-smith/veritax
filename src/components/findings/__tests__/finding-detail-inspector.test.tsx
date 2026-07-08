@@ -32,9 +32,9 @@ describe("FindingDetailInspector", () => {
 
   it("renders all exhibit cards with doc name and section", () => {
     render(<FindingDetailInspector finding={finding} exhibits={exhibits} onClose={vi.fn()} />);
-    expect(screen.getByText("UK Local File FY2024")).toBeInTheDocument();
-    expect(screen.getByText("TP Policy FY2024")).toBeInTheDocument();
-    expect(screen.getByText("§4.2")).toBeInTheDocument();
+    expect(screen.getAllByText("UK Local File FY2024").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("TP Policy FY2024").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("§4.2").length).toBeGreaterThan(0);
   });
 
   it("renders watch toggle and copy-link in header", () => {

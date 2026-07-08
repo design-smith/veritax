@@ -8,10 +8,10 @@ type DocType = "local-file" | "master-file" | "ica" | "benchmark" | "memo";
 type AssignmentStatus = "assigned" | "in-progress" | "changes-requested" | "signed";
 
 const STATUS_COLORS: Record<AssignmentStatus, string> = {
-  assigned:           "border-amber-300 bg-amber-50 text-amber-700",
-  "in-progress":      "border-blue-300 bg-blue-50 text-blue-700",
-  "changes-requested":"border-red-300 bg-red-50 text-red-700",
-  signed:             "border-green-300 bg-green-50 text-green-700",
+  assigned:           "border-transparent bg-warning-soft text-warning-soft-foreground",
+  "in-progress":      "border-transparent bg-info-soft text-info-soft-foreground",
+  "changes-requested":"border-transparent bg-danger-soft text-danger-soft-foreground",
+  signed:             "border-transparent bg-success-soft text-success-soft-foreground",
 };
 
 export interface ReviewAssignment {
@@ -46,7 +46,7 @@ export function ReviewQueue({ assignments, onOpen, className }: ReviewQueueProps
                 {a.status}
               </Badge>
               {a.redlineCount > 0 && (
-                <Badge variant="outline" className="text-[10px] border-amber-300 text-amber-700">
+                <Badge variant="outline" className="text-[10px] border-warning/25 text-warning-soft-foreground">
                   {a.redlineCount} changes
                 </Badge>
               )}

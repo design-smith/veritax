@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import type { ComponentProps } from "react";
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { BriefingContent } from "../briefing-content";
@@ -48,6 +49,7 @@ function Wrapper({
 }
 
 const requesterMap = Object.fromEntries(mockUsers.map((u) => [u.id, u]));
+type BriefingProps = ComponentProps<typeof BriefingContent>;
 
 function makeProps() {
   return {
@@ -67,6 +69,45 @@ function makeProps() {
     onNavigateObligation: vi.fn(),
     onBoardPack: vi.fn(),
   };
+}
+
+function makeTrackedProps(
+  overrides: Partial<BriefingProps> = {},
+) {
+  const calls = {
+    acknowledged: [] as string[],
+    opened: [] as string[],
+    approved: [] as string[],
+    changes: [] as Array<{ gateId: string; comment: string }>,
+    rejected: [] as Array<{ gateId: string; reason: string }>,
+    delegated: [] as Array<{ gateId: string; userId: string; expiresAt: string }>,
+    approvedRuns: [] as string[],
+    dismissedCommitments: [] as string[],
+    obligationHrefs: [] as string[],
+    boardPacks: 0,
+  };
+
+  const props: BriefingProps = {
+    ...makeProps(),
+    onAcknowledge: (eventId: string) => calls.acknowledged.push(eventId),
+    onOpen: (objectRef: string) => calls.opened.push(objectRef),
+    onApprove: (gateId: string) => calls.approved.push(gateId),
+    onRequestChanges: (gateId: string, comment: string) =>
+      calls.changes.push({ gateId, comment }),
+    onReject: (gateId: string, reason: string) => calls.rejected.push({ gateId, reason }),
+    onDelegate: (gateId: string, userId: string, expiresAt: string) =>
+      calls.delegated.push({ gateId, userId, expiresAt }),
+    onApproveRun: (commitmentId: string) => calls.approvedRuns.push(commitmentId),
+    onDismissCommitment: (commitmentId: string) =>
+      calls.dismissedCommitments.push(commitmentId),
+    onNavigateObligation: (href: string) => calls.obligationHrefs.push(href),
+    onBoardPack: () => {
+      calls.boardPacks += 1;
+    },
+    ...overrides,
+  };
+
+  return { calls, props };
 }
 
 describe("BriefingContent", () => {
@@ -130,6 +171,24 @@ describe("BriefingContent", () => {
     expect(screen.getByText(/get started/i)).toBeInTheDocument();
   });
 
+  it("renders the cold-start onboarding journey instead of an empty report", () => {
+    render(
+      <Wrapper>
+        <BriefingContent
+          {...makeProps()}
+          events={[]}
+          gates={[]}
+          obligations={[]}
+          commitments={[]}
+        />
+      </Wrapper>,
+    );
+
+    expect(screen.getByText(/connect sources/i)).toBeInTheDocument();
+    expect(screen.getByText(/run mirror/i)).toBeInTheDocument();
+    expect(screen.getByText(/review findings/i)).toBeInTheDocument();
+  });
+
   it("shows degraded sources in the neutral compact status area", () => {
     render(
       <Wrapper>
@@ -137,8 +196,22 @@ describe("BriefingContent", () => {
       </Wrapper>,
     );
 
-    expect(screen.getByRole("alert")).toBeInTheDocument();
-    expect(screen.getByText(/SAP ERP/)).toBeInTheDocument();
+    expect(screen.getByRole("alert")).toHaveTextContent(/SAP ERP/);
+  });
+
+  it("lists degraded sources in one consolidated briefing banner", () => {
+    render(
+      <Wrapper>
+        <BriefingContent {...makeProps()} degradedSources={["SAP ERP", "Payroll System"]} />
+      </Wrapper>,
+    );
+
+    const banner = screen.getByRole("alert", {
+      name: /degraded sources affect this brief/i,
+    });
+    expect(banner).toHaveTextContent("SAP ERP");
+    expect(banner).toHaveTextContent("Payroll System");
+    expect(banner).toHaveTextContent(/Affected sections/i);
   });
 
   it("renders all top metrics with the same neutral tile treatment", () => {
@@ -182,7 +255,7 @@ describe("BriefingContent", () => {
     await user.type(screen.getByRole("textbox", { name: /ask this brief/i }), "What decisions are pending?");
     await user.click(screen.getByRole("button", { name: /send briefing question/i }));
 
-    expect(screen.getByText(/pending review/i)).toBeInTheDocument();
+    expect(screen.getAllByText(/pending review/i).length).toBeGreaterThan(0);
   });
 
   it("answers a suggested attention prompt from the current briefing data", async () => {
@@ -218,6 +291,87 @@ describe("BriefingContent", () => {
     await user.click(screen.getByRole("button", { name: `Acknowledge ${event.description}` }));
     expect(props.onAcknowledge).toHaveBeenCalledWith(event.id);
     expect(screen.queryByText(event.description)).not.toBeInTheDocument();
+  });
+
+  it("keeps pending gate decisions actionable inside the expanded to-do rail", async () => {
+    const user = userEvent.setup();
+    const gate = mockGateRequests[0];
+    const { calls, props } = makeTrackedProps({
+      events: [],
+      gates: [gate],
+      obligations: [],
+      commitments: [],
+    });
+
+    render(
+      <Wrapper>
+        <BriefingContent {...props} />
+      </Wrapper>,
+    );
+
+    expect(screen.getByRole("button", { name: /since you were here/i })).toHaveAttribute(
+      "aria-expanded",
+      "true",
+    );
+    expect(screen.getByText(gate.objectName)).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: /approve & promote/i }));
+
+    expect(calls.approved).toEqual([gate.id]);
+    expect(screen.queryByText(gate.objectName)).not.toBeInTheDocument();
+  });
+
+  it("can request changes on a gate without navigating away from the brief", async () => {
+    const user = userEvent.setup();
+    const gate = mockGateRequests[1];
+    const { calls, props } = makeTrackedProps({
+      events: [],
+      gates: [gate],
+      obligations: [],
+      commitments: [],
+    });
+
+    render(
+      <Wrapper>
+        <BriefingContent {...props} />
+      </Wrapper>,
+    );
+
+    await user.click(screen.getByRole("button", { name: /request changes/i }));
+    await user.type(screen.getByRole("textbox", { name: /comment/i }), "Please add the missing citation.");
+    await user.click(screen.getByRole("button", { name: /^send$/i }));
+
+    expect(calls.changes).toEqual([
+      {
+        gateId: gate.id,
+        comment: "Please add the missing citation.",
+      },
+    ]);
+    expect(screen.queryByText(gate.objectName)).not.toBeInTheDocument();
+  });
+
+  it("runs the board-pack plan and announces the Documents handoff", async () => {
+    const user = userEvent.setup();
+    const { calls, props } = makeTrackedProps({ gates: [] });
+
+    render(
+      <Wrapper role="vp">
+        <BriefingContent {...props} />
+      </Wrapper>,
+    );
+
+    await user.click(screen.getByRole("button", { name: /generate board pack/i }));
+
+    expect(calls.boardPacks).toBe(1);
+    expect(screen.getByRole("link", { name: /view run/i })).toHaveAttribute(
+      "href",
+      "/runs/r-board-pack",
+    );
+    expect(screen.getByRole("link", { name: /open board pack in documents/i })).toHaveAttribute(
+      "href",
+      "/documents?type=board-pack&run=r-board-pack",
+    );
+    expect(screen.getByText(/artifact lands in documents/i)).toBeInTheDocument();
   });
 
   it("expands obligations and keeps navigation actionable", async () => {

@@ -32,7 +32,7 @@ function DiffBadge({ value }: { value: number }) {
       variant="outline"
       className={cn(
         "text-xs ml-2",
-        value > 0 ? "border-red-300 text-red-700" : value < 0 ? "border-green-300 text-green-700" : "",
+        value > 0 ? "border-danger/25 text-danger-soft-foreground" : value < 0 ? "border-success/25 text-success-soft-foreground" : "",
       )}
     >
       {label}

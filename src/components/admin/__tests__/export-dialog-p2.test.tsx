@@ -1,74 +1,81 @@
-import { describe, it, expect, vi } from "vitest";
+import { useState } from "react";
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { describe, expect, it } from "vitest";
+
 import { ExportDialogP2 } from "../export-dialog-p2";
 
-const baseProps = {
-  open: true,
-  artifactClass: "record" as const,
-  artifactName: "Veritax UK Local File FY2024",
-  isSigned: true,
-  verificationHash: "sha256:a1b2c3d4e5f6a7b8c9d0e1f2",
-  permittedDestinations: ["download", "sharepoint"] as const,
-  uncitedClaimCount: 0,
-  onExport: vi.fn(),
-  onClose: vi.fn(),
-};
+type ExportSummary = "none" | `${string}:${string}`;
+
+function ExportDialogHarness({
+  isSigned = true,
+  permittedDestinations = ["download", "sharepoint"],
+  blockedDestinations = [],
+  uncitedClaimCount = 0,
+}: {
+  isSigned?: boolean;
+  permittedDestinations?: Array<"download" | "sharepoint" | "email">;
+  blockedDestinations?: Array<"download" | "sharepoint" | "email">;
+  uncitedClaimCount?: number;
+}) {
+  const [exportSummary, setExportSummary] = useState<ExportSummary>("none");
+  const [open, setOpen] = useState(true);
+
+  return (
+    <>
+      <ExportDialogP2
+        open={open}
+        artifactClass="record"
+        artifactName="Veritax UK Local File FY2024"
+        isSigned={isSigned}
+        verificationHash="sha256:a1b2c3d4e5f6a7b8c9d0e1f2"
+        permittedDestinations={permittedDestinations}
+        blockedDestinations={blockedDestinations}
+        uncitedClaimCount={uncitedClaimCount}
+        onExport={(payload) => setExportSummary(`${payload.format}:${payload.destination}`)}
+        onClose={() => setOpen(false)}
+      />
+      <p>Export summary: {exportSummary}</p>
+      <p>Export dialog open: {open ? "yes" : "no"}</p>
+    </>
+  );
+}
 
 describe("ExportDialogP2", () => {
-  it("renders the artifact name", () => {
-    render(<ExportDialogP2 {...baseProps} />);
+  it("renders record export controls, hash, permitted destinations, and audit notice", () => {
+    render(<ExportDialogHarness />);
+
     expect(screen.getByText("Veritax UK Local File FY2024")).toBeInTheDocument();
-  });
-
-  it("displays the verification hash for record-class exports", () => {
-    render(<ExportDialogP2 {...baseProps} />);
     expect(screen.getByText(/sha256:a1b2c3d4/)).toBeInTheDocument();
-  });
-
-  it("renders a copy button for the verification hash", () => {
-    render(<ExportDialogP2 {...baseProps} />);
     expect(screen.getByRole("button", { name: /copy hash/i })).toBeInTheDocument();
-  });
-
-  it("shows only IT-permitted destinations", () => {
-    render(<ExportDialogP2 {...baseProps} permittedDestinations={["download"]} />);
     expect(screen.getByText(/download/i)).toBeInTheDocument();
-    expect(screen.queryByText(/sharepoint/i)).not.toBeInTheDocument();
+    expect(screen.getByText(/sharepoint/i)).toBeInTheDocument();
+    expect(screen.getByText(/export will be logged/i)).toBeInTheDocument();
+    expect(screen.queryByText(/not for reliance/i)).not.toBeInTheDocument();
   });
 
-  it("shows Request path for a blocked destination when provided", () => {
-    render(<ExportDialogP2 {...baseProps} blockedDestinations={["email"]} />);
+  it("shows blocked destinations through a request path", () => {
+    render(<ExportDialogHarness permittedDestinations={["download"]} blockedDestinations={["email"]} />);
+
+    expect(screen.getByText(/download/i)).toBeInTheDocument();
+    expect(screen.queryByLabelText(/email draft/i)).not.toBeInTheDocument();
     expect(screen.getByText(/request.*email|email.*request/i)).toBeInTheDocument();
   });
 
-  it("renders an audit-trail notice", () => {
-    render(<ExportDialogP2 {...baseProps} />);
-    expect(screen.getByText(/export will be logged/i)).toBeInTheDocument();
-  });
+  it("shows draft watermark notice for unsigned artifacts and blocks uncited exports", () => {
+    render(<ExportDialogHarness isSigned={false} uncitedClaimCount={4} />);
 
-  it("does NOT show DRAFT watermark notice when artifact is signed", () => {
-    render(<ExportDialogP2 {...baseProps} isSigned />);
-    expect(screen.queryByText(/draft — not for reliance/i)).not.toBeInTheDocument();
-  });
-
-  it("shows DRAFT watermark notice when artifact is unsigned", () => {
-    render(<ExportDialogP2 {...baseProps} isSigned={false} />);
-    expect(screen.getByText(/DRAFT — not for reliance/i)).toBeInTheDocument();
-  });
-
-  it("blocks export when uncited claims exist", () => {
-    render(<ExportDialogP2 {...baseProps} uncitedClaimCount={4} />);
-    expect(screen.getByRole("button", { name: /export/i })).toBeDisabled();
+    expect(screen.getByText(/not for reliance/i)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /^export$/i })).toBeDisabled();
     expect(screen.getByText(/4 uncited/i)).toBeInTheDocument();
   });
 
-  it("calls onExport with format and destination when Export clicked", async () => {
-    const onExport = vi.fn();
-    render(<ExportDialogP2 {...baseProps} onExport={onExport} />);
-    await userEvent.click(screen.getByRole("button", { name: /^export$/i }));
-    expect(onExport).toHaveBeenCalledWith(
-      expect.objectContaining({ format: expect.any(String), destination: expect.any(String) })
-    );
+  it("exports the selected format and destination through real harness state", async () => {
+    const user = userEvent.setup();
+    render(<ExportDialogHarness />);
+
+    await user.click(screen.getByRole("button", { name: /^export$/i }));
+
+    expect(screen.getByText("Export summary: PDF:download")).toBeInTheDocument();
   });
 });

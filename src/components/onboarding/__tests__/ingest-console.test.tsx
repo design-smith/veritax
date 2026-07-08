@@ -1,6 +1,8 @@
-import { describe, it, expect, vi } from "vitest";
+import { useState } from "react";
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { describe, expect, it } from "vitest";
+
 import { IngestConsole } from "../ingest-console";
 
 const counters = {
@@ -21,50 +23,71 @@ const problemItems = [
   { id: "p2", name: "duplicate-policy.pdf", issue: "duplicate" as const },
 ];
 
+function IngestHarness({
+  initialProblems = problemItems,
+}: {
+  initialProblems?: typeof problemItems;
+}) {
+  const [visibleProblems, setVisibleProblems] = useState(initialProblems);
+  const [latestFix, setLatestFix] = useState("none");
+  const [continued, setContinued] = useState(false);
+
+  return (
+    <>
+      <IngestConsole
+        counters={counters}
+        streamItems={streamItems}
+        problemItems={visibleProblems}
+        onContinue={() => setContinued(true)}
+        onFixProblem={(itemId, action) => {
+          setVisibleProblems((current) => current.filter((item) => item.id !== itemId));
+          setLatestFix(`${itemId}:${action}`);
+        }}
+      />
+      <p>Latest fix: {latestFix}</p>
+      <p>Ingest continued: {continued ? "yes" : "no"}</p>
+    </>
+  );
+}
+
 describe("IngestConsole", () => {
-  it("renders document count", () => {
-    render(<IngestConsole counters={counters} streamItems={streamItems} problemItems={[]} onContinue={vi.fn()} onFixProblem={vi.fn()} />);
+  it("shows the ingest counters and classification stream", () => {
+    render(<IngestHarness initialProblems={[]} />);
+
     expect(screen.getByTestId("counter-docs")).toHaveTextContent("24");
-  });
-
-  it("renders entities discovered count", () => {
-    render(<IngestConsole counters={counters} streamItems={streamItems} problemItems={[]} onContinue={vi.fn()} onFixProblem={vi.fn()} />);
     expect(screen.getByTestId("counter-entities")).toHaveTextContent("6");
-  });
-
-  it("renders agreements found count", () => {
-    render(<IngestConsole counters={counters} streamItems={streamItems} problemItems={[]} onContinue={vi.fn()} onFixProblem={vi.fn()} />);
     expect(screen.getByTestId("counter-agreements")).toHaveTextContent("8");
-  });
-
-  it("renders classification stream items", () => {
-    render(<IngestConsole counters={counters} streamItems={streamItems} problemItems={[]} onContinue={vi.fn()} onFixProblem={vi.fn()} />);
     expect(screen.getByText("Veritax UK Local File FY2024.pdf")).toBeInTheDocument();
     expect(screen.getByText("IC Royalty Agreement US-UK.pdf")).toBeInTheDocument();
+    expect(screen.getByText(/No problems.*all documents processed cleanly/i)).toBeInTheDocument();
   });
 
-  it("renders problem pile when problems exist", () => {
-    render(<IngestConsole counters={counters} streamItems={streamItems} problemItems={problemItems} onContinue={vi.fn()} onFixProblem={vi.fn()} />);
+  it("shows the problem pile with issue labels", () => {
+    render(<IngestHarness />);
+
     expect(screen.getByText("corrupt-file.pdf")).toBeInTheDocument();
     expect(screen.getByText("duplicate-policy.pdf")).toBeInTheDocument();
-  });
-
-  it("shows issue type label for each problem item", () => {
-    render(<IngestConsole counters={counters} streamItems={streamItems} problemItems={problemItems} onContinue={vi.fn()} onFixProblem={vi.fn()} />);
     expect(screen.getByText("unreadable")).toBeInTheDocument();
     expect(screen.getByText("duplicate")).toBeInTheDocument();
   });
 
-  it("calls onFixProblem with item id when fix action clicked", async () => {
-    const onFixProblem = vi.fn();
-    render(<IngestConsole counters={counters} streamItems={streamItems} problemItems={problemItems} onContinue={vi.fn()} onFixProblem={onFixProblem} />);
-    const fixButtons = screen.getAllByRole("button", { name: /retry|skip|mark/i });
-    await userEvent.click(fixButtons[0]);
-    expect(onFixProblem).toHaveBeenCalledWith("p1", expect.any(String));
+  it("resolves a problem through the visible action controls", async () => {
+    const user = userEvent.setup();
+    render(<IngestHarness />);
+
+    await user.click(screen.getByRole("button", { name: /retry/i }));
+
+    expect(screen.getByText("Latest fix: p1:retry")).toBeInTheDocument();
+    expect(screen.queryByText("corrupt-file.pdf")).not.toBeInTheDocument();
+    expect(screen.getByText("duplicate-policy.pdf")).toBeInTheDocument();
   });
 
-  it("Continue to Teach button is present", () => {
-    render(<IngestConsole counters={counters} streamItems={streamItems} problemItems={[]} onContinue={vi.fn()} onFixProblem={vi.fn()} />);
-    expect(screen.getByRole("button", { name: /continue.*teach/i })).toBeInTheDocument();
+  it("continues to Teach through the public continue action", async () => {
+    const user = userEvent.setup();
+    render(<IngestHarness initialProblems={[]} />);
+
+    await user.click(screen.getByRole("button", { name: /continue.*teach/i }));
+
+    expect(screen.getByText("Ingest continued: yes")).toBeInTheDocument();
   });
 });

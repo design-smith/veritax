@@ -1,8 +1,10 @@
 "use client";
 
 import { VChart } from "@visactor/react-vchart";
+import { useEffect, useState } from "react";
 import type { ILinearProgressChartSpec } from "@visactor/vchart";
 import type { Datum } from "@visactor/vchart/esm/typings";
+import { readOklchToken } from "@/lib/openai-style";
 import { numberToPercentage } from "@/lib/utils";
 
 const getSpec = (
@@ -70,15 +72,21 @@ const getSpec = (
 
 export default function LinearProgress({
   label,
-  color,
+  colorToken,
   percentage,
   icon,
 }: {
   label: string;
-  color: string;
+  colorToken: string;
   percentage: number;
   icon: React.ReactNode;
 }) {
+  const [color, setColor] = useState("currentColor");
+
+  useEffect(() => {
+    setColor(readOklchToken(colorToken));
+  }, [colorToken]);
+
   return (
     <div>
       <div className="mb-1 flex items-center gap-x-2">

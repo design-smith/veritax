@@ -47,7 +47,7 @@ function RedlineText({ current, prior }: { current: string; prior: string }) {
           <span
             key={`del-${i}`}
             data-testid="redline-delete"
-            className="line-through decoration-red-500 text-red-600 dark:text-red-400 mr-1"
+            className="line-through decoration-danger text-danger-soft-foreground dark:text-danger-soft-foreground mr-1"
           >
             {word}
           </span>
@@ -60,7 +60,7 @@ function RedlineText({ current, prior }: { current: string; prior: string }) {
             <span
               key={`ins-${i}`}
               data-testid="redline-insert"
-              className="underline decoration-green-500 text-green-700 dark:text-green-400 mr-1"
+              className="underline decoration-success text-success-soft-foreground dark:text-success-soft-foreground mr-1"
             >
               {word}
             </span>

@@ -16,8 +16,8 @@ export interface CatalogEntry {
 }
 
 const POLICY_CONFIG: Record<ITPolicyState, { label: string; cls: string }> = {
-  "self-serve": { label: "Self-serve", cls: "border-green-300 bg-green-50 text-green-700" },
-  "request":    { label: "Request",    cls: "border-amber-300 bg-amber-50 text-amber-700" },
+  "self-serve": { label: "Self-serve", cls: "border-transparent bg-success-soft text-success-soft-foreground" },
+  "request":    { label: "Request",    cls: "border-transparent bg-warning-soft text-warning-soft-foreground" },
   "disabled":   { label: "Disabled",  cls: "border-border text-muted-foreground" },
 };
 

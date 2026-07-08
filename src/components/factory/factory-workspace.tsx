@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import type { ReactNode } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
 import { cn } from "@/lib/utils";
@@ -8,11 +9,11 @@ import { cn } from "@/lib/utils";
 export type SectionStatus = "generated" | "edited" | "stale" | "blocked" | "pending-self-check";
 
 const STATUS_DOT_COLORS: Record<SectionStatus, string> = {
-  generated:          "bg-green-500",
-  edited:             "bg-blue-500",
-  stale:              "bg-amber-500",
-  blocked:            "bg-red-500",
-  "pending-self-check": "bg-amber-400 animate-pulse",
+  generated:          "bg-success",
+  edited:             "bg-info",
+  stale:              "bg-warning",
+  blocked:            "bg-danger",
+  "pending-self-check": "bg-warning animate-pulse",
 };
 
 export interface WorkspaceSection {
@@ -29,24 +30,39 @@ type ContextTab = (typeof CONTEXT_TABS)[number];
 interface FactoryWorkspaceProps {
   sections: WorkspaceSection[];
   onSectionSelect: (sectionId: string) => void;
+  selectedSectionId?: string;
+  onInputChipOpen?: (chip: WorkspaceSection["inputChips"][number], section: WorkspaceSection) => void;
+  renderSectionCanvas?: (section: WorkspaceSection) => ReactNode;
+  renderContextPanel?: (tab: ContextTab, section: WorkspaceSection | undefined) => ReactNode;
   className?: string;
 }
 
-export function FactoryWorkspace({ sections, onSectionSelect, className }: FactoryWorkspaceProps) {
+export function FactoryWorkspace({
+  sections,
+  onSectionSelect,
+  selectedSectionId,
+  onInputChipOpen,
+  renderSectionCanvas,
+  renderContextPanel,
+  className,
+}: FactoryWorkspaceProps) {
   const [activeSection, setActiveSection] = useState(sections[0]?.id ?? "");
   const [activeContextTab, setActiveContextTab] = useState<ContextTab>("Sources");
 
-  const currentSection = sections.find((s) => s.id === activeSection) ?? sections[0];
+  const activeId = selectedSectionId ?? activeSection;
+  const currentSection = sections.find((s) => s.id === activeId) ?? sections[0];
 
   function handleSectionClick(sectionId: string) {
-    setActiveSection(sectionId);
+    if (!selectedSectionId) {
+      setActiveSection(sectionId);
+    }
     onSectionSelect(sectionId);
   }
 
   return (
-    <div className={cn("flex h-full overflow-hidden", className)}>
+    <div className={cn("flex h-full flex-col overflow-hidden laptop:flex-row", className)}>
       {/* ── Left: Outline panel ── */}
-      <aside className="w-52 shrink-0 overflow-y-auto border-r border-border bg-muted/10">
+      <aside className="max-h-44 w-full shrink-0 overflow-y-auto border-b border-border bg-muted/10 laptop:max-h-none laptop:w-52 laptop:border-b-0 laptop:border-r">
         <div className="p-3 space-y-0.5">
           <p className="px-2 py-1 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
             Outline
@@ -57,7 +73,7 @@ export function FactoryWorkspace({ sections, onSectionSelect, className }: Facto
               onClick={() => handleSectionClick(section.id)}
               className={cn(
                 "flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-xs transition-colors hover:bg-muted",
-                activeSection === section.id && "bg-muted font-medium",
+                activeId === section.id && "bg-muted font-medium",
               )}
             >
               <span
@@ -84,9 +100,16 @@ export function FactoryWorkspace({ sections, onSectionSelect, className }: Facto
               {currentSection.inputChips.length > 0 && (
                 <div className="flex flex-wrap gap-1.5">
                   {currentSection.inputChips.map((chip) => (
-                    <Badge key={chip.ref} variant="secondary" className="text-xs gap-1 cursor-pointer hover:bg-muted">
-                      {chip.label}
-                    </Badge>
+                    <button
+                      key={chip.ref}
+                      type="button"
+                      onClick={() => onInputChipOpen?.(chip, currentSection)}
+                      className="rounded-md focus:outline-none focus:ring-2 focus:ring-ring/35"
+                    >
+                      <Badge variant="secondary" className="text-xs gap-1 cursor-pointer hover:bg-muted">
+                        {chip.label}
+                      </Badge>
+                    </button>
                   ))}
                 </div>
               )}
@@ -95,18 +118,22 @@ export function FactoryWorkspace({ sections, onSectionSelect, className }: Facto
             <Separator />
 
             {/* Section content */}
-            <div className="prose prose-sm max-w-none">
-              <p className="text-sm leading-relaxed">{currentSection.content}</p>
-            </div>
+            {renderSectionCanvas ? (
+              renderSectionCanvas(currentSection)
+            ) : (
+              <div className="prose prose-sm max-w-none">
+                <p className="text-sm leading-relaxed">{currentSection.content}</p>
+              </div>
+            )}
 
             {/* Status notice */}
             {currentSection.status === "blocked" && (
-              <div className="rounded-md border border-red-200 bg-red-50 p-3 text-xs text-red-800 dark:border-red-800 dark:bg-red-950 dark:text-red-200">
+              <div className="rounded-md border border-danger/25 bg-danger-soft p-3 text-xs text-danger-soft-foreground dark:border-danger/30 dark:bg-danger-soft dark:text-danger-soft-foreground">
                 This section is blocked — resolve the conflict before exporting.
               </div>
             )}
             {currentSection.status === "stale" && (
-              <div className="rounded-md border border-amber-200 bg-amber-50 p-3 text-xs text-amber-800 dark:border-amber-800 dark:bg-amber-950 dark:text-amber-200">
+              <div className="rounded-md border border-warning/25 bg-warning-soft p-3 text-xs text-warning-soft-foreground dark:border-warning/30 dark:bg-warning-soft dark:text-warning-soft-foreground">
                 Source inputs have changed. Regenerate this section.
               </div>
             )}
@@ -115,7 +142,7 @@ export function FactoryWorkspace({ sections, onSectionSelect, className }: Facto
       </main>
 
       {/* ── Right: Context panel ── */}
-      <aside className="w-64 shrink-0 overflow-y-auto border-l border-border bg-muted/10">
+      <aside className="max-h-48 w-full shrink-0 overflow-y-auto border-t border-border bg-muted/10 laptop:max-h-none laptop:w-64 laptop:border-l laptop:border-t-0">
         {/* Simple state-driven tabs (same pattern as EntityPageContent) */}
         <div role="tablist" className="flex border-b border-border">
           {CONTEXT_TABS.map((tab) => (
@@ -136,6 +163,10 @@ export function FactoryWorkspace({ sections, onSectionSelect, className }: Facto
           ))}
         </div>
         <div className="p-3">
+          {renderContextPanel ? (
+            renderContextPanel(activeContextTab, currentSection)
+          ) : (
+            <>
           {activeContextTab === "Sources" && (
             <p className="text-xs text-muted-foreground">Source documents for {currentSection?.title}…</p>
           )}
@@ -144,6 +175,8 @@ export function FactoryWorkspace({ sections, onSectionSelect, className }: Facto
           )}
           {activeContextTab === "Checks" && (
             <p className="text-xs text-muted-foreground">Self-check results appear here after regeneration.</p>
+          )}
+            </>
           )}
         </div>
       </aside>

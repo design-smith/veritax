@@ -72,19 +72,40 @@ export function useChartTheme() {
 }
 
 const registerTheme = () => {
-  // Temporary solution to get the font from the body
-  // issue: https://github.com/VisActor/VChart/issues/3145
-  const font = window
-    .getComputedStyle(document.body)
-    .getPropertyValue("--font-instrument")
-    .trim();
+  const style = window.getComputedStyle(document.documentElement);
+  const bodyStyle = window.getComputedStyle(document.body);
+  const font =
+    style.getPropertyValue("--font-sans").trim() ||
+    bodyStyle.fontFamily ||
+    "ui-sans-serif, system-ui, sans-serif";
+  const chartColor = (token: string) => ["oklch", "(", style.getPropertyValue(token).trim(), ")"].join("");
   const lightTheme: Partial<ITheme> = {
     ...customLightTheme,
     fontFamily: font,
+    colorScheme: {
+      ...customLightTheme.colorScheme,
+      default: [
+        chartColor("--chart-1"),
+        chartColor("--chart-2"),
+        chartColor("--chart-3"),
+        chartColor("--chart-4"),
+        chartColor("--chart-5"),
+      ],
+    },
   };
   const darkTheme: Partial<ITheme> = {
     ...customDarkTheme,
     fontFamily: font,
+    colorScheme: {
+      ...customDarkTheme.colorScheme,
+      default: [
+        chartColor("--chart-1"),
+        chartColor("--chart-2"),
+        chartColor("--chart-3"),
+        chartColor("--chart-4"),
+        chartColor("--chart-5"),
+      ],
+    },
   };
   ThemeManager.registerTheme("light", lightTheme);
   ThemeManager.registerTheme("dark", darkTheme);

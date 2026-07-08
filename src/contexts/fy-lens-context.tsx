@@ -1,6 +1,14 @@
 "use client";
 
-import { createContext, useContext, useState } from "react";
+import {
+  cloneElement,
+  createContext,
+  useContext,
+  useState,
+  type HTMLAttributes,
+  type ReactElement,
+  type ReactNode,
+} from "react";
 import { Info } from "lucide-react";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 
@@ -16,7 +24,7 @@ interface FYLensContextValue {
 
 const FYLensContext = createContext<FYLensContextValue | null>(null);
 
-export function FYLensProvider({ children }: { children: React.ReactNode }) {
+export function FYLensProvider({ children }: { children: ReactNode }) {
   const [fy, setFYState] = useState(CURRENT_FY);
   const [period, setPeriod] = useState<string | null>(null);
 
@@ -39,6 +47,30 @@ export function useFYLens(): FYLensContextValue {
   return ctx;
 }
 
+export function useSealedMutationGuard() {
+  const { fy, isPast } = useFYLens();
+
+  return {
+    disabled: isPast,
+    reason: `${fy} is sealed. Open the current FY to act.`,
+  };
+}
+
+export function SealedMutationGuard({ children }: { children: ReactElement }) {
+  const { disabled, reason } = useSealedMutationGuard();
+
+  if (!disabled) return children;
+
+  return (
+    <span title={reason}>
+      {cloneElement(children, {
+        disabled: true,
+        "aria-disabled": true,
+      } as HTMLAttributes<HTMLElement>)}
+    </span>
+  );
+}
+
 // ── PastFYBanner ─────────────────────────────────────────────────────────────
 
 export function PastFYBanner() {
@@ -47,8 +79,8 @@ export function PastFYBanner() {
   if (!isPast) return null;
 
   return (
-    <Alert role="alert" className="rounded-none border-x-0 border-t-0 border-amber-400 bg-amber-50 text-amber-900 dark:border-amber-600 dark:bg-amber-950 dark:text-amber-100">
-      <Info className="h-4 w-4 text-amber-600 dark:text-amber-400" />
+    <Alert role="alert" className="rounded-none border-x-0 border-t-0 border-transparent bg-warning-soft text-warning-soft-foreground">
+      <Info className="h-4 w-4 text-warning-soft-foreground dark:text-warning-soft-foreground" />
       <AlertDescription>
         Viewing {fy} · records as filed/known.{" "}
         <span className="font-medium">

@@ -9,6 +9,7 @@ import {
   CheckCircle,
   ChevronDown,
   ExternalLink,
+  FileText,
   Mail,
   MessageSquare,
   Package,
@@ -25,6 +26,11 @@ import {
 } from "date-fns";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import {
+  createCommitmentPlanApprovedEvent,
+  DEMO_FRONTEND_TELEMETRY_CONTEXT,
+  recordFrontendTelemetryEvent,
+} from "@/lib/telemetry/product-telemetry";
 import { cn } from "@/lib/utils";
 import type {
   Commitment,
@@ -34,7 +40,14 @@ import type {
   Obligation,
   User,
 } from "@/lib/mock/types";
+import { GateCard } from "@/components/patterns/pat-5-gate-card";
 import { BoardPackAction } from "./board-pack-action";
+
+interface BoardPackResult {
+  runRef?: string;
+  documentHref?: string;
+  notification?: string;
+}
 
 interface BriefingContentProps {
   events: Event[];
@@ -52,7 +65,7 @@ interface BriefingContentProps {
   onApproveRun: (commitmentId: string) => void;
   onDismissCommitment: (commitmentId: string) => void;
   onNavigateObligation: (href: string) => void;
-  onBoardPack: () => void;
+  onBoardPack: () => BoardPackResult | void;
   className?: string;
 }
 
@@ -170,13 +183,15 @@ function sortObligations(obligations: Obligation[]): Obligation[] {
 }
 
 function buildWorkItems(obligations: Obligation[], commitments: Commitment[]): WorkItem[] {
-  const obligationItems: WorkItem[] = obligations.map((obligation) => ({
-    id: obligation.id,
-    kind: "obligation",
-    due: obligation.due,
-    days: daysUntil(obligation.due),
-    obligation,
-  }));
+  const obligationItems: WorkItem[] = sortObligations(obligations)
+    .slice(0, 5)
+    .map((obligation) => ({
+      id: obligation.id,
+      kind: "obligation",
+      due: obligation.due,
+      days: daysUntil(obligation.due),
+      obligation,
+    }));
 
   const commitmentItems: WorkItem[] = commitments
     .filter((commitment) => !["completed", "dismissed"].includes(commitment.planState))
@@ -381,7 +396,6 @@ function SourcesTile({ degradedSources }: { degradedSources?: string[] }) {
   return (
     <div
       data-metric-tile="Sources"
-      role={degradedCount > 0 ? "alert" : undefined}
       className="rounded-lg border border-border bg-card px-2 py-1.5 text-foreground sm:px-3 sm:py-2"
     >
       <div className="flex items-center gap-2">
@@ -396,6 +410,68 @@ function SourcesTile({ degradedSources }: { degradedSources?: string[] }) {
           {degradedCount > 0 ? degradedSources?.join(", ") : "current record"}
         </p>
       </div>
+    </div>
+  );
+}
+
+function DegradedSourcesBanner({ degradedSources }: { degradedSources?: string[] }) {
+  if (!degradedSources || degradedSources.length === 0) return null;
+
+  return (
+    <div
+      role="alert"
+      aria-label="Degraded sources affect this brief"
+      className="flex shrink-0 flex-col gap-2 rounded-lg border border-border bg-card px-3 py-2 text-sm text-card-foreground sm:flex-row sm:items-center sm:justify-between"
+    >
+      <div className="flex min-w-0 items-start gap-2">
+        <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground" />
+        <div className="min-w-0">
+          <p className="font-medium">Degraded sources affect this brief</p>
+          <p className="text-xs text-muted-foreground">
+            {degradedSources.join(", ")}. Affected sections: findings, citations,
+            generated answers, and board pack.
+          </p>
+        </div>
+      </div>
+      <Badge variant="outline" className="w-fit shrink-0 text-[10px]">
+        {degradedSources.length} source{degradedSources.length === 1 ? "" : "s"}
+      </Badge>
+    </div>
+  );
+}
+
+function BoardPackHandoffNotice({
+  runRef,
+  documentHref,
+  message,
+}: {
+  runRef?: string;
+  documentHref?: string;
+  message?: string;
+}) {
+  if (!runRef || !documentHref || !message) return null;
+
+  return (
+    <div
+      role="status"
+      aria-label="Board pack handoff"
+      className="flex shrink-0 flex-col gap-2 rounded-lg border border-border bg-card px-3 py-2 text-sm text-card-foreground sm:flex-row sm:items-center sm:justify-between"
+    >
+      <div className="flex min-w-0 items-start gap-2">
+        <FileText className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground" />
+        <div className="min-w-0">
+          <p className="font-medium">Board pack run created</p>
+          <p className="text-xs text-muted-foreground">{message}</p>
+        </div>
+      </div>
+      <a
+        href={documentHref}
+        className="inline-flex w-fit shrink-0 items-center gap-1 rounded-md border border-border bg-background px-2.5 py-1.5 text-xs font-medium text-foreground transition-colors hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/30"
+        aria-label="Open board pack in Documents"
+      >
+        <ExternalLink className="h-3.5 w-3.5" />
+        Documents
+      </a>
     </div>
   );
 }
@@ -608,21 +684,33 @@ function BriefingChatPanel({
 
 function TodoRail({
   events,
+  gates,
   obligations,
   commitments,
   workItems,
+  requesterMap,
   onAcknowledge,
   onOpen,
+  onApprove,
+  onRequestChanges,
+  onReject,
+  onDelegate,
   onNavigateObligation,
   onApproveRun,
   onDismissCommitment,
 }: {
   events: Event[];
+  gates: GateRequest[];
   obligations: Obligation[];
   commitments: Commitment[];
   workItems: WorkItem[];
+  requesterMap: Record<string, User>;
   onAcknowledge: (eventId: string) => void;
   onOpen: (objectRef: string) => void;
+  onApprove: (gateId: string) => void;
+  onRequestChanges: (gateId: string, comment: string) => void;
+  onReject: (gateId: string, reason: string) => void;
+  onDelegate: (gateId: string, userId: string, expiresAt: string) => void;
   onNavigateObligation: (href: string) => void;
   onApproveRun: (commitmentId: string) => void;
   onDismissCommitment: (commitmentId: string) => void;
@@ -652,7 +740,7 @@ function TodoRail({
       className="min-h-0"
       headerSlot={
         <Badge variant="outline" className="text-[10px]">
-          {events.length + obligationItems.length + commitmentItems.length} items
+          {events.length + gates.length + obligationItems.length + commitmentItems.length} items
         </Badge>
       }
     >
@@ -660,14 +748,25 @@ function TodoRail({
         <TodoSection
           id="since-you-were-here"
           label="Since you were here"
-          count={events.length}
+          count={events.length + gates.length}
           open={openSections.events}
           onToggle={() => toggleSection("events")}
         >
-          {events.length === 0 ? (
-            <RailEmpty text="No new record changes." />
+          {events.length === 0 && gates.length === 0 ? (
+            <RailEmpty text="No new record changes or gate decisions." />
           ) : (
             <ul className="space-y-2">
+              {gates.map((gate) => (
+                <GateTodoItem
+                  key={gate.id}
+                  gate={gate}
+                  requesterMap={requesterMap}
+                  onApprove={onApprove}
+                  onRequestChanges={onRequestChanges}
+                  onReject={onReject}
+                  onDelegate={onDelegate}
+                />
+              ))}
               {events.map((event) => (
                 <EventTodoRow
                   key={event.id}
@@ -726,6 +825,46 @@ function TodoRail({
         </TodoSection>
       </div>
     </PanelShell>
+  );
+}
+
+function defaultDelegateExpiry(gate: GateRequest): string {
+  return format(gateDeadline(gate), "yyyy-MM-dd'T'HH:mm");
+}
+
+function GateTodoItem({
+  gate,
+  requesterMap,
+  onApprove,
+  onRequestChanges,
+  onReject,
+  onDelegate,
+}: {
+  gate: GateRequest;
+  requesterMap: Record<string, User>;
+  onApprove: (gateId: string) => void;
+  onRequestChanges: (gateId: string, comment: string) => void;
+  onReject: (gateId: string, reason: string) => void;
+  onDelegate: (gateId: string, userId: string, expiresAt: string) => void;
+}) {
+  const requester = requesterFor(gate, requesterMap);
+  const delegateOptions = Object.values(requesterMap).filter((user) => user.id !== requester.id);
+
+  return (
+    <li>
+      <GateCard
+        gate={gate}
+        objectSummary={`${gate.objectType} pending review`}
+        requester={requester}
+        delegateOptions={delegateOptions}
+        defaultDelegateExpiresAt={defaultDelegateExpiry(gate)}
+        className="shadow-none"
+        onApprove={() => onApprove(gate.id)}
+        onRequestChanges={(comment) => onRequestChanges(gate.id, comment)}
+        onReject={(reason) => onReject(gate.id, reason)}
+        onDelegate={(userId, expiresAt) => onDelegate(gate.id, userId, expiresAt)}
+      />
+    </li>
   );
 }
 
@@ -960,9 +1099,24 @@ function RailEmpty({ text }: { text: string }) {
 }
 
 function ColdStartState({ onGetStarted }: { onGetStarted?: () => void }) {
+  const steps = [
+    {
+      title: "Connect sources",
+      text: "Bring in the record sources Mirror needs before findings can be trusted.",
+    },
+    {
+      title: "Run Mirror",
+      text: "Create the first run so Veritax can read flows, documents, and citations.",
+    },
+    {
+      title: "Review findings",
+      text: "Use gates and citations to move the first record items to ready for review.",
+    },
+  ];
+
   return (
     <div className="flex h-[calc(100dvh-3.5rem)] min-h-0 items-center justify-center p-6">
-      <div className="flex max-w-md flex-col items-center gap-4 rounded-lg border border-border bg-card p-8 text-center">
+      <div className="flex max-w-xl flex-col items-center gap-4 rounded-lg border border-border bg-card p-8 text-center">
         <div className="flex h-14 w-14 items-center justify-center rounded-full bg-primary/10">
           <Rocket className="h-7 w-7 text-primary" />
         </div>
@@ -972,6 +1126,20 @@ function ColdStartState({ onGetStarted }: { onGetStarted?: () => void }) {
             Connect your data sources to surface findings, obligations, and commitments here.
           </p>
         </div>
+        <ol className="grid w-full gap-2 text-left sm:grid-cols-3">
+          {steps.map((step, index) => (
+            <li
+              key={step.title}
+              className="rounded-md border border-border bg-background p-3"
+            >
+              <span className="text-xs font-semibold text-muted-foreground">
+                {index + 1}
+              </span>
+              <p className="mt-1 text-sm font-semibold">{step.title}</p>
+              <p className="mt-1 text-xs leading-relaxed text-muted-foreground">{step.text}</p>
+            </li>
+          ))}
+        </ol>
         <Button onClick={onGetStarted}>Connect first source</Button>
       </div>
     </div>
@@ -987,6 +1155,10 @@ export function BriefingContent({
   degradedSources,
   onAcknowledge,
   onOpen,
+  onApprove,
+  onRequestChanges,
+  onReject,
+  onDelegate,
   onApproveRun,
   onDismissCommitment,
   onNavigateObligation,
@@ -1000,8 +1172,11 @@ export function BriefingContent({
     commitments.length === 0;
 
   const [dismissedEvents, setDismissedEvents] = useState<Set<string>>(new Set());
+  const [completedGates, setCompletedGates] = useState<Set<string>>(new Set());
   const [dismissedCommitments, setDismissedCommitments] = useState<Set<string>>(new Set());
   const [boardPackRunRef, setBoardPackRunRef] = useState<string | undefined>();
+  const [boardPackDocumentHref, setBoardPackDocumentHref] = useState<string | undefined>();
+  const [boardPackNotice, setBoardPackNotice] = useState<string | undefined>();
   const [isGenerating, setIsGenerating] = useState(false);
 
   const visibleEvents = useMemo(
@@ -1009,7 +1184,10 @@ export function BriefingContent({
     [dismissedEvents, events],
   );
 
-  const visibleGates = useMemo(() => sortGates(gates), [gates]);
+  const visibleGates = useMemo(
+    () => sortGates(gates.filter((gate) => !completedGates.has(gate.id))),
+    [completedGates, gates],
+  );
 
   const visibleCommitments = useMemo(
     () => commitments.filter((commitment) => !dismissedCommitments.has(commitment.id)),
@@ -1022,9 +1200,17 @@ export function BriefingContent({
   );
 
   function handleBoardPack() {
+    const fallbackRunRef = "/runs/r-board-pack";
+    const fallbackDocumentHref = "/documents?type=board-pack&run=r-board-pack";
+    const result = onBoardPack();
+
     setIsGenerating(true);
-    setBoardPackRunRef("/runs/r-board-pack");
-    onBoardPack();
+    setBoardPackRunRef(result?.runRef ?? fallbackRunRef);
+    setBoardPackDocumentHref(result?.documentHref ?? fallbackDocumentHref);
+    setBoardPackNotice(
+      result?.notification ??
+        "The artifact lands in Documents when the run completes.",
+    );
   }
 
   function handleAcknowledge(eventId: string) {
@@ -1032,7 +1218,37 @@ export function BriefingContent({
     onAcknowledge(eventId);
   }
 
+  function completeGate(gateId: string) {
+    setCompletedGates((prev) => new Set([...prev, gateId]));
+  }
+
+  function handleApprove(gateId: string) {
+    completeGate(gateId);
+    onApprove(gateId);
+  }
+
+  function handleRequestChanges(gateId: string, comment: string) {
+    completeGate(gateId);
+    onRequestChanges(gateId, comment);
+  }
+
+  function handleReject(gateId: string, reason: string) {
+    completeGate(gateId);
+    onReject(gateId, reason);
+  }
+
+  function handleDelegate(gateId: string, userId: string, expiresAt: string) {
+    onDelegate(gateId, userId, expiresAt);
+  }
+
   function handleApproveRun(commitmentId: string) {
+    recordFrontendTelemetryEvent(
+      createCommitmentPlanApprovedEvent({
+        ...DEMO_FRONTEND_TELEMETRY_CONTEXT,
+        surface: "briefing",
+        commitmentId,
+      }),
+    );
     setDismissedCommitments((prev) => new Set([...prev, commitmentId]));
     onApproveRun(commitmentId);
   }
@@ -1073,6 +1289,12 @@ export function BriefingContent({
             runRef={boardPackRunRef}
           />
         </CommandStrip>
+        <DegradedSourcesBanner degradedSources={degradedSources} />
+        <BoardPackHandoffNotice
+          runRef={boardPackRunRef}
+          documentHref={boardPackDocumentHref}
+          message={boardPackNotice}
+        />
 
         <div className="grid min-h-0 flex-1 grid-cols-1 grid-rows-[minmax(0,1fr)_minmax(220px,0.72fr)] gap-3 lg:grid-cols-[minmax(0,1fr)_minmax(320px,0.42fr)] lg:grid-rows-[minmax(0,1fr)]">
           <BriefingChatPanel
@@ -1086,11 +1308,17 @@ export function BriefingContent({
 
           <TodoRail
             events={visibleEvents}
+            gates={visibleGates}
             obligations={obligations}
             commitments={visibleCommitments}
             workItems={workItems}
+            requesterMap={requesterMap}
             onAcknowledge={handleAcknowledge}
             onOpen={onOpen}
+            onApprove={handleApprove}
+            onRequestChanges={handleRequestChanges}
+            onReject={handleReject}
+            onDelegate={handleDelegate}
             onNavigateObligation={onNavigateObligation}
             onApproveRun={handleApproveRun}
             onDismissCommitment={handleDismissCommitment}
