@@ -189,7 +189,8 @@ function ConnectorGrid({ connectors }: { connectors: Connector[] }) {
             )}
             {c.logo ? (
               <span style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", height: 30 }}>
-                <img src={c.logo} alt="" aria-hidden style={{ maxHeight: 28, maxWidth: 64, objectFit: "contain" }} />
+                {/* definite height so SVGs without intrinsic width/height (Fireflies, Granola) still render */}
+                <img src={c.logo} alt="" aria-hidden style={{ height: 28, width: "auto", maxWidth: 72, objectFit: "contain" }} />
               </span>
             ) : (
               <span aria-hidden style={{
