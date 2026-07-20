@@ -26,3 +26,6 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# leftover build artifacts from the old veritax-ui subfolder (app moved to root)
+/veritax-ui/
