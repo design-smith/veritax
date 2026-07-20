@@ -1,8 +1,7 @@
 "use client"
 
 import { useEffect, useRef, useState, type CSSProperties, type ReactNode } from "react"
-import { Check, ChevronDown, Globe, Link2, Mic, Upload, X } from "lucide-react"
-import { SegmentedControl } from "@/components/ui/segmented-control"
+import { Check, ChevronDown, Globe, Upload, X } from "lucide-react"
 import { cn } from "@/lib/utils"
 
 export type SourceId = "financials" | "agreements" | "public" | "interview"
@@ -29,15 +28,6 @@ const OUTLINE_INPUT: CSSProperties = {
   background: "transparent", fontSize: "var(--control-font-size-md)",
   color: "var(--color-text)", width: "100%", outline: "none",
   boxSizing: "border-box" as const, transition: "border-color var(--transition-duration-basic)",
-}
-
-const CONNECT_BTN: CSSProperties = {
-  display: "flex", alignItems: "center", justifyContent: "center", gap: "0.5rem",
-  height: "var(--control-size-sm)", padding: "0 var(--control-gutter-sm)",
-  borderRadius: "var(--control-radius-md)", border: "1px solid var(--color-border)",
-  background: "transparent", fontSize: "var(--control-font-size-md)",
-  fontWeight: "var(--font-weight-medium)", color: "var(--color-text)",
-  cursor: "pointer", width: "100%", transition: "background var(--transition-duration-basic)",
 }
 
 // ─── MultiSelect ──────────────────────────────────────────────────────────────
@@ -147,10 +137,71 @@ function UploadZone({ accept = "*", hint }: { accept?: string; hint?: string }) 
   )
 }
 
-function ConnectedBadge({ label }: { label: string }) {
+// ─── Connectors ───────────────────────────────────────────────────────────────
+
+type Connector = { name: string; color: string; logo?: string }
+
+const ERP_CONNECTORS: Connector[] = [
+  { name: "SAP",        color: "#0AA1DD" },
+  { name: "Oracle",     color: "#C74634", logo: "/oracle-6-logo-svgrepo-com.svg" },
+  { name: "NetSuite",   color: "#1F5FA9", logo: "/oracle-netsuite-svgrepo-com.svg" },
+  { name: "QuickBooks", color: "#2CA01C", logo: "/brand-quickbooks-svgrepo-com.svg" },
+  { name: "Xero",       color: "#13B5EA", logo: "/xero-svgrepo-com.svg" },
+]
+
+const NOTETAKER_CONNECTORS: Connector[] = [
+  { name: "Fireflies", color: "#7C4DFF", logo: "/Fireflies-ai.svg" },
+  { name: "Otter",     color: "#00A0DC", logo: "/otter.ai.svg" },
+  { name: "Granola",   color: "#E8613C", logo: "/granola.svg" },
+]
+
+function OrDivider() {
   return (
-    <div style={{ display: "flex", alignItems: "center", gap: "0.375rem", fontSize: "var(--font-text-xs-size)", color: "var(--color-text-success-soft)", padding: "0.25rem 0" }}>
-      <Check size={12} />{label}
+    <div style={{ display: "flex", alignItems: "center", gap: "0.625rem" }}>
+      <div style={{ flex: 1, height: 1, background: "var(--color-border)" }} />
+      <span style={{ fontSize: "var(--font-text-xs-size)", color: "var(--color-text-tertiary)" }}>or connect</span>
+      <div style={{ flex: 1, height: 1, background: "var(--color-border)" }} />
+    </div>
+  )
+}
+
+function ConnectorGrid({ connectors }: { connectors: Connector[] }) {
+  const [connected, setConnected] = useState<Set<string>>(new Set())
+  const toggle = (n: string) => setConnected(p => { const s = new Set(p); s.has(n) ? s.delete(n) : s.add(n); return s })
+  return (
+    <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(92px, 1fr))", gap: "0.5rem" }}>
+      {connectors.map(c => {
+        const on = connected.has(c.name)
+        return (
+          <button key={c.name} type="button" onClick={() => toggle(c.name)}
+            className={cn(!on && "hover:bg-[var(--color-background-primary-ghost-hover)]")}
+            style={{
+              position: "relative", display: "flex", flexDirection: "column", alignItems: "center", gap: "0.5rem",
+              padding: "0.75rem 0.5rem", borderRadius: "var(--radius-md)", cursor: "pointer",
+              border: `1px solid ${on ? "var(--color-background-primary-solid)" : "var(--color-border)"}`,
+              background: on ? "var(--color-background-primary-soft)" : "transparent",
+              transition: "border-color var(--transition-duration-basic), background var(--transition-duration-basic)",
+            }}>
+            {on && (
+              <span style={{ position: "absolute", top: 4, right: 4, display: "inline-flex", color: "var(--color-text-success-soft)" }}>
+                <Check size={12} />
+              </span>
+            )}
+            {c.logo ? (
+              <span style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", height: 30 }}>
+                <img src={c.logo} alt="" aria-hidden style={{ maxHeight: 28, maxWidth: 64, objectFit: "contain" }} />
+              </span>
+            ) : (
+              <span aria-hidden style={{
+                display: "inline-flex", alignItems: "center", justifyContent: "center",
+                width: 30, height: 30, borderRadius: 7, background: c.color,
+                color: "#fff", fontWeight: 700, fontSize: 15, letterSpacing: "-0.02em", flexShrink: 0,
+              }}>{c.name.charAt(0)}</span>
+            )}
+            <span style={{ fontSize: "var(--font-text-xs-size)", color: on ? "var(--color-text)" : "var(--color-text-secondary)", fontWeight: "var(--font-weight-medium)", textAlign: "center" }}>{c.name}</span>
+          </button>
+        )
+      })}
     </div>
   )
 }
@@ -158,21 +209,11 @@ function ConnectedBadge({ label }: { label: string }) {
 // ─── Source inputs ────────────────────────────────────────────────────────────
 
 function FinancialsInput() {
-  const [erpConnected, setErpConnected] = useState(false)
   return (
-    <div style={{ paddingLeft: "2rem", display: "flex", flexDirection: "column", gap: "0.625rem" }}>
+    <div style={{ paddingLeft: "2rem", display: "flex", flexDirection: "column", gap: "0.75rem" }}>
       <UploadZone accept=".pdf,.xlsx,.xls,.csv" hint="PDF, Excel, CSV" />
-      <div style={{ display: "flex", alignItems: "center", gap: "0.625rem" }}>
-        <div style={{ flex: 1, height: 1, background: "var(--color-border)" }} />
-        <span style={{ fontSize: "var(--font-text-xs-size)", color: "var(--color-text-tertiary)" }}>or</span>
-        <div style={{ flex: 1, height: 1, background: "var(--color-border)" }} />
-      </div>
-      {erpConnected
-        ? <ConnectedBadge label="Accounting system connected" />
-        : <button type="button" style={CONNECT_BTN} className="hover:bg-[var(--color-background-primary-ghost-hover)]" onClick={() => setErpConnected(true)}>
-            <Link2 size={14} style={{ color: "var(--color-text-tertiary)" }} />
-            Connect accounting system / ERP
-          </button>}
+      <OrDivider />
+      <ConnectorGrid connectors={ERP_CONNECTORS} />
     </div>
   )
 }
@@ -200,52 +241,12 @@ function WebsiteInput() {
   )
 }
 
-type InterviewMode = "live" | "upload" | "import"
-const PLATFORMS = ["Fireflies", "Otter", "Fathom"] as const
-type Platform = (typeof PLATFORMS)[number]
-
 function InterviewInput() {
-  const [mode, setMode] = useState<InterviewMode>("live")
-  const [platform, setPlatform] = useState<Platform>("Fireflies")
-  const [liveConnected, setLiveConnected] = useState(false)
-  const [importConnected, setImportConnected] = useState(false)
   return (
     <div style={{ paddingLeft: "2rem", display: "flex", flexDirection: "column", gap: "0.75rem" }}>
-      <SegmentedControl value={mode} onChange={setMode} aria-label="Interview source" size="sm" block>
-        <SegmentedControl.Option value="live">Live note-taker</SegmentedControl.Option>
-        <SegmentedControl.Option value="upload">Upload transcript</SegmentedControl.Option>
-        <SegmentedControl.Option value="import">Import</SegmentedControl.Option>
-      </SegmentedControl>
-      {mode === "live" && (liveConnected
-        ? <ConnectedBadge label="Meeting tool connected" />
-        : <button type="button" style={CONNECT_BTN} className="hover:bg-[var(--color-background-primary-ghost-hover)]" onClick={() => setLiveConnected(true)}>
-            <Mic size={14} style={{ color: "var(--color-text-tertiary)" }} />Connect meeting tool
-          </button>)}
-      {mode === "upload" && <UploadZone accept=".txt,.pdf,.docx,.vtt,.srt" hint="TXT, PDF, Word, VTT, SRT" />}
-      {mode === "import" && (
-        <div style={{ display: "flex", flexDirection: "column", gap: "0.5rem" }}>
-          <div style={{ display: "flex", gap: "0.375rem" }}>
-            {PLATFORMS.map(p => {
-              const active = platform === p
-              return (
-                <button key={p} type="button" onClick={() => { setPlatform(p); setImportConnected(false) }} style={{
-                  padding: "0.25rem 0.625rem", borderRadius: "9999px",
-                  border: `1px solid ${active ? "var(--color-background-primary-solid)" : "var(--color-border)"}`,
-                  background: active ? "var(--color-background-primary-solid)" : "transparent",
-                  color: active ? "var(--color-text-inverse)" : "var(--color-text-secondary)",
-                  fontSize: "var(--font-text-xs-size)", fontWeight: "var(--font-weight-medium)",
-                  cursor: "pointer", transition: "all var(--transition-duration-basic)",
-                }}>{p}</button>
-              )
-            })}
-          </div>
-          {importConnected
-            ? <ConnectedBadge label={`${platform} connected`} />
-            : <button type="button" style={CONNECT_BTN} className="hover:bg-[var(--color-background-primary-ghost-hover)]" onClick={() => setImportConnected(true)}>
-                <Link2 size={14} style={{ color: "var(--color-text-tertiary)" }} />Connect {platform}
-              </button>}
-        </div>
-      )}
+      <UploadZone accept=".txt,.pdf,.docx,.vtt,.srt" hint="TXT, PDF, Word, VTT, SRT" />
+      <OrDivider />
+      <ConnectorGrid connectors={NOTETAKER_CONNECTORS} />
     </div>
   )
 }
