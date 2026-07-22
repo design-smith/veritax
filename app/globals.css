@@ -543,3 +543,22 @@
 @keyframes oai-spin {
   to { transform: rotate(360deg); }
 }
+
+/* Planning-file draft body: react-markdown output (GFM tables, headings, lists). */
+.tp-draft { font-size: var(--font-text-sm-size); line-height: 1.75; color: var(--color-text); overflow-wrap: break-word; }
+.tp-draft p { margin: 0 0 0.75rem; }
+.tp-draft h3 { font-size: var(--font-text-md-size); font-weight: var(--font-weight-semibold); margin: 1.5rem 0 0.5rem; }
+.tp-draft h4 { font-size: var(--font-text-sm-size); font-weight: var(--font-weight-semibold); margin: 1.25rem 0 0.375rem; }
+.tp-draft ul, .tp-draft ol { margin: 0 0 0.75rem; padding-left: 1.25rem; }
+.tp-draft li { margin: 0.2rem 0; }
+.tp-draft strong { font-weight: var(--font-weight-semibold); }
+.tp-draft table {
+  border-collapse: collapse; width: 100%; margin: 0.75rem 0 1rem;
+  font-size: var(--font-text-xs-size); table-layout: fixed;  /* keep wide tables inside the page margins */
+}
+.tp-draft th, .tp-draft td {
+  border: 1px solid var(--color-border); padding: 0.4rem 0.6rem; text-align: left; vertical-align: top;
+  overflow-wrap: break-word; word-break: break-word;
+}
+.tp-draft th { background: var(--color-background-primary-soft); font-weight: var(--font-weight-medium); }
+.tp-draft td { color: var(--color-text-secondary); }

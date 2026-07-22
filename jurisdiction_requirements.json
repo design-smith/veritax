@@ -1,0 +1,265 @@
+{
+  "_meta": {
+    "description": "Veritax jurisdiction requirements seed data. Two-layer model: base_templates define the shared element spine per regime family; jurisdictions reference a base and add overlays (thresholds, deadlines, language, local-specific elements, element overrides). To resolve a jurisdiction's full required-element list at runtime: take its base template's elements, then apply its local_specific_elements (appended) and any element_overrides (merged by order).",
+    "version": "0.1-seed",
+    "source_note": "Derived from primary-law research (IRC 6662-6, TIOPA 2010, GAufzV, CGI/LPF, Dutch CIT Act, TCA 1997, ITAA 1997) cross-checked against OECD country profiles. Elements marked verified:false require content-ops confirmation before use as a compliance claim.",
+    "regime_families": ["OECD_BEPS_Action_13", "modified_OECD_US_6662", "modified_OECD_CA_247"],
+    "jurisdictions_included": ["United States", "Canada", "United Kingdom", "Germany", "France", "Netherlands", "Ireland", "Australia"],
+    "jurisdictions_pending": ["Japan", "Singapore", "Switzerland", "Spain", "Italy", "India", "and remaining Tier 2/3"]
+  },
+
+  "base_templates": {
+    "OECD_BEPS_Action_13": {
+      "template_id": "OECD_BEPS_Action_13",
+      "description": "OECD Transfer Pricing Guidelines Annex II to Chapter V. The shared 20-element Local File spine adopted by BEPS Action 13 jurisdictions. Individual countries incorporate this via domestic law and may add local-specific elements or overrides.",
+      "elements": [
+        { "order": 1, "element_name": "Management structure", "description": "Management structure, local organization chart, and reporting lines of the local entity.", "sub_requirements": ["Identify individuals to whom local management reports", "State countries of principal offices"], "required": true, "verified": true },
+        { "order": 2, "element_name": "Business and strategy", "description": "Detailed description of the local business and business strategy.", "sub_requirements": ["State whether the local entity was involved in or affected by business restructurings", "State whether the local entity was involved in or affected by intangible transfers in the current or immediately preceding year", "Explain effects on the local entity"], "required": true, "verified": true },
+        { "order": 3, "element_name": "Key competitors", "description": "Identification of key competitors of the local entity.", "sub_requirements": [], "required": true, "verified": true },
+        { "order": 4, "element_name": "Material controlled transactions and context", "description": "Description of each material category of controlled transaction and its commercial context.", "sub_requirements": [], "required": true, "verified": true },
+        { "order": 5, "element_name": "Amounts by category and jurisdiction", "description": "Amounts of intra-group payments and receipts for each material category broken down by tax jurisdiction of the foreign payor or recipient.", "sub_requirements": ["Products", "Services", "Royalties", "Interest", "Other relevant categories"], "required": true, "verified": true },
+        { "order": 6, "element_name": "Associated enterprises and relationships", "description": "Identification of associated enterprises involved in each category and their relationships.", "sub_requirements": [], "required": true, "verified": true },
+        { "order": 7, "element_name": "Material intercompany agreements", "description": "Copies of all material intercompany agreements concluded by the local entity.", "sub_requirements": [], "required": true, "verified": true },
+        { "order": 8, "element_name": "Comparability and functional analysis", "description": "Detailed comparability and functional analysis of the taxpayer and relevant associated enterprises for each documented category.", "sub_requirements": ["Cover taxpayer and relevant associated enterprises", "Identify changes from prior years"], "required": true, "verified": true },
+        { "order": 9, "element_name": "Method selection", "description": "Most appropriate transfer pricing method and reasons for selecting it.", "sub_requirements": [], "required": true, "verified": true },
+        { "order": 10, "element_name": "Tested party", "description": "Identification of the tested party, if any, and reasons for the choice.", "sub_requirements": [], "required": true, "verified": true },
+        { "order": 11, "element_name": "Key assumptions", "description": "Summary of important assumptions used in applying the transfer pricing method.", "sub_requirements": [], "required": true, "verified": true },
+        { "order": 12, "element_name": "Multi-year analysis", "description": "Reasons for using a multi-year analysis where relevant.", "sub_requirements": [], "required": true, "verified": true },
+        { "order": 13, "element_name": "Comparables and search methodology", "description": "List and description of comparable uncontrolled transactions or companies, relevant financial indicators, search methodology, and data sources.", "sub_requirements": ["Internal or external comparables", "Relevant financial indicators", "Source of data"], "required": true, "verified": true },
+        { "order": 14, "element_name": "Comparability adjustments", "description": "Description of comparability adjustments made and whether applied to the tested party, comparables, or both.", "sub_requirements": [], "required": true, "verified": true },
+        { "order": 15, "element_name": "Arm's-length conclusion", "description": "Explanation of why the results support an arm's-length outcome.", "sub_requirements": [], "required": true, "verified": true },
+        { "order": 16, "element_name": "Financial information used in method", "description": "Summary of the financial information used in applying the transfer pricing method.", "sub_requirements": [], "required": true, "verified": true },
+        { "order": 17, "element_name": "Relevant APAs and rulings", "description": "Copies of existing unilateral or bilateral/multilateral APAs and other tax rulings related to the documented controlled transactions.", "sub_requirements": [], "required": true, "verified": true },
+        { "order": 18, "element_name": "Annual local accounts", "description": "Annual financial accounts for the local entity for the fiscal year concerned.", "sub_requirements": ["Provide audited statements if they exist", "Otherwise provide unaudited statements"], "required": true, "verified": true },
+        { "order": 19, "element_name": "Tie-out and allocation schedules", "description": "Schedules showing how the financial data used in the method ties to the annual financial statements.", "sub_requirements": [], "required": true, "verified": true },
+        { "order": 20, "element_name": "Comparable financial data schedules", "description": "Summary schedules of relevant financial data for comparables and the source of that data.", "sub_requirements": [], "required": true, "verified": true }
+      ]
+    },
+
+    "modified_OECD_US_6662": {
+      "template_id": "modified_OECD_US_6662",
+      "description": "US penalty-protection contemporaneous documentation. Not an Annex II Local File. The ten principal documents under Treas. Reg. 1.6662-6(d)(2)(iii)(B). Items 8-10 unverified as to exact regulatory wording (eCFR text not directly retrievable during research).",
+      "elements": [
+        { "order": 1, "element_name": "Business overview", "description": "Overview of the taxpayer's business and the economic and legal factors affecting pricing.", "sub_requirements": [], "required": true, "verified": true },
+        { "order": 2, "element_name": "Organizational structure", "description": "Description of the taxpayer's organizational structure, including an organization chart of relevant related parties.", "sub_requirements": ["Include related parties engaged in transactions potentially relevant under IRC 482"], "required": true, "verified": true },
+        { "order": 3, "element_name": "Section 482 specific required documents", "description": "Any documentation explicitly required by the Treasury regulations under IRC 482 for the transaction type.", "sub_requirements": [], "required": true, "verified": true },
+        { "order": 4, "element_name": "Selected method and reasons", "description": "Description of the transfer pricing method selected and why it was selected.", "sub_requirements": [], "required": true, "verified": true },
+        { "order": 5, "element_name": "Alternative methods rejected", "description": "Description of alternative methods considered and why they were not selected.", "sub_requirements": [], "required": true, "verified": true },
+        { "order": 6, "element_name": "Controlled transactions and internal data", "description": "Description of the controlled transactions, including terms, and internal data used in the analysis.", "sub_requirements": [], "required": true, "verified": true },
+        { "order": 7, "element_name": "Comparables and comparability adjustments", "description": "Description of comparables used, how comparability was evaluated, and what adjustments were made.", "sub_requirements": [], "required": true, "verified": true },
+        { "order": 8, "element_name": "Economic analysis and projections", "description": "Explanation of the economic analysis and projections relied on.", "sub_requirements": [], "required": true, "verified": false },
+        { "order": 9, "element_name": "Relevant post-year-end data", "description": "Summary of relevant data obtained after year-end but before filing that bears on the method's reasonableness.", "sub_requirements": [], "required": true, "verified": false },
+        { "order": 10, "element_name": "Index and recordkeeping system", "description": "General index of principal and background documents and description of the recordkeeping system.", "sub_requirements": [], "required": true, "verified": false }
+      ]
+    },
+
+    "modified_OECD_CA_247": {
+      "template_id": "modified_OECD_CA_247",
+      "description": "Canada contemporaneous documentation under Income Tax Act subsection 247(4). Not an Annex II Local File. Six statutory content items per CRA TPM-09.",
+      "elements": [
+        { "order": 1, "element_name": "Property or services", "description": "Description of the property or services to which the transaction relates.", "sub_requirements": [], "required": true, "verified": true },
+        { "order": 2, "element_name": "Terms and conditions", "description": "Terms and conditions of the transaction and their relationship to other transactions between the participants.", "sub_requirements": [], "required": true, "verified": true },
+        { "order": 3, "element_name": "Participants and relationships", "description": "Identity of the participants in the transaction and their relationship to each other at the time of the transaction.", "sub_requirements": [], "required": true, "verified": true },
+        { "order": 4, "element_name": "Functions, property, and risks", "description": "Description of functions performed, property used or contributed, and risks assumed by the participants.", "sub_requirements": [], "required": true, "verified": true },
+        { "order": 5, "element_name": "Data, methods, and analysis", "description": "Data and methods considered and analysis performed to determine the transfer prices or allocations.", "sub_requirements": ["Covers prices or allocations of profits, losses, or contributions to costs, as applicable"], "required": true, "verified": true },
+        { "order": 6, "element_name": "Assumptions, strategies, and policies", "description": "Assumptions, strategies, and policies that influenced the determination of the transfer price or allocation.", "sub_requirements": [], "required": true, "verified": true }
+      ]
+    }
+  },
+
+  "jurisdictions": [
+    {
+      "country": "United States",
+      "base_template": "modified_OECD_US_6662",
+      "regime_basis": "modified_OECD",
+      "governing_authority": "Internal Revenue Service",
+      "governing_law": ["IRC 482", "Treas. Reg. 1.482-1 to 1.482-9", "IRC 6662(e)/(h)", "Treas. Reg. 1.6662-6(d)"],
+      "source_last_verified": "2026-02",
+      "scope_thresholds": {
+        "local_file_trigger": "No formal Local File regime; contemporaneous documentation required for net adjustment penalty protection under IRC 6662(e)(3)(B).",
+        "cbcr_threshold": "USD 850 million prior-year consolidated revenue (US ultimate parent)"
+      },
+      "deadlines": {
+        "preparation": "Must exist when the return is filed (limited post-year-end data excepted)",
+        "production_on_request": "Within 30 days of IRS request in examination",
+        "proactively_filed": false
+      },
+      "language": ["English"],
+      "penalties": "20% or 40% valuation-misstatement penalty (substantial vs gross). Documentation must be timely, adequate, and reasonable; inadequate or late-supplied documentation forfeits penalty protection.",
+      "local_specific_elements": [],
+      "element_overrides": {},
+      "notes": "Regime is penalty-protection oriented, not a filed Local File. Form 5472 applies separately where relevant. Items 8-10 of the base template are unverified as to exact regulatory wording."
+    },
+    {
+      "country": "Canada",
+      "base_template": "modified_OECD_CA_247",
+      "regime_basis": "modified_OECD",
+      "governing_authority": "Canada Revenue Agency",
+      "governing_law": ["Income Tax Act s.247(3)", "Income Tax Act s.247(4)", "CRA TPM-05R2", "CRA TPM-09"],
+      "source_last_verified": "2026-05",
+      "scope_thresholds": {
+        "local_file_trigger": "Applies to taxpayers with cross-border non-arm's-length transactions under s.247. No formal Local/Master File.",
+        "cbcr_threshold": "EUR 750 million consolidated revenue (preceding fiscal year)"
+      },
+      "deadlines": {
+        "preparation": "Records made or obtained within six months after the end of the taxation year",
+        "production_on_request": "Within 30 days of written request",
+        "proactively_filed": false
+      },
+      "language": ["English", "French"],
+      "penalties": "10% of certain transfer pricing adjustments where reasonable efforts not made (s.247(3)).",
+      "local_specific_elements": [],
+      "element_overrides": {},
+      "notes": "Form T106 and foreign-affiliate filings apply separately. The s.247(4) list is not treated by CRA as the outer limit of what may be examined."
+    },
+    {
+      "country": "United Kingdom",
+      "base_template": "OECD_BEPS_Action_13",
+      "regime_basis": "OECD_BEPS_Action_13",
+      "governing_authority": "HM Revenue & Customs",
+      "governing_law": ["TIOPA 2010 s.147, s.148, s.164", "The Transfer Pricing Records Regulations 2023", "HMRC INTM450000 series"],
+      "source_last_verified": "2026-07",
+      "scope_thresholds": {
+        "local_file_trigger": "UK entity in an MNE group with consolidated global revenue at or above EUR 750 million AND at least one material category of controlled transaction. SMEs generally exempt (TIOPA s.166, s.172).",
+        "master_file_trigger": "Same EUR 750 million MNE group test"
+      },
+      "deadlines": {
+        "preparation": "Prepared and retained; reviewed annually. In scope for CT accounting periods beginning on or after 1 April 2023 (income tax from 2024-25).",
+        "production_on_request": "Generally 30 days under an information notice",
+        "proactively_filed": false
+      },
+      "language": ["English"],
+      "penalties": "Penalties under Schedule 18 Finance Act 1998 for failure to keep/preserve specified TP records. TP records are statutory records requestable by unappealable information notice.",
+      "local_specific_elements": [
+        { "order": 21, "element_name": "Summary Audit Trail", "description": "A concise description of the work undertaken to prepare the Local File, evidencing the transfer-pricing documentation process. Required as a separate record for in-scope entities; not an Annex II element.", "sub_requirements": [], "required": true, "verified": true }
+      ],
+      "element_overrides": {},
+      "notes": "UK's primary deviation from plain OECD is the Summary Audit Trail requirement."
+    },
+    {
+      "country": "Germany",
+      "base_template": "OECD_BEPS_Action_13",
+      "regime_basis": "OECD_BEPS_Action_13",
+      "governing_authority": "German tax authorities",
+      "governing_law": ["Abgabenordnung s.90(3)", "AO s.138a", "AO s.162(3)-(4)", "Gewinnabgrenzungsaufzeichnungsverordnung (GAufzV)"],
+      "source_last_verified": "2025-10",
+      "scope_thresholds": {
+        "local_file_trigger": "General TP documentation duty on cross-border related-party dealings. Relief for small entities under GAufzV s.6.",
+        "transactional_thresholds": "EUR 6 million for goods transactions; EUR 600,000 for other transactions [UNVERIFIED - not directly confirmed from full ordinance text]",
+        "master_file_threshold": "EUR 100 million revenue"
+      },
+      "deadlines": {
+        "preparation": "Extraordinary-transaction documentation within six months after fiscal year-end.",
+        "production_on_request": "Master File, transaction matrix, and extraordinary-transaction docs within 30 days of audit-order notification (no separate request needed); Local File and other s.90(3) records within 30 days on request.",
+        "proactively_filed": false
+      },
+      "language": ["German", "English (may be accepted if justified; German translation still possible on request or in court)"],
+      "penalties": "Income estimation under AO s.162(3) if documentation missing/unusable; surcharges under AO s.162(4).",
+      "local_specific_elements": [
+        { "order": 21, "element_name": "Transaction matrix", "description": "A structured matrix overview of cross-border related-party transactions. German domestic requirement, submitted within 30 days of the audit order; not an Annex II element.", "sub_requirements": [], "required": true, "verified": true },
+        { "order": 22, "element_name": "Extraordinary transaction documentation", "description": "Special documentation for extraordinary business transactions, prepared within six months after fiscal year-end.", "sub_requirements": [], "required": true, "verified": true }
+      ],
+      "element_overrides": {},
+      "notes": "Accelerated submission tied to the audit order was tightened for audits beginning from 2025."
+    },
+    {
+      "country": "France",
+      "base_template": "OECD_BEPS_Action_13",
+      "regime_basis": "OECD_BEPS_Action_13",
+      "governing_authority": "Direction generale des Finances publiques",
+      "governing_law": ["CGI art. 57", "LPF art. L13 AA", "LPF art. L13 AB", "LPF art. L13 B", "CGI art. 223 quinquies B and C"],
+      "source_last_verified": "2025-10",
+      "scope_thresholds": {
+        "local_file_trigger": "Entity in a group with annual turnover or balance-sheet assets at or above EUR 150 million (LPF L13 AA) must keep master file and local file available.",
+        "simplified_annual_filing_trigger": "Turnover or balance-sheet assets at or above EUR 50 million must annually file a simplified version (CGI 223 quinquies B).",
+        "non_cooperative_jurisdiction": "Extra requirements under LPF L13 AB for related parties in non-cooperative jurisdictions."
+      },
+      "deadlines": {
+        "preparation": "Full master/local file kept available for audit.",
+        "production_on_request": "30 days to produce or complete if not produced or incomplete.",
+        "simplified_filing_due": "Within six months after filing the corporate tax result.",
+        "proactively_filed": false
+      },
+      "language": ["French (may be requested in French even if prepared in another language)"],
+      "penalties": "Fine under CGI art. 1735 ter: at least EUR 50,000, up to 0.5% of undocumented transaction amount or 5% of reassessed profits. L13 B failure: EUR 10,000 per tax year (CGI 1735). Simplified filing: EUR 150 (art. 1729 B).",
+      "local_specific_elements": [
+        { "order": 21, "element_name": "Annual simplified filing (223 quinquies B)", "description": "Annual simplified master/local file filing for entities at or above EUR 50 million. Separate French overlay filed proactively, distinct from the full audit-ready file.", "sub_requirements": [], "required": false, "verified": true },
+        { "order": 22, "element_name": "Non-cooperative jurisdiction documentation", "description": "Additional documentation for dealings with related parties in non-cooperative jurisdictions (LPF L13 AB).", "sub_requirements": [], "required": false, "verified": true }
+      ],
+      "element_overrides": {},
+      "notes": "Since 1 January 2024 the TP documentation is expressly enforceable against taxpayers. local_specific elements marked required:false because they are conditional on threshold/counterparty, not universal."
+    },
+    {
+      "country": "Netherlands",
+      "base_template": "OECD_BEPS_Action_13",
+      "regime_basis": "OECD_BEPS_Action_13",
+      "governing_authority": "Belastingdienst",
+      "governing_law": ["CIT Act art. 8b", "CIT Act art. 29b-29h", "Dutch TP Decree 14 June 2022"],
+      "source_last_verified": "2025-07",
+      "scope_thresholds": {
+        "local_file_trigger": "Dutch group entities of MNE groups with consolidated group revenue at or above EUR 50 million.",
+        "general_documentation": "Art. 8b(3) requires all taxpayers (including SMEs) to document/substantiate intercompany transactions, form-free, no threshold. Preparing a Local File satisfies this."
+      },
+      "deadlines": {
+        "preparation": "Available by the time the tax return for the year is due.",
+        "production_on_request": "Not proactively filed.",
+        "proactively_filed": false
+      },
+      "language": ["Dutch", "English"],
+      "penalties": "No special TP penalties; normal tax penalties apply and burden of proof may shift to the taxpayer if documentation is inadequate.",
+      "local_specific_elements": [
+        { "order": 21, "element_name": "Article 8b(3) general documentation", "description": "Form-free obligation for all intercompany transactions regardless of threshold. Broader in scope but not a distinct statutory content list; satisfied by a compliant Local File.", "sub_requirements": [], "required": true, "verified": true }
+      ],
+      "element_overrides": {},
+      "notes": "Dual-track: Annex II Local/Master File at EUR 50M plus universal art. 8b(3) obligation."
+    },
+    {
+      "country": "Ireland",
+      "base_template": "OECD_BEPS_Action_13",
+      "regime_basis": "OECD_BEPS_Action_13",
+      "governing_authority": "Revenue",
+      "governing_law": ["TCA 1997 s.835D", "TCA 1997 s.835F", "TCA 1997 s.835G", "TCA 1997 s.891H", "S.I. No. 653/2016"],
+      "source_last_verified": "2025-07",
+      "scope_thresholds": {
+        "local_file_trigger": "MNE consolidated global revenue at or above EUR 50 million.",
+        "master_file_trigger": "MNE consolidated global revenue at or above EUR 250 million.",
+        "sme_treatment": "Simplified requirements for SMEs under s.835F."
+      },
+      "deadlines": {
+        "preparation": "No later than the date the tax return for the chargeable period is due.",
+        "production_on_request": "Within 30 days of written request.",
+        "proactively_filed": false
+      },
+      "language": ["Irish", "English"],
+      "penalties": "EUR 4,000 fixed penalty for failure to provide within 30 days; increases to EUR 25,000 plus EUR 100/day for continuing failure where a Local File is required. Protection from tax-geared penalties where full documentation exists and reasonable efforts made, absent deliberate behaviour.",
+      "local_specific_elements": [],
+      "element_overrides": {},
+      "notes": "Statutory wording requires such records as may reasonably be required to demonstrate compliance; obligation not exhausted by bare existence of files."
+    },
+    {
+      "country": "Australia",
+      "base_template": "OECD_BEPS_Action_13",
+      "regime_basis": "OECD_BEPS_Action_13",
+      "governing_authority": "Australian Taxation Office",
+      "governing_law": ["ITAA 1997 Subdivision 815-B", "ITAA 1997 Subdivision 815-E", "ITAA 1936 s.262A(1)", "TAA 1953 Schedule 1 Subdivision 284-E", "TAA 1953 Schedule 1 Division 286"],
+      "source_last_verified": "2025-10",
+      "scope_thresholds": {
+        "local_file_trigger": "CbC reporting entities (groups with over AUD 1 billion annual global income). All businesses must keep tax-relevant records; contemporaneous documentation matters for penalty mitigation even below this.",
+        "cbcr_threshold": "AUD 1 billion annual global income"
+      },
+      "deadlines": {
+        "preparation": "CbC report, Master File, and Australian Local File lodged within 12 months after the end of the reporting period.",
+        "production_on_request": "N/A - proactively lodged.",
+        "proactively_filed": true,
+        "format": "Electronic, XML Schema"
+      },
+      "language": ["English"],
+      "penalties": "Significant administrative penalties under TAA 1953 Schedule 1 Division 286 for late lodgment by Significant Global Entities. Without contemporaneous documentation by return-filing time, taxpayer may be unable to establish a reasonably arguable position (Subdivision 284-E).",
+      "local_specific_elements": [
+        { "order": 21, "element_name": "Australian Local File (electronic lodgment)", "description": "The operational filing is the Australian Local File lodged electronically in XML within the CbC framework, sitting on top of the Annex II content structure. Short-form and detailed variants exist.", "sub_requirements": [], "required": true, "verified": true }
+      ],
+      "element_overrides": {},
+      "notes": "Not a keep-on-file regime: electronic lodgment for CbC reporting entities within 12 months of period end."
+    }
+  ]
+}

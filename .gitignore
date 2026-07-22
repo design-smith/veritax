@@ -29,3 +29,17 @@ next-env.d.ts
 
 # leftover build artifacts from the old veritax-ui subfolder (app moved to root)
 /veritax-ui/
+
+# never commit backend env / secrets
+backend/.env
+.env
+
+# python backend
+.venv/
+backend/.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+
+# python build metadata
+*.egg-info/

@@ -1,19 +1,23 @@
 "use client"
 
-import { useEffect, useRef, useState, type CSSProperties, type ReactNode } from "react"
+import { createContext, useContext, useEffect, useRef, useState, type CSSProperties, type ReactNode } from "react"
 import { Check, ChevronDown, Globe, Upload, X } from "lucide-react"
 import { cn } from "@/lib/utils"
+import { api } from "@/lib/api"
 
 export type SourceId = "financials" | "agreements" | "public" | "interview"
 
+// Provides the persisted engagement id to nested source inputs (upload zones, connector grid).
+const PlanningCtx = createContext<{ engagementId: string | null }>({ engagementId: null })
+
 // ─── Constants ────────────────────────────────────────────────────────────────
 
+// Must match the jurisdictions defined in jurisdiction_requirements.json (backend/app/data).
+// ponytail: hardcoded to the 8 with requirement lists; if that set grows, fetch it from the
+// backend instead of editing here.
 const JURISDICTIONS = [
-  "Australia","Belgium","Brazil","Canada","China","Denmark",
-  "France","Germany","Hong Kong","India","Ireland","Italy",
-  "Japan","Luxembourg","Mexico","Netherlands","New Zealand",
-  "Singapore","South Korea","Spain","Sweden","Switzerland",
-  "United Kingdom","United States",
+  "Australia", "Canada", "France", "Germany",
+  "Ireland", "Netherlands", "United Kingdom", "United States",
 ]
 
 const FIELD_LABEL: CSSProperties = {
@@ -83,12 +87,80 @@ function MultiSelect({ options, value, onChange, placeholder }: {
 
 // ─── UploadZone ───────────────────────────────────────────────────────────────
 
-function UploadZone({ accept = "*", hint }: { accept?: string; hint?: string }) {
+// The api client throws `API <status> <url>: <body>`; pull the server's detail message for the chip.
+function uploadErrorMessage(err: unknown): string {
+  const raw = err instanceof Error ? err.message : String(err)
+  const body = raw.slice(raw.indexOf(": ") + 2)
+  try { return JSON.parse(body).detail ?? raw } catch { return raw }
+}
+
+// uploading → sent, awaiting response; processing → backend embedding; done → embedded; error → rejected/failed
+type UploadStatus = "uploading" | "processing" | "done" | "error"
+interface UploadItem { id: number; name: string; status: UploadStatus; error?: string }
+
+// Backend DocumentStatus → chip status. Poll until it settles (embedded/failed).
+const DOC_STATUS: Record<string, UploadStatus> = {
+  uploaded: "processing", embedding: "processing", embedded: "done", failed: "error",
+}
+const STATUS_LABEL: Record<UploadStatus, string> = {
+  uploading: "Uploading…", processing: "Processing…", done: "Processed", error: "Failed",
+}
+
+function UploadZone({ kind, accept = "*", hint }: { kind: SourceId; accept?: string; hint?: string }) {
+  const { engagementId } = useContext(PlanningCtx)
   const [dragging, setDragging] = useState(false)
-  const [files, setFiles] = useState<File[]>([])
+  const [items, setItems] = useState<UploadItem[]>([])
   const inputRef = useRef<HTMLInputElement>(null)
-  const addFiles = (list: FileList | null) => { if (list) setFiles(p => [...p, ...Array.from(list)]) }
-  const removeFile = (i: number) => setFiles(p => p.filter((_, j) => j !== i))
+  const nextId = useRef(0)
+
+  // Poll one document's processing status until it settles, then reflect it on its chip.
+  // Ceiling is generous — extracting + embedding a large PDF can take a few minutes.
+  async function pollDoc(itemId: number, documentId: string) {
+    for (let i = 0; i < 160; i++) {
+      await new Promise(r => setTimeout(r, 1500))
+      try {
+        const doc = await api.getDocument(documentId)
+        const status = DOC_STATUS[doc.status] ?? "processing"
+        setItems(p => p.map(x => (x.id === itemId ? { ...x, status, error: doc.error ?? undefined } : x)))
+        if (status === "done" || status === "error") return
+      } catch (err) {
+        console.error("[veritax] status poll failed:", err)
+        return
+      }
+    }
+  }
+
+  async function addFiles(list: FileList | null) {
+    const arr = Array.from(list ?? [])
+    if (!arr.length) return
+    const entries: UploadItem[] = arr.map(f => ({ id: nextId.current++, name: f.name, status: "uploading" }))
+    setItems(p => [...p, ...entries])
+    const ids = new Set(entries.map(e => e.id))
+    const markAll = (status: UploadStatus, error?: string) =>
+      setItems(p => p.map(x => (ids.has(x.id) ? { ...x, status, error } : x)))
+
+    if (!engagementId) {
+      // No backend session yet — keep the local chip UX so the user isn't blocked.
+      console.warn("[veritax] no engagement id; file kept locally, not uploaded")
+      markAll("done")
+      return
+    }
+    try {
+      const docs = await api.uploadDocuments(engagementId, kind, arr)
+      // Backend returns documents in file order — correlate each chip to its doc and poll.
+      setItems(p => p.map(x => {
+        const idx = entries.findIndex(e => e.id === x.id)
+        return idx >= 0 && docs[idx] ? { ...x, status: "processing" as UploadStatus } : x
+      }))
+      entries.forEach((e, idx) => { if (docs[idx]) void pollDoc(e.id, docs[idx].id) })
+    } catch (err) {
+      console.error("[veritax] upload failed:", err)
+      markAll("error", uploadErrorMessage(err))
+    }
+  }
+
+  const removeFile = (id: number) => setItems(p => p.filter(x => x.id !== id))
+
   return (
     <div>
       <div role="button" tabIndex={0}
@@ -96,7 +168,7 @@ function UploadZone({ accept = "*", hint }: { accept?: string; hint?: string }) 
         onKeyDown={e => e.key === "Enter" && inputRef.current?.click()}
         onDragOver={e => { e.preventDefault(); setDragging(true) }}
         onDragLeave={() => setDragging(false)}
-        onDrop={e => { e.preventDefault(); setDragging(false); addFiles(e.dataTransfer.files) }}
+        onDrop={e => { e.preventDefault(); setDragging(false); void addFiles(e.dataTransfer.files) }}
         style={{
           border: `1.5px dashed ${dragging ? "var(--color-border-primary-outline)" : "var(--color-border)"}`,
           borderRadius: "var(--radius-md)", padding: "1rem 1.25rem", textAlign: "center",
@@ -105,7 +177,7 @@ function UploadZone({ accept = "*", hint }: { accept?: string; hint?: string }) 
           transition: "border-color var(--transition-duration-basic), background var(--transition-duration-basic)",
         }}>
         <input ref={inputRef} type="file" multiple accept={accept}
-          style={{ display: "none" }} onChange={e => addFiles(e.target.files)} />
+          style={{ display: "none" }} onChange={e => void addFiles(e.target.files)} />
         <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: "0.375rem" }}>
           <Upload size={16} style={{ color: "var(--color-text-tertiary)" }} />
           <span style={{ fontSize: "var(--font-text-sm-size)", color: "var(--color-text-secondary)" }}>
@@ -115,20 +187,32 @@ function UploadZone({ accept = "*", hint }: { accept?: string; hint?: string }) 
           {hint && <span style={{ fontSize: "var(--font-text-xs-size)", color: "var(--color-text-tertiary)" }}>{hint}</span>}
         </div>
       </div>
-      {files.length > 0 && (
-        <div style={{ display: "flex", flexWrap: "wrap", gap: "0.375rem", marginTop: "0.5rem" }}>
-          {files.map((f, i) => (
-            <span key={i} style={{
-              display: "inline-flex", alignItems: "center", gap: "0.25rem",
-              padding: "0.125rem 0.375rem 0.125rem 0.5rem", borderRadius: "var(--radius-xs)",
-              background: "var(--color-background-primary-soft)",
-              fontSize: "var(--font-text-xs-size)", color: "var(--color-text)", maxWidth: 200,
-            }}>
-              <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{f.name}</span>
-              <button type="button" onClick={e => { e.stopPropagation(); removeFile(i) }}
-                style={{ background: "none", border: "none", cursor: "pointer", color: "var(--color-text-tertiary)", lineHeight: 1, padding: 0, flexShrink: 0 }}>
-                <X size={10} />
-              </button>
+      {items.length > 0 && (
+        <div style={{ display: "flex", flexDirection: "column", gap: "0.375rem", marginTop: "0.5rem" }}>
+          <div style={{ display: "flex", flexWrap: "wrap", gap: "0.375rem" }}>
+            {items.map(f => (
+              <span key={f.id} title={f.status === "error" ? f.error : STATUS_LABEL[f.status]} style={{
+                display: "inline-flex", alignItems: "center", gap: "0.375rem",
+                padding: "0.125rem 0.375rem 0.125rem 0.5rem", borderRadius: "var(--radius-xs)",
+                background: f.status === "error" ? "var(--color-background-danger-soft)" : "var(--color-background-primary-soft)",
+                fontSize: "var(--font-text-xs-size)", color: "var(--color-text)", maxWidth: 220,
+              }}>
+                {(f.status === "uploading" || f.status === "processing") && (
+                  <span style={{ color: "var(--color-text-tertiary)" }}>{f.status === "uploading" ? "↑" : "…"}</span>
+                )}
+                {f.status === "done" && <Check size={11} style={{ color: "var(--color-text-success-soft)", flexShrink: 0 }} />}
+                {f.status === "error" && <span style={{ color: "var(--color-text-danger-soft)" }}>!</span>}
+                <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{f.name}</span>
+                <button type="button" onClick={e => { e.stopPropagation(); removeFile(f.id) }}
+                  style={{ background: "none", border: "none", cursor: "pointer", color: "var(--color-text-tertiary)", lineHeight: 1, padding: 0, flexShrink: 0 }}>
+                  <X size={10} />
+                </button>
+              </span>
+            ))}
+          </div>
+          {items.filter(f => f.status === "error" && f.error).map(f => (
+            <span key={f.id} style={{ fontSize: "var(--font-text-xs-size)", color: "var(--color-text-danger-soft)" }}>
+              {f.name}: {f.error}
             </span>
           ))}
         </div>
@@ -165,19 +249,41 @@ function OrDivider() {
   )
 }
 
-function ConnectorGrid({ connectors }: { connectors: Connector[] }) {
+function ConnectorGrid({ kind, connectors }: { kind: SourceId; connectors: Connector[] }) {
+  const { engagementId } = useContext(PlanningCtx)
   const [connected, setConnected] = useState<Set<string>>(new Set())
-  const toggle = (n: string) => setConnected(p => { const s = new Set(p); s.has(n) ? s.delete(n) : s.add(n); return s })
+  const [statusByProvider, setStatusByProvider] = useState<Record<string, string>>({})
+
+  // Pull the registry so tiles reflect backend availability (all "available" for now).
+  useEffect(() => {
+    api.getConnectors()
+      .then(list => setStatusByProvider(Object.fromEntries(list.map(c => [c.provider, c.status]))))
+      .catch(err => console.error("[veritax] failed to load connectors:", err))
+  }, [])
+
+  function toggle(name: string) {
+    const on = connected.has(name)
+    setConnected(p => { const s = new Set(p); on ? s.delete(name) : s.add(name); return s })
+    if (!on && engagementId) {
+      // Record a connected-source stub (no OAuth yet).
+      api.createSource(engagementId, { kind, origin: "connected", connector_provider: name.toLowerCase() })
+        .catch(err => console.error("[veritax] failed to record connected source:", err))
+    }
+  }
+
   return (
     <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(92px, 1fr))", gap: "0.5rem" }}>
       {connectors.map(c => {
         const on = connected.has(c.name)
+        const providerStatus = statusByProvider[c.name.toLowerCase()]
+        const unavailable = providerStatus !== undefined && providerStatus !== "available"
         return (
-          <button key={c.name} type="button" onClick={() => toggle(c.name)}
-            className={cn(!on && "hover:bg-[var(--color-background-primary-ghost-hover)]")}
+          <button key={c.name} type="button" onClick={() => !unavailable && toggle(c.name)} disabled={unavailable}
+            className={cn(!on && !unavailable && "hover:bg-[var(--color-background-primary-ghost-hover)]")}
             style={{
               position: "relative", display: "flex", flexDirection: "column", alignItems: "center", gap: "0.5rem",
-              padding: "0.75rem 0.5rem", borderRadius: "var(--radius-md)", cursor: "pointer",
+              padding: "0.75rem 0.5rem", borderRadius: "var(--radius-md)", cursor: unavailable ? "not-allowed" : "pointer",
+              opacity: unavailable ? 0.45 : 1,
               border: `1px solid ${on ? "var(--color-background-primary-solid)" : "var(--color-border)"}`,
               background: on ? "var(--color-background-primary-soft)" : "transparent",
               transition: "border-color var(--transition-duration-basic), background var(--transition-duration-basic)",
@@ -212,9 +318,9 @@ function ConnectorGrid({ connectors }: { connectors: Connector[] }) {
 function FinancialsInput() {
   return (
     <div style={{ paddingLeft: "2rem", display: "flex", flexDirection: "column", gap: "0.75rem" }}>
-      <UploadZone accept=".pdf,.xlsx,.xls,.csv" hint="PDF, Excel, CSV" />
+      <UploadZone kind="financials" accept=".pdf,.xlsx,.xls,.csv" hint="PDF, Excel, CSV · up to 50 MB each" />
       <OrDivider />
-      <ConnectorGrid connectors={ERP_CONNECTORS} />
+      <ConnectorGrid kind="financials" connectors={ERP_CONNECTORS} />
     </div>
   )
 }
@@ -222,18 +328,26 @@ function FinancialsInput() {
 function AgreementsInput() {
   return (
     <div style={{ paddingLeft: "2rem" }}>
-      <UploadZone accept=".pdf,.doc,.docx,.xlsx,.xls" hint="PDF, Word, Excel" />
+      <UploadZone kind="agreements" accept=".pdf,.doc,.docx,.xlsx,.xls" hint="PDF, Word, Excel · up to 50 MB each" />
     </div>
   )
 }
 
 function WebsiteInput() {
+  const { engagementId } = useContext(PlanningCtx)
   const [url, setUrl] = useState("")
+
+  function saveUrl() {
+    if (!engagementId) return
+    api.patchEngagement(engagementId, { website_url: url.trim() })
+      .catch(err => console.error("[veritax] failed to save website url:", err))
+  }
+
   return (
     <div style={{ paddingLeft: "2rem", display: "flex", flexDirection: "column", gap: "0.5rem" }}>
       <input type="url" placeholder="https://example.com" value={url} onChange={e => setUrl(e.target.value)}
         onFocus={e => { e.currentTarget.style.borderColor = "var(--input-outline-border-color-focus)" }}
-        onBlur={e => { e.currentTarget.style.borderColor = "var(--input-outline-border-color)" }}
+        onBlur={e => { e.currentTarget.style.borderColor = "var(--input-outline-border-color)"; saveUrl() }}
         style={OUTLINE_INPUT} />
       <span style={{ display: "flex", alignItems: "center", gap: "0.3rem", fontSize: "var(--font-text-xs-size)", color: "var(--color-text-tertiary)" }}>
         <Globe size={11} />The tool will pull publicly available information from this URL.
@@ -245,9 +359,9 @@ function WebsiteInput() {
 function InterviewInput() {
   return (
     <div style={{ paddingLeft: "2rem", display: "flex", flexDirection: "column", gap: "0.75rem" }}>
-      <UploadZone accept=".txt,.pdf,.docx,.vtt,.srt" hint="TXT, PDF, Word, VTT, SRT" />
+      <UploadZone kind="interview" accept=".txt,.pdf,.docx,.vtt,.srt" hint="TXT, PDF, Word, VTT, SRT · up to 50 MB each" />
       <OrDivider />
-      <ConnectorGrid connectors={NOTETAKER_CONNECTORS} />
+      <ConnectorGrid kind="interview" connectors={NOTETAKER_CONNECTORS} />
     </div>
   )
 }
@@ -264,10 +378,12 @@ const SOURCES: { id: SourceId; label: string; primary?: true; render?: () => Rea
 // ─── Component ────────────────────────────────────────────────────────────────
 
 export default function PlanningStep({
+  engagementId,
   jurisdictions, onJurisdictionsChange,
   entity, onEntityChange,
   sources, onSourcesChange, onContinue,
 }: {
+  engagementId: string | null
   jurisdictions: string[]
   onJurisdictionsChange: (v: string[]) => void
   entity: string
@@ -284,6 +400,7 @@ export default function PlanningStep({
   const canContinue = jurisdictions.length > 0 && entity.trim().length > 0 && sources.size > 0
 
   return (
+    <PlanningCtx.Provider value={{ engagementId }}>
     <main style={{ flex: 1, display: "flex", flexDirection: "column", padding: "3rem 3.5rem", maxWidth: 640, overflowY: "auto" }}>
       <div style={{ display: "flex", gap: "0.75rem", marginBottom: "2.5rem" }}>
         <div style={{ flex: "0 0 240px" }}>
@@ -363,5 +480,6 @@ export default function PlanningStep({
         }}>Continue</button>
       </div>
     </main>
+    </PlanningCtx.Provider>
   )
 }

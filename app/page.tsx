@@ -1,10 +1,11 @@
 "use client"
 
-import { useState } from "react"
+import { useEffect, useState } from "react"
 import PlanningStep, { type SourceId } from "@/components/steps/planning"
 import RequirementsStep from "@/components/steps/requirements"
 import DraftStep from "@/components/steps/draft"
 import RisksStep from "@/components/steps/risks"
+import { api } from "@/lib/api"
 
 type Step = 1 | 2 | 3 | 4
 
@@ -21,10 +22,28 @@ export default function Page() {
   const [jurisdictions, setJ] = useState<string[]>([])
   const [entity, setEntity]   = useState("")
   const [sources, setSources] = useState<Set<SourceId>>(new Set())
+  const [engagementId, setEngagementId] = useState<string | null>(null)
+  // Deep-link from a Requirements row to the draft section that fulfils it.
+  const [draftJump, setDraftJump] = useState<{ jurisdiction: string; sectionId: string } | null>(null)
+
+  // Persist a planning session up front so uploads/sources have somewhere to attach.
+  useEffect(() => {
+    api.createEngagement()
+      .then(({ id }) => setEngagementId(id))
+      .catch(err => console.error("[veritax] failed to create engagement:", err))
+  }, [])
 
   function navigate(s: Step) {
     setStep(s)
     setVisited(prev => new Set(prev).add(s))
+  }
+
+  function continueFromPlanning() {
+    if (engagementId) {
+      api.patchEngagement(engagementId, { entity_name: entity, jurisdictions })
+        .catch(err => console.error("[veritax] failed to save engagement scope:", err))
+    }
+    navigate(2)
   }
 
   return (
@@ -101,26 +120,29 @@ export default function Page() {
         <div style={{ flex: 1, display: "flex", overflow: "hidden" }}>
           {step === 1 && (
             <PlanningStep
+              engagementId={engagementId}
               jurisdictions={jurisdictions} onJurisdictionsChange={setJ}
               entity={entity}              onEntityChange={setEntity}
               sources={sources}            onSourcesChange={setSources}
-              onContinue={() => navigate(2)}
+              onContinue={continueFromPlanning}
             />
           )}
           {step === 2 && (
             <RequirementsStep
-              jurisdictions={jurisdictions} sources={sources}
+              engagementId={engagementId} jurisdictions={jurisdictions}
               onContinue={() => navigate(3)} onBack={() => navigate(1)}
+              onOpenDraftSection={(jurisdiction, sectionId) => { setDraftJump({ jurisdiction, sectionId }); navigate(3) }}
             />
           )}
           {step === 3 && (
             <DraftStep
-              jurisdictions={jurisdictions} entity={entity} sources={sources}
+              engagementId={engagementId} jurisdictions={jurisdictions} entity={entity}
               onContinue={() => navigate(4)}
+              jumpTo={draftJump} onJumped={() => setDraftJump(null)}
             />
           )}
           {step === 4 && (
-            <RisksStep jurisdictions={jurisdictions} entity={entity} />
+            <RisksStep engagementId={engagementId} jurisdictions={jurisdictions} entity={entity} />
           )}
         </div>
 
