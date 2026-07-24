@@ -189,13 +189,16 @@ class DeepSeekAssessor:
                     {"role": "user", "content": prompt},
                 ],
                 tools=[tool],
-                tool_choice={"type": "function", "function": {"name": "record_assessment"}},
+                tool_choice="auto",  # DeepSeek v4 "thinking mode" rejects a forced tool_choice
                 timeout=90,  # fail visibly rather than hang the whole loop
             )
         except Exception:
             log.exception("assess[deepseek] '%s' call FAILED after %.1fs", element.element_name, time.monotonic() - t0)
             raise
-        call = resp.choices[0].message.tool_calls[0]
+        msg = resp.choices[0].message
+        if not msg.tool_calls:
+            raise RuntimeError(f"DeepSeek returned no tool call: {(msg.content or '')[:200]}")
+        call = msg.tool_calls[0]
         d = json.loads(call.function.arguments)
         log.info("assess[deepseek] DONE '%s' -> %s in %.1fs", element.element_name, d.get("status"), time.monotonic() - t0)
         return _assessment_from(d)

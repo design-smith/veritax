@@ -188,9 +188,12 @@ class DeepSeekRiskAnalyzer:
                 {"role": "user", "content": _prompt(entity, jurisdiction, draft_text, documents)},
             ],
             tools=[tool],
-            tool_choice={"type": "function", "function": {"name": "record_findings"}},
+            tool_choice="auto",  # DeepSeek v4 "thinking mode" rejects a forced tool_choice
         )
-        return _parse(json.loads(resp.choices[0].message.tool_calls[0].function.arguments))
+        msg = resp.choices[0].message
+        if not msg.tool_calls:
+            raise RuntimeError(f"DeepSeek returned no tool call: {(msg.content or '')[:200]}")
+        return _parse(json.loads(msg.tool_calls[0].function.arguments))
 
 
 class AnthropicRiskAnalyzer:

@@ -218,9 +218,12 @@ class DeepSeekDrafter:
                 {"role": "user", "content": _prompt(element, register, documents, coverage_note)},
             ],
             tools=[tool],
-            tool_choice={"type": "function", "function": {"name": "write_section"}},
+            tool_choice="auto",  # DeepSeek v4 "thinking mode" rejects a forced tool_choice
         )
-        d = json.loads(resp.choices[0].message.tool_calls[0].function.arguments)
+        msg = resp.choices[0].message
+        if not msg.tool_calls:
+            raise RuntimeError(f"DeepSeek returned no tool call: {(msg.content or '')[:200]}")
+        d = json.loads(msg.tool_calls[0].function.arguments)
         cites = [
             Citation(
                 marker=c["marker"],
