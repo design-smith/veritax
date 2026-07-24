@@ -19,7 +19,7 @@ class Settings(BaseSettings):
     embedding_dim: int = 1024
 
     anthropic_api_key: str = ""
-    assessment_model: str = "claude-haiku-4-5"
+    assessment_model: str = "claude-haiku-4-5-20251001"
     draft_model: str = "claude-sonnet-4-6"
 
     # DeepSeek (OpenAI-compatible). When set, used for assessment + drafting instead of Anthropic.
