@@ -7,7 +7,7 @@ research is a gap-filler only. Documents are passed in directly (no vector searc
 
 from __future__ import annotations
 
-import json
+import json_repair
 from dataclasses import dataclass
 from typing import Protocol
 
@@ -223,7 +223,7 @@ class DeepSeekDrafter:
         msg = resp.choices[0].message
         if not msg.tool_calls:
             raise RuntimeError(f"DeepSeek returned no tool call: {(msg.content or '')[:200]}")
-        d = json.loads(msg.tool_calls[0].function.arguments)
+        d = json_repair.loads(msg.tool_calls[0].function.arguments)  # tolerant of malformed tool JSON
         cites = [
             Citation(
                 marker=c["marker"],

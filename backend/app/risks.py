@@ -9,7 +9,7 @@ precision (L3). Reads the draft + record directly (no vector search).
 
 from __future__ import annotations
 
-import json
+import json_repair
 from dataclasses import dataclass, field
 from typing import Protocol
 
@@ -193,7 +193,7 @@ class DeepSeekRiskAnalyzer:
         msg = resp.choices[0].message
         if not msg.tool_calls:
             raise RuntimeError(f"DeepSeek returned no tool call: {(msg.content or '')[:200]}")
-        return _parse(json.loads(msg.tool_calls[0].function.arguments))
+        return _parse(json_repair.loads(msg.tool_calls[0].function.arguments))  # tolerant of malformed tool JSON
 
 
 class AnthropicRiskAnalyzer:

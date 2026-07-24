@@ -7,7 +7,7 @@ documents directly (callers pass full text); never uses vector search.
 
 from __future__ import annotations
 
-import json
+import json_repair
 import logging
 import time
 from dataclasses import dataclass
@@ -199,7 +199,7 @@ class DeepSeekAssessor:
         if not msg.tool_calls:
             raise RuntimeError(f"DeepSeek returned no tool call: {(msg.content or '')[:200]}")
         call = msg.tool_calls[0]
-        d = json.loads(call.function.arguments)
+        d = json_repair.loads(call.function.arguments)  # tolerant: DeepSeek tool JSON is sometimes malformed
         log.info("assess[deepseek] DONE '%s' -> %s in %.1fs", element.element_name, d.get("status"), time.monotonic() - t0)
         return _assessment_from(d)
 
