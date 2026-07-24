@@ -101,6 +101,7 @@ async def run_analysis(session_factory: async_sessionmaker, analyzer: RiskAnalyz
         ).scalar_one_or_none()
         if run is None:
             return
+        run_id = run.id  # capture now — after a rollback the instance is expired and can't lazy-load
         run.status = RiskRunStatus.analyzing
         await session.commit()
 
@@ -160,7 +161,7 @@ async def run_analysis(session_factory: async_sessionmaker, analyzer: RiskAnalyz
             await session.commit()
         except Exception as exc:  # noqa: BLE001 - record failure on the run
             await session.rollback()
-            run = await session.get(RiskRun, run.id)
+            run = await session.get(RiskRun, run_id)  # run.id would be expired after the rollback
             if run is not None:
                 run.status = RiskRunStatus.failed
                 run.error = str(exc)[:1000]

@@ -137,23 +137,33 @@ def _prompt(entity: str, jurisdiction: str, draft_text: str, documents: list[Doc
     )
 
 
+_VALID_KIND = {"discrepancy", "exposure"}
+_VALID_SEVERITY = {"critical", "high", "medium", "low"}
+_VALID_CONFIDENCE = {"high", "medium", "low"}
+
+
 def _parse(payload: dict) -> list[Finding]:
+    # Tolerant of missing/invalid keys — the model occasionally omits a field or uses an off-enum value.
     out: list[Finding] = []
     for f in payload.get("findings", []):
+        kind = f.get("kind") if f.get("kind") in _VALID_KIND else "exposure"
+        sev = f.get("severity") if f.get("severity") in _VALID_SEVERITY else "medium"
+        conf = f.get("confidence") if f.get("confidence") in _VALID_CONFIDENCE else "low"
         out.append(
             Finding(
-                kind=f["kind"],
-                title=f["title"],
-                description=f["description"],
-                severity=f["severity"],
+                kind=kind,
+                title=f.get("title") or "Untitled finding",
+                description=f.get("description") or "",
+                severity=sev,
                 exposure_label=f.get("exposure_label", ""),
                 exposure_estimated=bool(f.get("exposure_estimated", True)),
-                confidence=f.get("confidence", "low"),
+                confidence=conf,
                 evidence=[
-                    Evidence(e["kind"], e["reference"], e["detail"], e.get("source_filename"))
-                    for e in f.get("evidence", [])
+                    Evidence(e.get("kind", "document"), e.get("reference", ""), e.get("detail", ""),
+                             e.get("source_filename"))
+                    for e in f.get("evidence", []) if isinstance(e, dict)
                 ],
-                recommendations=list(f.get("recommendations", [])),
+                recommendations=[r for r in f.get("recommendations", []) if isinstance(r, str)],
             )
         )
     return out
