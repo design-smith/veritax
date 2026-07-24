@@ -1,0 +1,30 @@
+# Render Blueprint — one-click backend deploy. In Render: New → Blueprint → connect this repo.
+# All secrets are sync:false, so you enter them in the dashboard (nothing sensitive lives in the repo).
+services:
+  - type: web
+    name: veritax-backend
+    runtime: docker
+    dockerfilePath: ./backend/Dockerfile
+    dockerContext: ./backend
+    plan: free
+    region: oregon
+    healthCheckPath: /health
+    envVars:
+      - key: DATABASE_URL       # Supabase Session-pooler URL, scheme postgresql+asyncpg://
+        sync: false
+      - key: DEEPSEEK_API_KEY
+        sync: false
+      - key: VOYAGE_API_KEY
+        sync: false
+      - key: S3_ENDPOINT_URL    # e.g. https://<acct>.r2.cloudflarestorage.com
+        sync: false
+      - key: S3_ACCESS_KEY
+        sync: false
+      - key: S3_SECRET_KEY
+        sync: false
+      - key: S3_BUCKET
+        sync: false
+      - key: S3_REGION          # R2: "auto"
+        sync: false
+      - key: CORS_ORIGINS       # your Vercel origin(s), comma-separated, no trailing slash
+        sync: false
