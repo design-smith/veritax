@@ -183,7 +183,7 @@ class DeepSeekAssessor:
         try:
             resp = self._get_client().chat.completions.create(
                 model=self._model,
-                max_tokens=1024,
+                max_tokens=8192,  # headroom: v4 thinking mode spends tokens reasoning before the tool JSON
                 messages=[
                     {"role": "system", "content": SYSTEM_PROMPT},
                     {"role": "user", "content": prompt},

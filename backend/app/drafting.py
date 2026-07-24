@@ -212,7 +212,7 @@ class DeepSeekDrafter:
         }
         resp = self._get_client().chat.completions.create(
             model=self._model,
-            max_tokens=4000,
+            max_tokens=8192,  # headroom: v4 thinking mode spends tokens reasoning before the tool JSON
             messages=[
                 {"role": "system", "content": SYSTEM_PROMPT_NO_WEB},
                 {"role": "user", "content": _prompt(element, register, documents, coverage_note)},

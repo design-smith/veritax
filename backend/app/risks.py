@@ -182,7 +182,7 @@ class DeepSeekRiskAnalyzer:
         }
         resp = self._get_client().chat.completions.create(
             model=self._model,
-            max_tokens=4000,
+            max_tokens=8192,  # headroom: v4 thinking mode spends tokens reasoning before the tool JSON
             messages=[
                 {"role": "system", "content": SYSTEM_PROMPT},
                 {"role": "user", "content": _prompt(entity, jurisdiction, draft_text, documents)},
