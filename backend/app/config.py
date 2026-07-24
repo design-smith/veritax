@@ -6,11 +6,13 @@ class Settings(BaseSettings):
 
     database_url: str = "postgresql+asyncpg://veritax:veritax@localhost:5432/veritax"
 
-    s3_endpoint_url: str = "http://localhost:9000"
+    # Object storage. Leave S3_ENDPOINT_URL unset to use local filesystem storage (no bucket needed).
+    s3_endpoint_url: str = ""
     s3_access_key: str = "minioadmin"
     s3_secret_key: str = "minioadmin"
     s3_bucket: str = "veritax-sources"
     s3_region: str = "us-east-1"
+    storage_dir: str = "_storage"  # used by LocalStorage when S3 is not configured
 
     voyage_api_key: str = ""
     embedding_model: str = "voyage-law-2"

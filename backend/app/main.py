@@ -15,7 +15,7 @@ from .drafting import AnthropicDrafter, DeepSeekDrafter, FakeDrafter
 from .embeddings import FakeEmbedder, VoyageEmbedder
 from .risks import AnthropicRiskAnalyzer, DeepSeekRiskAnalyzer, FakeRiskAnalyzer
 from .routers import connectors, coverage, documents, draft, engagements, risks, search, sources
-from .storage import S3Storage
+from .storage import LocalStorage, S3Storage
 
 log = logging.getLogger("veritax")
 # Emit veritax logs at INFO regardless of uvicorn's --log-level, so the pipeline is observable.
@@ -31,11 +31,16 @@ if not log.handlers:
 async def lifespan(app: FastAPI):
     await init_db()
     app.state.session_factory = SessionFactory
-    storage = S3Storage()
+    # S3/MinIO when configured; otherwise local filesystem (no external bucket needed).
+    if settings.s3_endpoint_url:
+        storage = S3Storage()
+    else:
+        log.warning("No S3 endpoint set — using local filesystem storage at %s", settings.storage_dir)
+        storage = LocalStorage()
     try:
         storage.ensure_bucket()
-    except Exception:  # noqa: BLE001 - app should still boot if MinIO isn't up yet
-        log.warning("could not reach object storage at %s yet", settings.s3_endpoint_url)
+    except Exception:  # noqa: BLE001 - app should still boot if storage isn't ready yet
+        log.warning("could not initialise object storage yet")
     app.state.storage = storage
     if settings.voyage_api_key:
         app.state.embedder = VoyageEmbedder()

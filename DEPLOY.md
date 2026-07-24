@@ -5,12 +5,13 @@ Two services:
 - **Frontend** — Next.js on **Vercel** (already connected; auto-deploys on push to `main`).
 - **Backend** — FastAPI on **Render** (this repo's `backend/`, via [`render.yaml`](render.yaml) + [`backend/Dockerfile`](backend/Dockerfile)).
 
-Plus two managed dependencies:
+Plus one managed dependency:
 
 - **Database** — Supabase Postgres + `pgvector`.
-- **File storage** — Cloudflare R2 (S3-compatible; 10 GB free). Supabase Storage also works.
 
-Do the steps in order — the backend needs the DB + storage values, and the frontend needs the backend URL.
+**No object storage / S3 bucket is needed.** Uploaded files are written to the backend's local disk and read only once (during embedding, right after upload); everything after that reads from the database. On Render's free tier the disk is ephemeral, which is fine — by the time a file could be lost, its embeddings are already in the DB. (If you ever want durable file storage, set `S3_ENDPOINT_URL` + `S3_ACCESS_KEY`/`S3_SECRET_KEY`/`S3_BUCKET`/`S3_REGION` and it switches to S3/R2 automatically.)
+
+Do the steps in order — the backend needs the DB values, and the frontend needs the backend URL.
 
 ---
 
@@ -30,25 +31,7 @@ The backend creates its own tables on startup (`create_all`), so an empty databa
 
 ---
 
-## 2. File storage — Cloudflare R2
-
-1. Create an R2 **bucket** named `veritax-sources`.
-2. Create an R2 **API token** (Object Read & Write) → gives an Access Key ID + Secret Access Key.
-3. Note your account's S3 endpoint: `https://<account_id>.r2.cloudflarestorage.com`.
-
-Values:
-
-| Env | Value |
-|---|---|
-| `S3_ENDPOINT_URL` | `https://<account_id>.r2.cloudflarestorage.com` |
-| `S3_ACCESS_KEY` | R2 access key id |
-| `S3_SECRET_KEY` | R2 secret |
-| `S3_BUCKET` | `veritax-sources` |
-| `S3_REGION` | `auto` |
-
----
-
-## 3. Backend — Render
+## 2. Backend — Render
 
 1. Render → **New → Blueprint** → connect this GitHub repo. It reads `render.yaml` and proposes the `veritax-backend` web service (free plan, Docker).
 2. Fill in the environment variables (all `sync:false`, entered in the dashboard):
@@ -58,15 +41,16 @@ Values:
    | `DATABASE_URL` | from step 1 |
    | `DEEPSEEK_API_KEY` | your DeepSeek key |
    | `VOYAGE_API_KEY` | your Voyage key |
-   | `S3_ENDPOINT_URL` / `S3_ACCESS_KEY` / `S3_SECRET_KEY` / `S3_BUCKET` / `S3_REGION` | from step 2 |
    | `CORS_ORIGINS` | your Vercel origin(s), e.g. `https://veritax.vercel.app` (comma-separated, **no trailing slash**) |
+
+   No storage vars needed — the backend uses local disk unless you set the `S3_*` vars.
 
 3. Deploy. The URL will be `https://veritax-backend.onrender.com`.
 4. Verify: open `https://veritax-backend.onrender.com/health` → `{"ok": true}`.
 
 ---
 
-## 4. Point the frontend at the backend — Vercel
+## 3. Point the frontend at the backend — Vercel
 
 Vercel → Project → **Settings → Environment Variables**:
 

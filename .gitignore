@@ -43,3 +43,6 @@ __pycache__/
 
 # python build metadata
 *.egg-info/
+
+# local filesystem storage (LocalStorage)
+_storage/

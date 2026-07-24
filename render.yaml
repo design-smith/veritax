@@ -16,15 +16,7 @@ services:
         sync: false
       - key: VOYAGE_API_KEY
         sync: false
-      - key: S3_ENDPOINT_URL    # e.g. https://<acct>.r2.cloudflarestorage.com
-        sync: false
-      - key: S3_ACCESS_KEY
-        sync: false
-      - key: S3_SECRET_KEY
-        sync: false
-      - key: S3_BUCKET
-        sync: false
-      - key: S3_REGION          # R2: "auto"
-        sync: false
       - key: CORS_ORIGINS       # your Vercel origin(s), comma-separated, no trailing slash
         sync: false
+    # No object storage needed: uploads are stored on the local disk and only read once during
+    # embedding. To use S3/R2 instead, add S3_ENDPOINT_URL + S3_ACCESS_KEY/S3_SECRET_KEY/S3_BUCKET/S3_REGION.

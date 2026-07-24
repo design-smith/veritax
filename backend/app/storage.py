@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import uuid
+from pathlib import Path
 from typing import Protocol
 
 import boto3
@@ -62,3 +63,25 @@ class InMemoryStorage:
 
     def get(self, key: str) -> bytes:
         return self._objects[key]
+
+
+class LocalStorage:
+    """Filesystem storage — no external bucket needed. An uploaded file is only read once, during
+    embedding (in-process, right after upload), so an ephemeral disk is sufficient for a single
+    instance. Used automatically when no S3 endpoint is configured.
+    """
+
+    def __init__(self, base_dir: str | None = None) -> None:
+        self.bucket = settings.s3_bucket
+        self._base = Path(base_dir or settings.storage_dir)
+
+    def ensure_bucket(self) -> None:
+        self._base.mkdir(parents=True, exist_ok=True)
+
+    def put(self, key: str, data: bytes, content_type: str | None = None) -> None:
+        path = self._base / key
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(data)
+
+    def get(self, key: str) -> bytes:
+        return (self._base / key).read_bytes()
