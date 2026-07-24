@@ -74,6 +74,7 @@ def _to_read(row: RequirementCoverage, doc_kind: dict[uuid.UUID, str],
         whats_present=row.whats_present,
         whats_missing=row.whats_missing,
         confidence=row.confidence,
+        error=row.error,
         sources_used=kinds,
         evidence=[
             CoverageEvidenceRead(document_id=e.document_id, source_label=e.source_label, locator=e.locator)

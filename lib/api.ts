@@ -61,6 +61,7 @@ export interface CoverageRow {
   whats_present: string | null
   whats_missing: string | null
   confidence: "high" | "medium" | "low" | null
+  error: string | null
   sources_used: string[]
   evidence: CoverageEvidence[]
   draft_section_id: string | null

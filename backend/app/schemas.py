@@ -101,6 +101,7 @@ class CoverageRead(BaseModel):
     whats_present: str | None
     whats_missing: str | None
     confidence: Confidence | None
+    error: str | None  # why this requirement failed to assess, if it did
     sources_used: list[str]  # source kinds that fed the assessment
     evidence: list[CoverageEvidenceRead]  # which document + where (provenance pointers)
     draft_section_id: uuid.UUID | None  # the drafted section that fulfils this requirement, if drafted
