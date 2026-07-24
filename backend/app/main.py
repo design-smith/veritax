@@ -49,19 +49,28 @@ async def lifespan(app: FastAPI):
         # real embeddings. Never masks config in prod silently — this warning is loud.
         log.warning("VOYAGE_API_KEY not set — using FakeEmbedder (dev only, embeddings are not real)")
         app.state.embedder = FakeEmbedder()
-    if settings.deepseek_api_key:
+    # Provider is an explicit choice via LLM_PROVIDER (deepseek|anthropic|fake). Blank = auto-detect
+    # from whichever API key is set. This lets you flip providers with one env var without having to
+    # remove another provider's key.
+    provider = settings.llm_provider.strip().lower()
+    if not provider:
+        provider = ("deepseek" if settings.deepseek_api_key
+                    else "anthropic" if settings.anthropic_api_key
+                    else "fake")
+
+    if provider == "deepseek":
         log.warning("Using DeepSeek (%s) for assessment + drafting + risks", settings.deepseek_model)
         app.state.assessor = DeepSeekAssessor()
         app.state.drafter = DeepSeekDrafter()
         app.state.risk_analyzer = DeepSeekRiskAnalyzer()
-    elif settings.anthropic_api_key:
+    elif provider == "anthropic":
         log.warning("Using Anthropic (%s / %s) for assessment + drafting + risks",
                     settings.assessment_model, settings.draft_model)
         app.state.assessor = AnthropicAssessor()
         app.state.drafter = AnthropicDrafter()
         app.state.risk_analyzer = AnthropicRiskAnalyzer()
     else:
-        log.warning("No LLM key set — using Fake assessor/drafter/risk-analyzer (dev only, not real)")
+        log.warning("Using Fake assessor/drafter/risk-analyzer (LLM_PROVIDER=%r; dev only, not real)", provider)
         app.state.assessor = FakeAssessor()
         app.state.drafter = FakeDrafter()
         app.state.risk_analyzer = FakeRiskAnalyzer()

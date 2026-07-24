@@ -18,13 +18,18 @@ class Settings(BaseSettings):
     embedding_model: str = "voyage-law-2"
     embedding_dim: int = 1024
 
+    # ── LLM provider ─────────────────────────────────────────────────────────
+    # LLM_PROVIDER: "deepseek" | "anthropic" | "fake". Blank = auto (first key that's set).
+    # Set the models per provider with the *_MODEL env vars below.
+    llm_provider: str = ""
+
+    # Anthropic — ASSESSMENT_MODEL (fast, per-requirement) + DRAFT_MODEL (quality, draft & risks).
     anthropic_api_key: str = ""
     assessment_model: str = "claude-haiku-4-5-20251001"
     draft_model: str = "claude-sonnet-4-6"
 
-    # DeepSeek (OpenAI-compatible). When set, used for assessment + drafting instead of Anthropic.
-    # Model names: deepseek-v4-flash (fast/cheap) or deepseek-v4-pro (higher quality). Override with
-    # DEEPSEEK_MODEL. ("deepseek-chat" was retired by DeepSeek.)
+    # DeepSeek (OpenAI-compatible). DEEPSEEK_MODEL: deepseek-v4-flash (fast/cheap) or deepseek-v4-pro
+    # (higher quality). ("deepseek-chat" was retired by DeepSeek.)
     deepseek_api_key: str = ""
     deepseek_base_url: str = "https://api.deepseek.com"
     deepseek_model: str = "deepseek-v4-flash"
