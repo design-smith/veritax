@@ -55,6 +55,8 @@ async def lifespan(app: FastAPI):
         app.state.drafter = DeepSeekDrafter()
         app.state.risk_analyzer = DeepSeekRiskAnalyzer()
     elif settings.anthropic_api_key:
+        log.warning("Using Anthropic (%s / %s) for assessment + drafting + risks",
+                    settings.assessment_model, settings.draft_model)
         app.state.assessor = AnthropicAssessor()
         app.state.drafter = AnthropicDrafter()
         app.state.risk_analyzer = AnthropicRiskAnalyzer()
