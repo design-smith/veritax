@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import logging
 import uuid
 
 from sqlalchemy import select
@@ -11,6 +12,18 @@ from .embeddings import Embedder
 from .models import Document, DocumentChunk, DocumentStatus
 from .processing import chunk, extract_text
 from .storage import Storage, build_key
+
+log = logging.getLogger("veritax")
+
+
+def _rss_mb() -> str:
+    """Peak resident memory in MB (Linux) — best-effort, to spot OOM pressure in the logs."""
+    try:
+        import resource
+
+        return f"{resource.getrusage(resource.RUSAGE_SELF).ru_maxrss // 1024}MB"
+    except Exception:  # noqa: BLE001 - not available on Windows; diagnostics only
+        return "n/a"
 
 
 async def store_upload(
@@ -55,7 +68,10 @@ async def embed_document(
     async with session_factory() as session:
         doc = await session.get(Document, document_id)
         if doc is None:
+            log.warning("embed_document: doc %s not found", document_id)
             return
+        fname = doc.original_filename
+        log.info("embed START doc=%s file=%s size=%d rss=%s", doc.id, fname, doc.size_bytes, _rss_mb())
         doc.status = DocumentStatus.embedding
         await session.commit()
 
@@ -64,9 +80,13 @@ async def embed_document(
             # the single web worker stays responsive — otherwise a big PDF blocks the event loop long
             # enough for the platform health check to fail and restart the worker mid-embed.
             data = await asyncio.to_thread(storage.get, doc.storage_key)
+            log.info("embed: read %d bytes for %s (rss=%s)", len(data), fname, _rss_mb())
             text = await asyncio.to_thread(extract_text, doc.original_filename, doc.content_type, data)
+            log.info("embed: extracted %d chars from %s (rss=%s)", len(text), fname, _rss_mb())
             pieces = chunk(text)
+            log.info("embed: %d chunk(s) for %s — embedding now (rss=%s)", len(pieces), fname, _rss_mb())
             vectors = await asyncio.to_thread(embedder.embed_documents, pieces)
+            log.info("embed: got %d vector(s) for %s (rss=%s)", len(vectors), fname, _rss_mb())
             for i, (piece, vec) in enumerate(zip(pieces, vectors)):
                 session.add(
                     DocumentChunk(
@@ -80,7 +100,9 @@ async def embed_document(
             doc.status = DocumentStatus.embedded
             doc.error = None
             await session.commit()
+            log.info("embed DONE doc=%s file=%s -> embedded (rss=%s)", doc.id, fname, _rss_mb())
         except Exception as exc:  # noqa: BLE001 - record failure, don't crash the worker
+            log.exception("embed FAILED doc=%s file=%s: %s", document_id, fname, exc)
             await session.rollback()
             doc = await session.get(Document, document_id)
             if doc is not None:
