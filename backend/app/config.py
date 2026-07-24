@@ -23,9 +23,11 @@ class Settings(BaseSettings):
     draft_model: str = "claude-sonnet-4-6"
 
     # DeepSeek (OpenAI-compatible). When set, used for assessment + drafting instead of Anthropic.
+    # Model names: deepseek-v4-flash (fast/cheap) or deepseek-v4-pro (higher quality). Override with
+    # DEEPSEEK_MODEL. ("deepseek-chat" was retired by DeepSeek.)
     deepseek_api_key: str = ""
     deepseek_base_url: str = "https://api.deepseek.com"
-    deepseek_model: str = "deepseek-chat"
+    deepseek_model: str = "deepseek-v4-flash"
 
     cors_origins: str = "http://localhost:3000"
 
