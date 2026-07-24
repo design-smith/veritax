@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import uuid
 
@@ -59,10 +60,13 @@ async def embed_document(
         await session.commit()
 
         try:
-            data = storage.get(doc.storage_key)
-            text = extract_text(doc.original_filename, doc.content_type, data)
+            # Offload the blocking work (storage read, PDF extraction, embedding HTTP) to threads so
+            # the single web worker stays responsive — otherwise a big PDF blocks the event loop long
+            # enough for the platform health check to fail and restart the worker mid-embed.
+            data = await asyncio.to_thread(storage.get, doc.storage_key)
+            text = await asyncio.to_thread(extract_text, doc.original_filename, doc.content_type, data)
             pieces = chunk(text)
-            vectors = embedder.embed_documents(pieces)
+            vectors = await asyncio.to_thread(embedder.embed_documents, pieces)
             for i, (piece, vec) in enumerate(zip(pieces, vectors)):
                 session.add(
                     DocumentChunk(
