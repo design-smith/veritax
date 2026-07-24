@@ -11,7 +11,25 @@ from .models import CONNECTOR_SEED, Base, Connector
 # ponytail: create_all + a seed helper instead of Alembic. Greenfield, single schema, no data to
 # migrate yet. Add Alembic when the Requirements stage starts evolving the schema.
 
-engine = create_async_engine(settings.database_url, pool_pre_ping=True)
+
+def _normalize_db_url(url: str) -> str:
+    """Force the asyncpg driver. A bare `postgres://` or `postgresql://` URL (what Supabase/Render
+    hand you) routes SQLAlchemy to the sync psycopg2 driver, which we don't install."""
+    if url.startswith("postgresql+asyncpg://"):
+        return url
+    for scheme in ("postgresql://", "postgres://"):
+        if url.startswith(scheme):
+            return "postgresql+asyncpg://" + url[len(scheme):]
+    return url
+
+
+_url = _normalize_db_url(settings.database_url)
+# Managed Postgres (Supabase) requires SSL; its pooler (pgbouncer) rejects cached prepared
+# statements. Apply both for any non-local database; skip for localhost.
+_is_local = "localhost" in _url or "127.0.0.1" in _url
+_connect_args: dict = {} if _is_local else {"ssl": "require", "statement_cache_size": 0}
+
+engine = create_async_engine(_url, pool_pre_ping=True, connect_args=_connect_args)
 SessionFactory = async_sessionmaker(engine, expire_on_commit=False)
 
 
