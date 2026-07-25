@@ -3,8 +3,7 @@
 Requirements (coverage), Draft, and Risks read documents via `retrieve_documents` — semantic
 retrieval of the chunks most relevant to each element. Whole-document context does not scale: real
 annual-report PDFs run to millions of characters and blow past the model's context window, so we
-pass in the matched passages, not the whole file. `gather_documents` (full text) is kept for small
-corpora / tooling but is no longer the pipeline's primary path.
+pass in the matched passages, not the whole file.
 """
 
 from __future__ import annotations
@@ -19,14 +18,14 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from .embeddings import Embedder
 from .models import Document, DocumentChunk, Source
-from .processing import extract_text
-from .storage import Storage
 
 log = logging.getLogger("veritax")
 
-# Chunks to pull per retrieval query. ~14 × 600-word chunks ≈ 14K tokens — comfortably inside the
-# model window while covering an element from several angles. ponytail: bump if recall is thin.
+# Chunks to pull per retrieval query. Draft needs the richer context (~14 × 600-word chunks ≈ 14K
+# tokens); assessment is only a presence check, so it pulls fewer — and a batch sends the UNION of its
+# elements' chunks, so recall holds. ponytail: bump if recall is thin.
 RETRIEVE_K = 14
+ASSESS_K = 8
 
 
 @dataclass
@@ -38,36 +37,34 @@ class DocContext:
     text: str
 
 
-async def gather_documents(session: AsyncSession, engagement_id: uuid.UUID, storage: Storage) -> list[DocContext]:
-    rows = (
-        await session.execute(
-            select(Document, Source.kind, Source.id)
-            .join(Source, Source.id == Document.source_id)
-            .where(Source.engagement_id == engagement_id)
-        )
-    ).all()
-    log.info("gather_documents: engagement=%s found %d document(s)", engagement_id, len(rows))
-    docs: list[DocContext] = []
-    for doc, kind, source_id in rows:
-        try:
-            data = await asyncio.to_thread(storage.get, doc.storage_key)
-        except Exception:
-            log.exception("gather_documents: storage.get FAILED for %s (key=%s)", doc.original_filename, doc.storage_key)
-            raise
-        text = await asyncio.to_thread(extract_text, doc.original_filename, doc.content_type, data)
-        log.info("  · %s (%s): %d bytes -> %d chars extracted", doc.original_filename, kind.value, len(data), len(text))
-        docs.append(
-            DocContext(
-                source_id=str(source_id),
-                document_id=str(doc.id),
-                kind=kind.value,
-                filename=doc.original_filename,
-                text=text,
-            )
-        )
-    total = sum(len(d.text) for d in docs)
-    log.info("gather_documents: %d doc(s), %d total chars of context", len(docs), total)
-    return docs
+_CHUNK_SEP = "\n…\n"  # how _search_chunks joins a document's matched passages
+
+
+def union_docs(doc_lists: list[list[DocContext]]) -> list[DocContext]:
+    """Merge several elements' retrievals into one deduped context (batched assessment sends it once).
+
+    Chunks overlap heavily across related elements; without dedup a batch re-sends the same passages.
+    Keeps first-seen order, dedups passages per document.
+    """
+    by_doc: dict[str, dict] = {}
+    order: list[str] = []
+    for docs in doc_lists:
+        for d in docs:
+            entry = by_doc.get(d.document_id)
+            if entry is None:
+                entry = {"meta": d, "pieces": [], "seen": set()}
+                by_doc[d.document_id] = entry
+                order.append(d.document_id)
+            for piece in d.text.split(_CHUNK_SEP):
+                if piece not in entry["seen"]:
+                    entry["seen"].add(piece)
+                    entry["pieces"].append(piece)
+    out: list[DocContext] = []
+    for doc_id in order:
+        e = by_doc[doc_id]
+        m = e["meta"]
+        out.append(DocContext(m.source_id, m.document_id, m.kind, m.filename, _CHUNK_SEP.join(e["pieces"])))
+    return out
 
 
 def element_query(element) -> str:

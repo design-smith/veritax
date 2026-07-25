@@ -9,6 +9,7 @@ from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
 from sqlalchemy import delete, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
+from sqlalchemy.orm import selectinload
 
 from ..config import settings
 from ..corpus import DocContext, document_filename_map, element_query, retrieve_documents, retrieve_documents_batch
@@ -125,6 +126,41 @@ async def _draft_one(session: AsyncSession, section: DraftSection, element, docu
         section.error = str(exc)[:1000]
 
 
+async def _find_drafted_twin(session: AsyncSession, engagement_id: uuid.UUID, element) -> DraftSection | None:
+    """A completed section for the same element elsewhere in the engagement. Shared base templates give
+    jurisdictions the same (name, order), and the prose is grounded in the same documents — so reuse it:
+    no regeneration, and the shared narrative reads identically across the jurisdiction files.
+    ponytail: identity = (name, order); DraftSection has no description column and a cross-base name+order
+    collision within one engagement is near-zero. Add element_description to the table if that changes."""
+    return (
+        await session.execute(
+            select(DraftSection)
+            .where(
+                DraftSection.engagement_id == engagement_id,
+                DraftSection.element_name == element.element_name,
+                DraftSection.element_order == element.order,
+                DraftSection.status == DraftStatus.drafted,
+            )
+            .options(selectinload(DraftSection.citations))
+            .limit(1)
+        )
+    ).scalar_one_or_none()
+
+
+async def _copy_draft(session: AsyncSession, target: DraftSection, twin: DraftSection) -> None:
+    target.content = twin.content
+    target.model = twin.model
+    target.status = DraftStatus.drafted
+    target.error = None
+    target.drafted_at = datetime.now(timezone.utc)
+    await session.execute(delete(DraftCitation).where(DraftCitation.section_id == target.id))
+    for c in twin.citations:
+        session.add(DraftCitation(
+            section_id=target.id, marker=c.marker, kind=c.kind, document_id=c.document_id,
+            url=c.url, source_label=c.source_label, quote=c.quote,
+        ))
+
+
 async def run_draft(session_factory: async_sessionmaker, drafter: Drafter, embedder: Embedder,
                     engagement_id: uuid.UUID, jurisdiction: str) -> None:
     async with session_factory() as session:
@@ -140,23 +176,33 @@ async def run_draft(session_factory: async_sessionmaker, drafter: Drafter, embed
                 )
             )
         ).scalars().all()
-        # One embedding call for all sections' queries; per-section pgvector search is free/local.
-        queries = {s.requirement_key: element_query(elements[s.requirement_key])
-                   for s in pending if s.requirement_key in elements}
-        try:
-            docs_by_key = await retrieve_documents_batch(session, engagement_id, embedder, queries)
-        except Exception:  # noqa: BLE001 - embedding down: draft with no context rather than crash the run
-            log.exception("run_draft: query embedding FAILED — sections draft without retrieved context")
-            docs_by_key = {}
+        # Pass 1: reuse a drafted twin from another jurisdiction (no LLM, keeps files consistent).
+        remaining: list[DraftSection] = []
         for section in pending:
             element = elements.get(section.requirement_key)
             if element is None:
                 section.status = DraftStatus.failed
                 section.error = "requirement not found in seed"
+                await session.commit()
+                continue
+            twin = await _find_drafted_twin(session, engagement_id, element)
+            if twin is not None and twin.id != section.id:
+                await _copy_draft(session, section, twin)
+                await session.commit()
             else:
-                documents = docs_by_key.get(section.requirement_key, [])
-                await _draft_one(session, section, element, documents,
-                                 notes.get(section.requirement_key, ""), drafter, fname_to_docid)
+                remaining.append(section)
+        # Pass 2: draft the rest. One embedding call for their queries; per-section pgvector search is free.
+        queries = {s.requirement_key: element_query(elements[s.requirement_key]) for s in remaining}
+        try:
+            docs_by_key = await retrieve_documents_batch(session, engagement_id, embedder, queries)
+        except Exception:  # noqa: BLE001 - embedding down: draft with no context rather than crash the run
+            log.exception("run_draft: query embedding FAILED — sections draft without retrieved context")
+            docs_by_key = {}
+        for section in remaining:
+            element = elements[section.requirement_key]
+            documents = docs_by_key.get(section.requirement_key, [])
+            await _draft_one(session, section, element, documents,
+                             notes.get(section.requirement_key, ""), drafter, fname_to_docid)
             await session.commit()
 
 

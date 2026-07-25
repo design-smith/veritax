@@ -19,9 +19,18 @@ from fastapi import (
 from sqlalchemy import delete, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
+from sqlalchemy.orm import selectinload
 
 from ..assessment import Assessor
-from ..corpus import document_filename_map, element_query, retrieve_documents, retrieve_documents_batch
+from ..config import settings
+from ..corpus import (
+    ASSESS_K,
+    document_filename_map,
+    element_query,
+    retrieve_documents,
+    retrieve_documents_batch,
+    union_docs,
+)
 from ..deps import get_assessor, get_embedder, get_session, get_session_factory, get_storage
 from ..embeddings import Embedder
 from ..ingest import embed_document, get_or_create_uploaded_source, store_upload
@@ -160,6 +169,87 @@ async def _write_evidence(session: AsyncSession, coverage_id: uuid.UUID, evidenc
         ))
 
 
+# ── Cross-jurisdiction dedup: reuse a byte-identical element already assessed in this engagement ──
+async def _find_assessed_twin(session: AsyncSession, engagement_id: uuid.UUID, element) -> RequirementCoverage | None:
+    """A completed assessment of the same element elsewhere in this engagement. Shared base templates
+    give jurisdictions byte-identical (name, description) elements, so the verdict is the same over the
+    same documents — reuse it instead of paying the LLM again (and keep the files consistent)."""
+    return (
+        await session.execute(
+            select(RequirementCoverage)
+            .where(
+                RequirementCoverage.engagement_id == engagement_id,
+                RequirementCoverage.element_name == element.element_name,
+                RequirementCoverage.element_description == element.description,
+                RequirementCoverage.status.in_(
+                    [CoverageStatus.present, CoverageStatus.partial, CoverageStatus.missing]
+                ),
+            )
+            .options(selectinload(RequirementCoverage.evidence))
+            .limit(1)
+        )
+    ).scalar_one_or_none()
+
+
+async def _copy_assessment(session: AsyncSession, target_id: uuid.UUID, twin: RequirementCoverage) -> None:
+    row = await session.get(RequirementCoverage, target_id)
+    if row is None:
+        return
+    row.status = twin.status
+    row.whats_present = twin.whats_present
+    row.whats_missing = twin.whats_missing
+    row.confidence = twin.confidence
+    row.error = None
+    row.assessed_at = datetime.now(timezone.utc)
+    await session.execute(delete(CoverageEvidence).where(CoverageEvidence.coverage_id == target_id))
+    for e in twin.evidence:
+        session.add(CoverageEvidence(
+            coverage_id=target_id, document_id=e.document_id, source_label=e.source_label, locator=e.locator,
+        ))
+
+
+async def _assess_group(session_factory: async_sessionmaker, assessor: Assessor, elements: dict,
+                        docs_by_key: dict, retrieval_error: str | None, fname_to_docid: dict[str, str],
+                        group: list[tuple[uuid.UUID, str]]) -> None:
+    """Assess one batch in a single LLM call over the UNION of its elements' chunks, then write + commit
+    all rows together (the UI reveals the batch at once). One bad batch fails only its own rows."""
+    els = [elements[rk] for _, rk in group]
+    results: dict = {}
+    err: Exception | None = None
+    if retrieval_error is not None:
+        err = RuntimeError(f"context retrieval failed: {retrieval_error}")
+    else:
+        shared = union_docs([docs_by_key.get(rk, []) for _, rk in group])
+        try:
+            results = await asyncio.to_thread(assessor.assess_batch, els, shared)
+        except Exception as exc:  # noqa: BLE001 - whole batch failed; mark its rows, keep the run going
+            err = exc
+            log.exception("assess_batch FAILED for %d element(s)", len(els))
+    async with session_factory() as s:
+        for i, (rid, _rk) in enumerate(group, 1):  # element_number is 1-based position in the group
+            row = await s.get(RequirementCoverage, rid)
+            if row is None:
+                continue
+            result = None if err is not None else results.get(i)
+            try:
+                if err is not None:
+                    row.status, row.error = CoverageStatus.failed, str(err)[:1000]
+                elif result is None:
+                    row.status, row.error = CoverageStatus.failed, "no assessment returned for this element"
+                else:
+                    row.status = CoverageStatus(result.status)
+                    row.whats_present = result.whats_present or None
+                    row.whats_missing = result.whats_missing or None
+                    row.confidence = Confidence(result.confidence)
+                    row.error = None
+                    row.assessed_at = datetime.now(timezone.utc)
+                    await _write_evidence(s, row.id, result.evidence, fname_to_docid)
+            except Exception:  # noqa: BLE001 - one row's write error can't sink the rest of the batch
+                log.exception("assess write FAILED for '%s'", row.element_name)
+                row.status, row.error = CoverageStatus.failed, "assessment write error"
+        await s.commit()
+
+
 async def _apply(session: AsyncSession, row: RequirementCoverage, element, documents, assessor: Assessor,
                  fname_to_docid: dict[str, str]) -> None:
     try:
@@ -179,18 +269,21 @@ async def _apply(session: AsyncSession, row: RequirementCoverage, element, docum
 
 async def run_assessment(session_factory: async_sessionmaker, assessor: Assessor, embedder: Embedder,
                          engagement_id: uuid.UUID, jurisdiction: str) -> None:
-    """Background job: assess pending rows ONE AT A TIME in element order, committing each as it finishes.
+    """Background job. Two passes over the pending rows:
 
-    Sequential (not concurrent) on purpose — the UI reveals requirements one-by-one as each is processed,
-    so completions must arrive in order. Context is retrieved PER element (the matched chunks), so each
-    assessment call stays inside the model window regardless of how large the source documents are.
+    1. Cross-jurisdiction dedup — an element already assessed elsewhere in the engagement (shared base
+       templates) is copied, no LLM call, revealed immediately.
+    2. The rest are assessed in batches of ASSESS_BATCH_SIZE, each a single LLM call over the union of
+       the batch's retrieved chunks (context sent once, not per element), committed per batch so the UI
+       still reveals progressively. Batch size 1 == the old strict one-call-per-element behaviour.
     """
     log.info("run_assessment START engagement=%s jurisdiction=%s assessor=%s",
              engagement_id, jurisdiction, type(assessor).__name__)
     t0 = time.monotonic()
     try:
+        elements = {e.requirement_key: e for e in resolve_requirements(jurisdiction)}
+        # ── Pass 1: setup, cross-jurisdiction dedup, retrieval for the remainder ──
         async with session_factory() as session:
-            elements = {e.requirement_key: e for e in resolve_requirements(jurisdiction)}
             fname_to_docid = await document_filename_map(session, engagement_id)
             pending = (
                 await session.execute(
@@ -201,63 +294,44 @@ async def run_assessment(session_factory: async_sessionmaker, assessor: Assessor
                     ).order_by(RequirementCoverage.element_order)  # process (and reveal) in order
                 )
             ).all()
-            # Embed every element's query in ONE call (the rate-limited step), then search per element.
-            queries = {rk: element_query(elements[rk]) for _, rk in pending if rk in elements}
+            uncached: list[tuple[uuid.UUID, str]] = []
+            reused = 0
+            for rid, rk in pending:
+                element = elements.get(rk)
+                if element is None:
+                    row = await session.get(RequirementCoverage, rid)
+                    if row is not None:
+                        row.status, row.error = CoverageStatus.failed, "requirement not found in seed"
+                    await session.commit()
+                    continue
+                twin = await _find_assessed_twin(session, engagement_id, element)
+                if twin is not None and twin.id != rid:
+                    await _copy_assessment(session, rid, twin)
+                    await session.commit()  # reveal the reused verdict immediately
+                    reused += 1
+                else:
+                    uncached.append((rid, rk))
+            # One embed call for the remaining elements (the rate-limited step); search per element.
+            queries = {rk: element_query(elements[rk]) for _, rk in uncached}
             docs_by_key: dict = {}
             retrieval_error: str | None = None
             try:
-                docs_by_key = await retrieve_documents_batch(session, engagement_id, embedder, queries)
+                docs_by_key = await retrieve_documents_batch(
+                    session, engagement_id, embedder, queries, k=ASSESS_K
+                )
             except Exception as exc:  # noqa: BLE001 - embedding provider down/rate-limited: fail rows cleanly
                 retrieval_error = str(exc)[:500]
-                log.exception("run_assessment: query embedding FAILED — all rows will be marked failed")
-        log.info("run_assessment: %d pending row(s), assessing one at a time in order", len(pending))
+                log.exception("run_assessment: query embedding FAILED — uncached rows will be marked failed")
 
-        async def assess_one(row_id: uuid.UUID, req_key: str) -> None:
-            # Fully self-contained: any failure marks THIS row failed and never propagates, so one bad
-            # row can't stall the sequence (which previously left the rest stuck 'pending').
-            try:
-                element = elements.get(req_key)
-                result, err = None, None
-                if element is not None:
-                    if retrieval_error is not None:
-                        err = RuntimeError(f"context retrieval failed: {retrieval_error}")
-                    else:
-                        documents = docs_by_key.get(req_key, [])
-                        try:
-                            result = await asyncio.to_thread(assessor.assess, element, documents)
-                        except Exception as exc:  # noqa: BLE001
-                            err = exc
-                            log.exception("assess FAILED for '%s'", element.element_name)
-                async with session_factory() as s:  # own session per row → concurrency-safe + progressive
-                    row = await s.get(RequirementCoverage, row_id)
-                    if row is None:
-                        return
-                    if element is None:
-                        row.status, row.error = CoverageStatus.failed, "requirement not found in seed"
-                    elif err is not None:
-                        row.status, row.error = CoverageStatus.failed, str(err)[:1000]
-                    else:
-                        row.status = CoverageStatus(result.status)
-                        row.whats_present = result.whats_present or None
-                        row.whats_missing = result.whats_missing or None
-                        row.confidence = Confidence(result.confidence)
-                        row.error = None
-                        row.assessed_at = datetime.now(timezone.utc)
-                        await _write_evidence(s, row.id, result.evidence, fname_to_docid)
-                    await s.commit()
-            except Exception:  # noqa: BLE001 - last resort: mark failed, never abort the batch
-                log.exception("assess_one CRASHED for row %s", row_id)
-                try:
-                    async with session_factory() as s2:
-                        r = await s2.get(RequirementCoverage, row_id)
-                        if r is not None and r.status == CoverageStatus.pending:
-                            r.status, r.error = CoverageStatus.failed, "assessment write error"
-                            await s2.commit()
-                except Exception:  # noqa: BLE001
-                    pass
+        batch_size = max(1, settings.assess_batch_size)
+        log.info("run_assessment: %d reused from twin, %d to assess in batches of %d",
+                 reused, len(uncached), batch_size)
 
-        for rid, rk in pending:  # sequential — each commit reveals the next requirement in the UI
-            await assess_one(rid, rk)
+        # ── Pass 2: batched assessment of the uncached rows (committed per batch = progressive reveal) ──
+        for start in range(0, len(uncached), batch_size):
+            group = uncached[start:start + batch_size]
+            await _assess_group(session_factory, assessor, elements, docs_by_key,
+                                retrieval_error, fname_to_docid, group)
         log.info("run_assessment DONE engagement=%s jurisdiction=%s in %.1fs",
                  engagement_id, jurisdiction, time.monotonic() - t0)
     except Exception:

@@ -23,6 +23,10 @@ class Settings(BaseSettings):
     # Set the models per provider with the *_MODEL env vars below.
     llm_provider: str = ""
 
+    # Requirements assessed this many elements per LLM call (shared context sent once). 1 = strict
+    # one-call-per-element (today's behaviour) — the instant rollback if batching ever regresses quality.
+    assess_batch_size: int = 5
+
     # Anthropic — ASSESSMENT_MODEL (fast, per-requirement) + DRAFT_MODEL (quality, draft & risks).
     anthropic_api_key: str = ""
     assessment_model: str = "claude-haiku-4-5-20251001"

@@ -71,6 +71,34 @@ ASSESS_TOOL = {
     },
 }
 
+# Batched variant: assess several elements in ONE call against shared context. Same per-element shape,
+# wrapped in an array and keyed by element_number so results map back to the requested elements.
+ASSESS_BATCH_TOOL = {
+    "name": "record_assessments",
+    "description": "Record the input-sufficiency assessment for EACH listed requirement element.",
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "assessments": {
+                "type": "array",
+                "description": "Exactly one entry per element listed in the prompt.",
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "element_number": {
+                            "type": "integer",
+                            "description": "The element's number exactly as listed in the prompt (1-based).",
+                        },
+                        **ASSESS_TOOL["input_schema"]["properties"],
+                    },
+                    "required": ["element_number", *ASSESS_TOOL["input_schema"]["required"]],
+                },
+            }
+        },
+        "required": ["assessments"],
+    },
+}
+
 
 @dataclass
 class EvidenceItem:
@@ -89,6 +117,9 @@ class Assessment:
 
 class Assessor(Protocol):
     def assess(self, element: ResolvedElement, documents: list[DocContext]) -> Assessment: ...
+    def assess_batch(
+        self, elements: list[ResolvedElement], documents: list[DocContext]
+    ) -> dict[int, Assessment]: ...
 
 
 def _assessment_from(d: dict) -> Assessment:
@@ -106,6 +137,23 @@ def _assessment_from(d: dict) -> Assessment:
     )
 
 
+_VALID_STATUS = {"present", "partial", "missing"}
+
+
+def _assessments_from(payload: dict) -> dict[int, Assessment]:
+    """Batch payload → {element_number: Assessment}. Tolerant: skips items missing a number/status so
+    one garbled entry can't sink the batch (the caller marks any un-returned element failed)."""
+    out: dict[int, Assessment] = {}
+    for item in payload.get("assessments", []):
+        if not isinstance(item, dict):
+            continue
+        num = item.get("element_number")
+        if not isinstance(num, int) or item.get("status") not in _VALID_STATUS:
+            continue
+        out[num] = _assessment_from(item)
+    return out
+
+
 def _element_prompt(element: ResolvedElement, documents: list[DocContext]) -> str:
     subs = "\n".join(f"  - {s}" for s in element.sub_requirements) or "  (none)"
     docs = "\n\n".join(
@@ -119,6 +167,29 @@ def _element_prompt(element: ResolvedElement, documents: list[DocContext]) -> st
         f"SOURCE MATERIALS:\n{docs}\n\n"
         "Assess whether these sources contain enough information to write this element. "
         "Call record_assessment with your result."
+    )
+
+
+def _batch_prompt(elements: list[ResolvedElement], documents: list[DocContext]) -> str:
+    docs = "\n\n".join(
+        f"--- SOURCE: {d.filename} (type: {d.kind}) ---\n{d.text.strip() or '(no extractable text)'}"
+        for d in documents
+    ) or "(no documents uploaded)"
+    blocks = []
+    for i, el in enumerate(elements, 1):
+        subs = "\n".join(f"    - {s}" for s in el.sub_requirements) or "    (none)"
+        blocks.append(
+            f"ELEMENT {i}: {el.element_name}\n"
+            f"  DESCRIPTION: {el.description}\n"
+            f"  SUB-REQUIREMENTS:\n{subs}"
+        )
+    return (
+        f"Assess EACH of these {len(elements)} required elements against the SHARED source materials "
+        "below. Judge each element independently on presence/completeness only; return exactly one "
+        "assessment per element, with element_number matching the numbers below.\n\n"
+        f"{chr(10).join(blocks)}\n\n"
+        f"SHARED SOURCE MATERIALS:\n{docs}\n\n"
+        "Call record_assessments once, with one entry per element."
     )
 
 
@@ -149,6 +220,20 @@ class AnthropicAssessor:
             if getattr(block, "type", None) == "tool_use" and block.name == "record_assessment":
                 d = block.input
                 return _assessment_from(d)
+        raise RuntimeError("assessor returned no tool_use block")
+
+    def assess_batch(self, elements, documents):
+        resp = self._get_client().messages.create(
+            model=self._model,
+            max_tokens=4096,
+            system=SYSTEM_PROMPT,
+            tools=[ASSESS_BATCH_TOOL],
+            tool_choice={"type": "tool", "name": "record_assessments"},
+            messages=[{"role": "user", "content": _batch_prompt(elements, documents)}],
+        )
+        for block in resp.content:
+            if getattr(block, "type", None) == "tool_use" and block.name == "record_assessments":
+                return _assessments_from(block.input)
         raise RuntimeError("assessor returned no tool_use block")
 
 
@@ -204,6 +289,43 @@ class DeepSeekAssessor:
         log.info("assess[deepseek] DONE '%s' -> %s in %.1fs", element.element_name, d.get("status"), time.monotonic() - t0)
         return _assessment_from(d)
 
+    def assess_batch(self, elements, documents):
+        tool = {
+            "type": "function",
+            "function": {
+                "name": "record_assessments",
+                "description": ASSESS_BATCH_TOOL["description"],
+                "parameters": ASSESS_BATCH_TOOL["input_schema"],
+            },
+        }
+        prompt = _batch_prompt(elements, documents)
+        log.info("assess_batch[deepseek] START %d element(s) (prompt %d chars, %d docs)",
+                 len(elements), len(prompt), len(documents))
+        t0 = time.monotonic()
+        try:
+            resp = self._get_client().chat.completions.create(
+                model=self._model,
+                max_tokens=8192,  # a batch of verdicts; thinking is off so this is pure tool JSON
+                messages=[
+                    {"role": "system", "content": SYSTEM_PROMPT},
+                    {"role": "user", "content": prompt},
+                ],
+                tools=[tool],
+                tool_choice={"type": "function", "function": {"name": "record_assessments"}},
+                extra_body={"thinking": {"type": "disabled"}},
+                timeout=120,  # a batch is a larger single call than a per-element assess
+            )
+        except Exception:
+            log.exception("assess_batch[deepseek] call FAILED after %.1fs", time.monotonic() - t0)
+            raise
+        msg = resp.choices[0].message
+        if not msg.tool_calls:
+            raise RuntimeError(f"DeepSeek returned no tool call: {(msg.content or '')[:200]}")
+        results = _assessments_from(json_repair.loads(msg.tool_calls[0].function.arguments))
+        log.info("assess_batch[deepseek] DONE %d/%d verdict(s) in %.1fs",
+                 len(results), len(elements), time.monotonic() - t0)
+        return results
+
 
 class FakeAssessor:
     """Deterministic keyword-overlap heuristic for tests + dev fallback. No network."""
@@ -239,3 +361,6 @@ class FakeAssessor:
             [],
             "low",
         )
+
+    def assess_batch(self, elements, documents):
+        return {i: self.assess(el, documents) for i, el in enumerate(elements, 1)}
