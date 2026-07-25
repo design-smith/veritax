@@ -198,7 +198,8 @@ class DeepSeekRiskAnalyzer:
                 {"role": "user", "content": _prompt(entity, jurisdiction, draft_text, documents)},
             ],
             tools=[tool],
-            tool_choice="auto",  # DeepSeek v4 "thinking mode" rejects a forced tool_choice
+            tool_choice={"type": "function", "function": {"name": "record_findings"}},
+            extra_body={"thinking": {"type": "disabled"}},  # off: faster, no token burn, forced tool_choice works
         )
         msg = resp.choices[0].message
         if not msg.tool_calls:
