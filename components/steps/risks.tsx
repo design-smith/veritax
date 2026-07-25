@@ -1,32 +1,68 @@
 "use client"
 
-import { useCallback, useEffect, useRef, useState } from "react"
-import { Loader2, Download, ChevronDown, ChevronUp, GitCompareArrows, ShieldAlert, FileText } from "lucide-react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
+import { Loader2, Download, X, FileText } from "lucide-react"
 import { api, DraftNotCompleteError, type RiskResponse, type RiskFinding, type RiskSeverityValue } from "@/lib/api"
 
-const SEV_CFG: Record<RiskSeverityValue, { label: string; bg: string; text: string; dot: string }> = {
-  critical: { label: "Critical", bg: "#000",                                   text: "#fff",                          dot: "#000" },
-  high:     { label: "High",     bg: "var(--color-background-danger-soft)",    text: "var(--color-text-danger-soft)", dot: "var(--red-400)" },
-  medium:   { label: "Medium",   bg: "var(--color-background-caution-soft)",   text: "var(--color-text-caution-soft)", dot: "var(--yellow-400)" },
-  low:      { label: "Low",      bg: "var(--color-background-info-soft)",      text: "var(--color-text-info-soft)",   dot: "var(--blue-400)" },
+// ── Original "Findings" appearance (grayscale), now driven by the real pipeline ──────────────
+type Severity = RiskSeverityValue
+const SEVERITY_ORDER: Record<Severity, number> = { critical: 0, high: 1, medium: 2, low: 3 }
+const SEVERITY_STYLE: Record<Severity, { bg: string; color: string; border?: string }> = {
+  critical: { bg: "#000", color: "#fff" },
+  high:     { bg: "#3f3f3f", color: "#fff" },
+  medium:   { bg: "#dcdcdc", color: "#000" },
+  low:      { bg: "#f2f2f2", color: "#666", border: "1px solid #e5e5e5" },
 }
+const KIND_LABEL = { discrepancy: "Contradiction", exposure: "Exposure" } as const
+type KindFilter = "all" | "exposure" | "discrepancy"
 
-const KIND_CFG = {
-  discrepancy: { label: "Contradiction", hint: "Your documents disagree — reconcile them", Icon: GitCompareArrows },
-  exposure:    { label: "Exposure",      hint: "This position may be challenged",          Icon: ShieldAlert },
-} as const
+const fmt = (n: number) => n.toLocaleString("en-US")
+
+// ── Small presentational bits (ported from the original) ─────────────────────────────────────
+function Chip({ children, style }: { children: React.ReactNode; style?: React.CSSProperties }) {
+  return (
+    <span style={{ display: "inline-block", padding: "2px 8px", borderRadius: 9999, fontSize: 11, fontWeight: 500, whiteSpace: "nowrap", ...style }}>
+      {children}
+    </span>
+  )
+}
+function OutlineChip({ children }: { children: React.ReactNode }) {
+  return <Chip style={{ background: "#fff", color: "#555", border: "1px solid #e5e5e5" }}>{children}</Chip>
+}
+function Stat({ label, value }: { label: string; value: React.ReactNode }) {
+  return (
+    <div>
+      <p style={{ fontSize: 11, color: "#888", margin: "0 0 0.125rem" }}>{label}</p>
+      <p style={{ fontSize: 20, fontWeight: 600, color: "#000", margin: 0, fontVariant: "tabular-nums" }}>{value}</p>
+    </div>
+  )
+}
+const Divider = () => <div style={{ width: 1, height: 32, background: "#e5e5e5" }} />
+
+const TH: React.CSSProperties = { textAlign: "left", fontSize: 11, fontWeight: 600, color: "#888", textTransform: "uppercase", letterSpacing: "0.04em", padding: "0.5rem 0.75rem", borderBottom: "1px solid #e5e5e5", whiteSpace: "nowrap" }
+const TD: React.CSSProperties = { padding: "0.625rem 0.75rem", borderBottom: "1px solid #f0f0f0", verticalAlign: "middle" }
+const PILL = (active: boolean): React.CSSProperties => ({
+  height: 28, padding: "0 0.75rem", borderRadius: 9999, cursor: "pointer",
+  border: active ? "1px solid #000" : "1px solid #e5e5e5",
+  background: active ? "#000" : "#fff", color: active ? "#fff" : "#555",
+  fontSize: 12, fontWeight: 500,
+})
 
 export default function RisksStep({ engagementId, jurisdictions, entity }: {
   engagementId: string | null
   jurisdictions: string[]
   entity: string
 }) {
+  // ── real pipeline wiring (unchanged) ──
   const [riskByJuris, setRiskByJuris] = useState<Record<string, RiskResponse>>({})
   const [started, setStarted] = useState<Set<string>>(new Set())
   const [notReady, setNotReady] = useState<Set<string>>(new Set())
   const [activeJurisdiction, setActive] = useState(jurisdictions[0] ?? "")
   const [error, setError] = useState<string | null>(null)
-  const [expanded, setExpanded] = useState<Set<string>>(new Set())
+  // ── view state (search + kind toggle + slide-in detail, from the original) ──
+  const [search, setSearch] = useState("")
+  const [view, setView] = useState<KindFilter>("all")
+  const [openFinding, setOpenFinding] = useState<RiskFinding | null>(null)
 
   const riskRef = useRef(riskByJuris); riskRef.current = riskByJuris
   const startedRef = useRef(started); startedRef.current = started
@@ -76,6 +112,7 @@ export default function RisksStep({ engagementId, jurisdictions, entity }: {
 
   function selectJurisdiction(j: string) {
     setActive(j)
+    setOpenFinding(null)
     startJurisdiction(j)
   }
 
@@ -88,14 +125,26 @@ export default function RisksStep({ engagementId, jurisdictions, entity }: {
 
   const risk = riskByJuris[activeJurisdiction] ?? null
   const findings = risk?.findings ?? []
-  const s = risk?.summary
+
+  const visible = useMemo(() => {
+    const q = search.trim().toLowerCase()
+    return findings
+      .filter(f => view === "all" || f.kind === view)
+      .filter(f => !q || `${f.title} ${f.description} ${KIND_LABEL[f.kind]}`.toLowerCase().includes(q))
+      .slice()
+      .sort((a, b) => SEVERITY_ORDER[a.severity] - SEVERITY_ORDER[b.severity])
+  }, [findings, view, search])
+
+  const exposureCount = findings.filter(f => f.kind === "exposure").length
+  const contradictionCount = findings.filter(f => f.kind === "discrepancy").length
+  const needAttention = findings.filter(f => f.severity === "critical" || f.severity === "high").length
 
   function exportRegister() {
     const title = `${entity || "Entity"} — ${activeJurisdiction} · Risk Register`
     const body = findings.map(f => {
       const ev = f.evidence.map(e => `<li><em>${e.kind}</em> — ${e.reference}: ${e.detail}</li>`).join("")
       const rec = f.recommendations.map(r => `<li>${r}</li>`).join("")
-      return `<div class="f"><h3>[${f.severity.toUpperCase()} · ${KIND_CFG[f.kind].label}] ${f.title}</h3>` +
+      return `<div class="f"><h3>[${f.severity.toUpperCase()} · ${KIND_LABEL[f.kind]}] ${f.title}</h3>` +
         `<p>${f.description}</p>` +
         `<p><strong>Exposure:</strong> ${f.exposure_label ?? "—"}${f.exposure_estimated ? " <em>(estimated)</em>" : ""} · <strong>Confidence:</strong> ${f.confidence}</p>` +
         `<p><strong>Evidence</strong></p><ul>${ev}</ul>` +
@@ -112,27 +161,23 @@ export default function RisksStep({ engagementId, jurisdictions, entity }: {
     URL.revokeObjectURL(url)
   }
 
-  if (!engagementId) return <main style={{ flex: 1, padding: "3rem 3.5rem", color: "var(--color-text-tertiary)" }}>Preparing session…</main>
-  if (jurisdictions.length === 0) return <main style={{ flex: 1, padding: "3rem 3.5rem", color: "var(--color-text-tertiary)" }}>Select a jurisdiction in Planning first.</main>
+  if (!engagementId) return <main style={{ flex: 1, padding: "3rem 3rem", color: "#888" }}>Preparing session…</main>
+  if (jurisdictions.length === 0) return <main style={{ flex: 1, padding: "3rem 3rem", color: "#888" }}>Select a jurisdiction in Planning first.</main>
+
+  const hasFindings = risk?.status !== "failed" && !analyzing(risk) && findings.length > 0
 
   return (
     <div style={{ flex: 1, display: "flex", flexDirection: "column", overflow: "hidden" }}>
 
-      {/* Jurisdiction tabs */}
-      <div style={{ background: "var(--color-surface)", padding: "1rem 3.5rem 0.75rem", display: "flex", gap: "0.375rem", flexWrap: "wrap", borderBottom: "1px solid var(--color-border)" }}>
+      {/* Jurisdiction tabs (grayscale pills) */}
+      <div style={{ background: "#fff", padding: "1rem 3rem 0.75rem", display: "flex", gap: "0.375rem", flexWrap: "wrap", borderBottom: "1px solid #e5e5e5" }}>
         {jurisdictions.map(j => {
           const isActive = j === activeJurisdiction
           const isStarted = started.has(j)
           const processing = isStarted && analyzing(riskByJuris[j])
           return (
-            <button key={j} type="button" onClick={() => selectJurisdiction(j)} style={{
-              display: "inline-flex", alignItems: "center", gap: "0.375rem",
-              padding: "0.25rem 0.75rem", borderRadius: "9999px", border: "none", cursor: "pointer",
-              background: isActive ? "var(--color-background-primary-solid)" : isStarted ? "var(--alpha-06)" : "transparent",
-              color: isActive ? "var(--color-text-inverse)" : isStarted ? "var(--color-text-secondary)" : "var(--color-text-tertiary)",
-              fontSize: "var(--font-text-xs-size)", fontWeight: "var(--font-weight-medium)",
-              opacity: isStarted ? 1 : 0.55, transition: "all var(--transition-duration-basic)",
-            }}>
+            <button key={j} type="button" onClick={() => selectJurisdiction(j)}
+              style={{ display: "inline-flex", alignItems: "center", gap: "0.375rem", ...PILL(isActive), opacity: isStarted ? 1 : 0.6 }}>
               {processing && <Loader2 size={11} className="animate-spin" />}
               {j}
             </button>
@@ -140,122 +185,186 @@ export default function RisksStep({ engagementId, jurisdictions, entity }: {
         })}
       </div>
 
-      {/* Body */}
-      <div style={{ flex: 1, overflowY: "auto" }}>
-        <main style={{ padding: "2rem 3.5rem 3rem", maxWidth: 820 }}>
+      <div style={{ flex: 1, display: "flex", overflow: "hidden" }}>
+        <main style={{ flex: 1, display: "flex", flexDirection: "column", padding: "2rem 3rem", overflowY: "auto" }}>
 
-          <div style={{ marginBottom: "1.25rem", display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: "1rem" }}>
-            <div>
-              <h1 style={{ fontSize: "var(--font-text-xl-size)", fontWeight: "var(--font-weight-semibold)", color: "var(--color-text)", margin: "0 0 0.375rem" }}>
-                Where are you exposed?
-              </h1>
-              {s && risk?.status === "done" && (
-                <p style={{ fontSize: "var(--font-text-sm-size)", color: "var(--color-text-secondary)", margin: 0 }}>
-                  {s.total} finding{s.total === 1 ? "" : "s"} · {s.by_kind.exposure ?? 0} exposure · {s.by_kind.discrepancy ?? 0} contradiction · {activeJurisdiction}
-                </p>
-              )}
-            </div>
-            {risk?.status === "done" && findings.length > 0 && (
-              <button type="button" onClick={exportRegister} style={{ display: "inline-flex", alignItems: "center", gap: "0.375rem", height: "var(--control-size-sm)", padding: "0 var(--control-gutter-md)", borderRadius: "var(--control-radius-md)", border: "1px solid var(--color-border)", background: "var(--color-surface)", color: "var(--color-text-secondary)", fontSize: "var(--control-font-size-md)", fontWeight: "var(--font-weight-medium)", cursor: "pointer", flexShrink: 0 }}>
+          {/* Header */}
+          <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: "1rem", marginBottom: "1.25rem" }}>
+            <h1 style={{ fontSize: 24, fontWeight: 600, color: "#000", margin: 0 }}>Findings</h1>
+            {hasFindings && (
+              <button type="button" onClick={exportRegister} style={{ display: "inline-flex", alignItems: "center", gap: "0.375rem", height: 30, padding: "0 0.75rem", borderRadius: 6, border: "1px solid #e5e5e5", background: "#fff", color: "#000", fontSize: 12, fontWeight: 500, cursor: "pointer", flexShrink: 0 }}>
                 <Download size={14} /> Export register
               </button>
             )}
           </div>
 
-          {error && <p style={{ fontSize: "var(--font-text-sm-size)", color: "var(--color-text-danger-soft)" }}>Couldn’t load risks. Is the backend running? ({error})</p>}
+          {error && <p style={{ fontSize: 13, color: "#b00020" }}>Couldn’t load risks. Is the backend running? ({error})</p>}
 
           {notReady.has(activeJurisdiction) ? (
-            <div style={{ border: "1px solid var(--color-border)", borderRadius: "var(--radius-lg)", padding: "1.5rem", textAlign: "center" }}>
-              <p style={{ fontSize: "var(--font-text-sm-size)", color: "var(--color-text-secondary)", margin: "0 0 0.75rem" }}>
+            <div style={{ border: "1px solid #e5e5e5", borderRadius: 8, padding: "1.5rem", textAlign: "center" }}>
+              <p style={{ fontSize: 13, color: "#555", margin: "0 0 0.75rem" }}>
                 Risks run on the finished file. Complete the <strong>Draft</strong> for {activeJurisdiction} first, then check here.
               </p>
-              <button type="button" onClick={() => retry(activeJurisdiction)} style={{ height: "var(--control-size-sm)", padding: "0 var(--control-gutter-md)", borderRadius: "var(--control-radius-md)", border: "1px solid var(--color-border)", background: "transparent", color: "var(--color-text-secondary)", fontSize: "var(--control-font-size-md)", cursor: "pointer" }}>Check again</button>
+              <button type="button" onClick={() => retry(activeJurisdiction)} style={{ height: 28, padding: "0 0.75rem", borderRadius: 6, border: "1px solid #e5e5e5", background: "#fff", color: "#555", fontSize: 12, cursor: "pointer" }}>Check again</button>
             </div>
           ) : analyzing(risk) || (!risk && !error) ? (
-            <p style={{ display: "flex", alignItems: "center", gap: "0.5rem", fontSize: "var(--font-text-sm-size)", color: "var(--color-text-tertiary)" }}>
+            <p style={{ display: "flex", alignItems: "center", gap: "0.5rem", fontSize: 13, color: "#888" }}>
               <Loader2 size={14} className="animate-spin" /> Analysing the {activeJurisdiction} file for risk…
             </p>
           ) : risk?.status === "failed" ? (
-            <p style={{ fontSize: "var(--font-text-sm-size)", color: "var(--color-text-danger-soft)" }}>Analysis failed: {risk.error}</p>
+            <p style={{ fontSize: 13, color: "#b00020" }}>Analysis failed: {risk.error}</p>
           ) : findings.length === 0 ? (
-            <p style={{ fontSize: "var(--font-text-sm-size)", color: "var(--color-text-tertiary)" }}>No risks surfaced for this file.</p>
+            <p style={{ fontSize: 13, color: "#888" }}>No risks surfaced for this file.</p>
           ) : (
             <>
-              <p style={{ fontSize: "var(--font-text-xs-size)", color: "var(--color-text-tertiary)", margin: "0 0 1rem" }}>
+              {/* Search + kind toggle */}
+              <div style={{ display: "flex", alignItems: "center", gap: "0.5rem", marginBottom: "0.875rem" }}>
+                <input type="text" value={search} onChange={e => setSearch(e.target.value)} placeholder="Search findings…"
+                  style={{ height: 28, width: 240, padding: "0 0.75rem", borderRadius: 9999, border: "1px solid #e5e5e5", background: "#fff", color: "#000", fontSize: 12, outline: "none" }} />
+                {([["all", "All"], ["exposure", "Exposure"], ["discrepancy", "Contradictions"]] as const).map(([id, label]) => (
+                  <button key={id} type="button" onClick={() => setView(id)} style={PILL(view === id)}>{label}</button>
+                ))}
+              </div>
+
+              {/* Rollup header */}
+              <div style={{ display: "flex", alignItems: "center", gap: "1.5rem", border: "1px solid #e5e5e5", borderRadius: 8, padding: "0.875rem 1.25rem", marginBottom: "1rem", flexWrap: "wrap" }}>
+                <Stat label="Findings" value={findings.length} />
+                <Divider />
+                <Stat label="Exposure" value={exposureCount} />
+                <Divider />
+                <Stat label="Contradictions" value={contradictionCount} />
+                <div style={{ marginLeft: "auto", textAlign: "right" }}>
+                  <p style={{ fontSize: 11, color: "#888", margin: "0 0 0.125rem" }}>Need attention</p>
+                  <p style={{ fontSize: 20, fontWeight: 600, color: "#000", margin: 0 }}>{needAttention}</p>
+                </div>
+              </div>
+
+              <p style={{ fontSize: 11, color: "#aaa", margin: "0 0 0.75rem" }}>
                 Exposure figures are flagged estimates, not computed — verify against the record before acting.
               </p>
-              <div style={{ display: "flex", flexDirection: "column", gap: "0.75rem" }}>
-                {findings.map(f => <FindingCard key={f.id} f={f} open={expanded.has(f.id)} onToggle={() => setExpanded(prev => { const n = new Set(prev); n.has(f.id) ? n.delete(f.id) : n.add(f.id); return n })} />)}
-              </div>
+
+              {/* Table */}
+              <table style={{ width: "100%", borderCollapse: "collapse" }}>
+                <thead>
+                  <tr>
+                    <th style={TH}>Severity</th>
+                    <th style={TH}>Kind</th>
+                    <th style={TH}>Title</th>
+                    <th style={TH}>Exposure</th>
+                    <th style={TH}>Confidence</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {visible.map(f => (
+                    <tr key={f.id} style={{ cursor: "pointer", background: openFinding?.id === f.id ? "#f2f2f2" : "transparent" }}
+                      onClick={() => setOpenFinding(f)}
+                      onMouseEnter={e => { if (openFinding?.id !== f.id) e.currentTarget.style.background = "#fafafa" }}
+                      onMouseLeave={e => { if (openFinding?.id !== f.id) e.currentTarget.style.background = "transparent" }}>
+                      <td style={TD}><Chip style={{ ...SEVERITY_STYLE[f.severity], textTransform: "capitalize", fontWeight: 600 }}>{f.severity}</Chip></td>
+                      <td style={TD}><OutlineChip>{KIND_LABEL[f.kind]}</OutlineChip></td>
+                      <td style={{ ...TD, fontSize: 13, fontWeight: 500, color: "#000", maxWidth: 360 }}>
+                        <span style={{ display: "block", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{f.title}</span>
+                      </td>
+                      <td style={{ ...TD, fontSize: 12, color: "#555", maxWidth: 220 }}>
+                        {f.exposure_amount != null ? (
+                          <span style={{ fontVariant: "tabular-nums", color: "#000" }}>{fmt(f.exposure_amount)} <span style={{ color: "#aaa", fontSize: 11 }}>{f.exposure_currency}</span></span>
+                        ) : (
+                          <span style={{ display: "block", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                            {f.exposure_label || "—"}{f.exposure_estimated && f.exposure_label ? " (est.)" : ""}
+                          </span>
+                        )}
+                      </td>
+                      <td style={{ ...TD, fontSize: 12, color: "#888", textTransform: "capitalize" }}>{f.confidence}</td>
+                    </tr>
+                  ))}
+                  {visible.length === 0 && (
+                    <tr><td colSpan={5} style={{ padding: "3rem", textAlign: "center", fontSize: 13, color: "#888" }}>No findings match the current view.</td></tr>
+                  )}
+                </tbody>
+              </table>
             </>
           )}
         </main>
+
+        {/* Detail panel — slides in on row click */}
+        {openFinding && (
+          <aside style={{ width: 380, flexShrink: 0, borderLeft: "1px solid #e5e5e5", background: "#fff", display: "flex", flexDirection: "column", overflowY: "auto" }}>
+            <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: "0.75rem", borderBottom: "1px solid #e5e5e5", padding: "1rem 1.25rem" }}>
+              <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: "0.5rem" }}>
+                <Chip style={{ ...SEVERITY_STYLE[openFinding.severity], textTransform: "capitalize", fontWeight: 600 }}>{openFinding.severity}</Chip>
+                <OutlineChip>{KIND_LABEL[openFinding.kind]}</OutlineChip>
+              </div>
+              <button type="button" aria-label="Close" onClick={() => setOpenFinding(null)} style={{ display: "inline-flex", padding: 6, border: "none", background: "transparent", cursor: "pointer", color: "#888" }}>
+                <X size={16} />
+              </button>
+            </div>
+
+            <div style={{ flex: 1, padding: "1.25rem", display: "flex", flexDirection: "column", gap: "1.25rem" }}>
+              <div>
+                <h3 style={{ fontSize: 16, fontWeight: 600, color: "#000", margin: "0 0 0.5rem" }}>{openFinding.title}</h3>
+                <p style={{ fontSize: 13, lineHeight: 1.6, color: "#666", margin: 0 }}>{openFinding.description}</p>
+              </div>
+
+              <div style={{ height: 1, background: "#e5e5e5" }} />
+
+              {/* Exposure card */}
+              <div style={{ border: "1px solid #e5e5e5", borderRadius: 8, padding: "1rem", display: "flex", flexDirection: "column", gap: "0.5rem" }}>
+                <p style={{ fontSize: 11, fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.04em", color: "#888", margin: 0 }}>Exposure</p>
+                {openFinding.exposure_amount != null ? (
+                  <div style={{ display: "flex", alignItems: "baseline", gap: "0.5rem" }}>
+                    <span style={{ fontSize: 24, fontWeight: 600, color: "#000", fontVariant: "tabular-nums" }}>{fmt(openFinding.exposure_amount)}</span>
+                    <span style={{ fontSize: 13, color: "#888" }}>{openFinding.exposure_currency}</span>
+                  </div>
+                ) : (
+                  <div style={{ display: "flex", alignItems: "center", gap: "0.5rem", flexWrap: "wrap" }}>
+                    <span style={{ fontSize: 14, fontWeight: 500, color: "#000" }}>{openFinding.exposure_label || "—"}</span>
+                    {openFinding.exposure_estimated && (
+                      <Chip style={{ background: "#dcdcdc", color: "#000", fontSize: 10, fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.04em" }}>Estimated</Chip>
+                    )}
+                  </div>
+                )}
+                <p style={{ fontSize: 11, color: "#aaa", margin: 0, textTransform: "capitalize" }}>{openFinding.confidence} confidence</p>
+                <p style={{ fontSize: 11, color: "#aaa", margin: 0 }}>Flagged estimate — verify against the record, not computed.</p>
+              </div>
+
+              <div style={{ height: 1, background: "#e5e5e5" }} />
+
+              {/* Evidence (real provenance) */}
+              <div style={{ display: "flex", flexDirection: "column", gap: "0.5rem" }}>
+                <p style={{ fontSize: 11, fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.04em", color: "#888", margin: "0 0 0.25rem" }}>Evidence ({openFinding.evidence.length})</p>
+                {openFinding.evidence.map((e, i) => (
+                  <div key={i} style={{ border: "1px solid #e5e5e5", background: "#fafafa", borderRadius: 6, padding: "0.75rem", display: "flex", flexDirection: "column", gap: "0.5rem" }}>
+                    <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "0.5rem" }}>
+                      <span style={{ fontSize: 12, fontWeight: 500, color: "#000", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                        <span style={{ color: "#aaa", textTransform: "uppercase", fontSize: 10, letterSpacing: "0.04em", marginRight: 6 }}>{e.kind}</span>{e.reference}
+                      </span>
+                      {e.document_id && (
+                        <Chip style={{ background: "#fff", color: "#555", border: "1px solid #e5e5e5", flexShrink: 0, display: "inline-flex", alignItems: "center", gap: 4 }}>
+                          <FileText size={10} /> Source
+                        </Chip>
+                      )}
+                    </div>
+                    <p style={{ fontSize: 12, fontStyle: "italic", color: "#888", margin: 0, lineHeight: 1.5 }}>&ldquo;{e.detail}&rdquo;</p>
+                  </div>
+                ))}
+                {openFinding.evidence.length === 0 && <p style={{ fontSize: 12, color: "#aaa", margin: 0 }}>No evidence pointers recorded.</p>}
+              </div>
+
+              <div style={{ height: 1, background: "#e5e5e5" }} />
+
+              {/* Options (recommendations) */}
+              <div style={{ display: "flex", flexDirection: "column", gap: "0.5rem" }}>
+                <p style={{ fontSize: 11, fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.04em", color: "#888", margin: "0 0 0.25rem" }}>Your options</p>
+                <ul style={{ margin: 0, padding: "0 0 0 1rem", display: "flex", flexDirection: "column", gap: "0.375rem" }}>
+                  {openFinding.recommendations.map((r, i) => (
+                    <li key={i} style={{ fontSize: 13, color: "#555", lineHeight: 1.55 }}>{r}</li>
+                  ))}
+                </ul>
+              </div>
+            </div>
+          </aside>
+        )}
       </div>
-    </div>
-  )
-}
-
-function FindingCard({ f, open, onToggle }: { f: RiskFinding; open: boolean; onToggle: () => void }) {
-  const sev = SEV_CFG[f.severity]
-  const kind = KIND_CFG[f.kind]
-  return (
-    <div style={{ border: "1px solid var(--color-border)", borderRadius: "var(--radius-lg)", overflow: "hidden" }}>
-      <button type="button" onClick={onToggle} style={{ display: "flex", alignItems: "flex-start", gap: "0.875rem", width: "100%", padding: "1rem 1.25rem", textAlign: "left", background: "transparent", border: "none", cursor: "pointer" }}>
-        <kind.Icon size={16} style={{ color: "var(--color-text-tertiary)", flexShrink: 0, marginTop: "0.125rem" }} />
-        <div style={{ flex: 1, minWidth: 0 }}>
-          <div style={{ display: "flex", alignItems: "center", gap: "0.5rem", flexWrap: "wrap", marginBottom: "0.25rem" }}>
-            <span style={{ padding: "2px 8px", borderRadius: "9999px", fontSize: "var(--font-text-xs-size)", fontWeight: "var(--font-weight-medium)", background: sev.bg, color: sev.text }}>{sev.label}</span>
-            <span style={{ padding: "2px 8px", borderRadius: "9999px", fontSize: "var(--font-text-xs-size)", fontWeight: "var(--font-weight-medium)", background: "var(--alpha-06)", color: "var(--color-text-secondary)" }}>{kind.label}</span>
-            <span style={{ fontSize: "var(--font-text-sm-size)", fontWeight: "var(--font-weight-medium)", color: "var(--color-text)" }}>{f.title}</span>
-          </div>
-          <p style={{ fontSize: "var(--font-text-sm-size)", color: "var(--color-text-secondary)", margin: 0, lineHeight: 1.5 }}>{f.description}</p>
-          {!open && f.exposure_label && (
-            <p style={{ fontSize: "var(--font-text-xs-size)", color: "var(--color-text-tertiary)", margin: "0.375rem 0 0" }}>
-              {kind.hint} · Exposure: {f.exposure_label}{f.exposure_estimated ? " (est.)" : ""}
-            </p>
-          )}
-        </div>
-        <span style={{ color: "var(--color-text-tertiary)", flexShrink: 0 }}>{open ? <ChevronUp size={16} /> : <ChevronDown size={16} />}</span>
-      </button>
-
-      {open && (
-        <div style={{ borderTop: "1px solid var(--color-border)", padding: "1rem 1.25rem 1.25rem", display: "flex", flexDirection: "column", gap: "1rem" }}>
-          <div>
-            <p style={{ fontSize: "var(--font-text-xs-size)", fontWeight: "var(--font-weight-semibold)", textTransform: "uppercase", letterSpacing: "0.04em", color: "var(--color-text-tertiary)", margin: "0 0 0.375rem" }}>Exposure</p>
-            <div style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
-              <span style={{ fontSize: "var(--font-text-sm-size)", color: "var(--color-text)", fontWeight: "var(--font-weight-medium)" }}>{f.exposure_label ?? "—"}</span>
-              {f.exposure_estimated && <span style={{ padding: "1px 7px", borderRadius: "9999px", fontSize: "10px", fontWeight: "var(--font-weight-semibold)", letterSpacing: "0.04em", background: "var(--color-background-caution-soft)", color: "var(--color-text-caution-soft)", textTransform: "uppercase" }}>Estimated</span>}
-              <span style={{ fontSize: "var(--font-text-xs-size)", color: "var(--color-text-tertiary)" }}>· {f.confidence} confidence</span>
-            </div>
-          </div>
-
-          <div>
-            <p style={{ fontSize: "var(--font-text-xs-size)", fontWeight: "var(--font-weight-semibold)", textTransform: "uppercase", letterSpacing: "0.04em", color: "var(--color-text-tertiary)", margin: "0 0 0.375rem" }}>Evidence</p>
-            <div style={{ display: "flex", flexDirection: "column", gap: "0.375rem" }}>
-              {f.evidence.map((e, i) => (
-                <div key={i} style={{ fontSize: "var(--font-text-sm-size)", color: "var(--color-text-secondary)", lineHeight: 1.5 }}>
-                  <span style={{ fontSize: "10px", textTransform: "uppercase", letterSpacing: "0.04em", color: "var(--color-text-tertiary)", marginRight: "0.375rem" }}>{e.kind}</span>
-                  <span style={{ fontWeight: "var(--font-weight-medium)", color: "var(--color-text)" }}>{e.reference}</span> — {e.detail}
-                  {e.document_id && (
-                    <span title="Traceable to a source document on file" style={{ display: "inline-flex", alignItems: "center", gap: "0.25rem", marginLeft: "0.5rem", padding: "0 6px", borderRadius: "9999px", fontSize: "10px", fontWeight: "var(--font-weight-medium)", background: "var(--color-background-info-soft)", color: "var(--color-text-info-soft)", verticalAlign: "middle" }}>
-                      <FileText size={10} /> Source document
-                    </span>
-                  )}
-                </div>
-              ))}
-            </div>
-          </div>
-
-          <div>
-            <p style={{ fontSize: "var(--font-text-xs-size)", fontWeight: "var(--font-weight-semibold)", textTransform: "uppercase", letterSpacing: "0.04em", color: "var(--color-text-tertiary)", margin: "0 0 0.375rem" }}>Your options</p>
-            <ul style={{ margin: 0, padding: "0 0 0 1rem", display: "flex", flexDirection: "column", gap: "0.375rem" }}>
-              {f.recommendations.map((r, i) => (
-                <li key={i} style={{ fontSize: "var(--font-text-sm-size)", color: "var(--color-text-secondary)", lineHeight: 1.55 }}>{r}</li>
-              ))}
-            </ul>
-          </div>
-        </div>
-      )}
     </div>
   )
 }
