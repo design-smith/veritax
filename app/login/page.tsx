@@ -6,6 +6,11 @@ import { createClient } from "@/lib/supabase/client"
 
 type Mode = "login" | "signup"
 
+// Lazily create the browser client on first use (in the browser) — never during the build's prerender,
+// so a missing NEXT_PUBLIC_SUPABASE_* var can't crash the build.
+let _supa: ReturnType<typeof createClient> | null = null
+const supa = () => (_supa ??= createClient())
+
 const PRIMARY: React.CSSProperties = {
   display: "flex", alignItems: "center", justifyContent: "center",
   width: "100%", height: 42, borderRadius: 8, border: "1px solid #000",
@@ -18,7 +23,6 @@ const INPUT: React.CSSProperties = {
 
 export default function LoginPage() {
   const router = useRouter()
-  const [supabase] = useState(() => createClient())
   const [mode, setMode] = useState<Mode>("login")
   const [stage, setStage] = useState<"form" | "code">("form")
   const [name, setName] = useState("")
@@ -33,7 +37,7 @@ export default function LoginPage() {
     const options = mode === "signup"
       ? { shouldCreateUser: true, data: { full_name: name.trim() } }
       : { shouldCreateUser: false }
-    const { error } = await supabase.auth.signInWithOtp({ email: email.trim(), options })
+    const { error } = await supa().auth.signInWithOtp({ email: email.trim(), options })
     setBusy(false)
     if (error) setError(mode === "login" && /not (allowed|found)|signup/i.test(error.message)
       ? "No account found for that email — switch to Sign up."
@@ -43,7 +47,7 @@ export default function LoginPage() {
 
   async function verify(e: React.FormEvent) {
     e.preventDefault(); setError(null); setBusy(true)
-    const { error } = await supabase.auth.verifyOtp({ email: email.trim(), token: code.trim(), type: "email" })
+    const { error } = await supa().auth.verifyOtp({ email: email.trim(), token: code.trim(), type: "email" })
     setBusy(false)
     if (error) setError(error.message)
     else router.replace("/")
