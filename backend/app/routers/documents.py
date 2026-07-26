@@ -5,10 +5,19 @@ import uuid
 from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, HTTPException, UploadFile
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from ..deps import get_embedder, get_session, get_session_factory, get_storage
+from ..auth import AuthUser
+from ..deps import (
+    assert_owner,
+    get_current_user,
+    get_embedder,
+    get_session,
+    get_session_factory,
+    get_storage,
+    require_engagement_owner,
+)
 from ..embeddings import Embedder
 from ..ingest import embed_document, get_or_create_uploaded_source, store_upload
-from ..models import Document, Engagement, SourceKind
+from ..models import Document, Engagement, Source, SourceKind
 from ..schemas import DocumentRead
 from ..storage import Storage
 
@@ -28,9 +37,8 @@ async def upload_documents(
     storage: Storage = Depends(get_storage),
     embedder: Embedder = Depends(get_embedder),
     session_factory: async_sessionmaker = Depends(get_session_factory),
+    _owner: Engagement = Depends(require_engagement_owner),
 ) -> list[Document]:
-    if await session.get(Engagement, engagement_id) is None:
-        raise HTTPException(status_code=404, detail="engagement not found")
     if not files:
         raise HTTPException(status_code=422, detail="no files provided")
 
@@ -58,22 +66,33 @@ async def upload_documents(
     return created
 
 
-@router.get("/documents/{document_id}", response_model=DocumentRead)
-async def get_document(
-    document_id: uuid.UUID, session: AsyncSession = Depends(get_session)
-) -> Document:
+async def _owned_document(session: AsyncSession, document_id: uuid.UUID, user: AuthUser) -> Document:
+    """Load a document only if the caller owns its engagement (document → source → engagement)."""
     doc = await session.get(Document, document_id)
     if doc is None:
         raise HTTPException(status_code=404, detail="document not found")
+    src = await session.get(Source, doc.source_id)
+    if src is None:
+        raise HTTPException(status_code=404, detail="document not found")
+    await assert_owner(session, src.engagement_id, user)
     return doc
+
+
+@router.get("/documents/{document_id}", response_model=DocumentRead)
+async def get_document(
+    document_id: uuid.UUID,
+    session: AsyncSession = Depends(get_session),
+    user: AuthUser = Depends(get_current_user),
+) -> Document:
+    return await _owned_document(session, document_id, user)
 
 
 @router.delete("/documents/{document_id}", status_code=204)
 async def delete_document(
-    document_id: uuid.UUID, session: AsyncSession = Depends(get_session)
+    document_id: uuid.UUID,
+    session: AsyncSession = Depends(get_session),
+    user: AuthUser = Depends(get_current_user),
 ) -> None:
-    doc = await session.get(Document, document_id)
-    if doc is None:
-        raise HTTPException(status_code=404, detail="document not found")
+    doc = await _owned_document(session, document_id, user)
     await session.delete(doc)
     await session.commit()

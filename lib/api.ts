@@ -1,7 +1,19 @@
 // Thin client for the Veritax Sources-stage backend (FastAPI).
 // Base URL from env; falls back to local dev. All calls throw on non-2xx so callers can log.
 
+import { createClient } from "@/lib/supabase/client"
+
 const BASE = process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:8000"
+
+// Every backend call carries the Supabase access token — the API verifies it and scopes data per user.
+let _sb: ReturnType<typeof createClient> | null = null
+async function afetch(url: string, init: RequestInit = {}): Promise<Response> {
+  _sb ??= createClient()
+  const headers = new Headers(init.headers)
+  const { data } = await _sb.auth.getSession()
+  if (data.session?.access_token) headers.set("Authorization", `Bearer ${data.session.access_token}`)
+  return fetch(url, { ...init, headers })
+}
 
 export type SourceKind = "financials" | "agreements" | "public" | "interview"
 
@@ -156,13 +168,13 @@ async function parse<T>(res: Response): Promise<T> {
 
 export const api = {
   createEngagement: (): Promise<{ id: string }> =>
-    fetch(`${BASE}/engagements`, { method: "POST" }).then(r => parse<{ id: string }>(r)),
+    afetch(`${BASE}/engagements`, { method: "POST" }).then(r => parse<{ id: string }>(r)),
 
   patchEngagement: (
     id: string,
     body: { entity_name?: string; jurisdictions?: string[]; website_url?: string },
   ): Promise<unknown> =>
-    fetch(`${BASE}/engagements/${id}`, {
+    afetch(`${BASE}/engagements/${id}`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body),
@@ -172,37 +184,37 @@ export const api = {
     const fd = new FormData()
     fd.append("kind", kind)
     for (const f of files) fd.append("files", f)
-    return fetch(`${BASE}/engagements/${id}/documents`, { method: "POST", body: fd }).then(r =>
+    return afetch(`${BASE}/engagements/${id}/documents`, { method: "POST", body: fd }).then(r =>
       parse<DocumentRead[]>(r),
     )
   },
 
   getDocument: (documentId: string): Promise<DocumentRead> =>
-    fetch(`${BASE}/documents/${documentId}`).then(r => parse<DocumentRead>(r)),
+    afetch(`${BASE}/documents/${documentId}`).then(r => parse<DocumentRead>(r)),
 
   getEngagement: (id: string): Promise<Engagement> =>
-    fetch(`${BASE}/engagements/${id}`).then(r => parse<Engagement>(r)),
+    afetch(`${BASE}/engagements/${id}`).then(r => parse<Engagement>(r)),
 
   createSource: (
     id: string,
     body: { kind: SourceKind; origin: "connected" | "reference"; connector_provider?: string; url?: string },
   ): Promise<{ id: string }> =>
-    fetch(`${BASE}/engagements/${id}/sources`, {
+    afetch(`${BASE}/engagements/${id}/sources`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body),
     }).then(r => parse<{ id: string }>(r)),
 
   getConnectors: (): Promise<Connector[]> =>
-    fetch(`${BASE}/connectors`).then(r => parse<Connector[]>(r)),
+    afetch(`${BASE}/connectors`).then(r => parse<Connector[]>(r)),
 
   startCoverage: (engagementId: string, jurisdiction: string): Promise<CoverageResponse> =>
-    fetch(`${BASE}/engagements/${engagementId}/coverage?jurisdiction=${encodeURIComponent(jurisdiction)}`, {
+    afetch(`${BASE}/engagements/${engagementId}/coverage?jurisdiction=${encodeURIComponent(jurisdiction)}`, {
       method: "POST",
     }).then(r => parse<CoverageResponse>(r)),
 
   getCoverage: (engagementId: string, jurisdiction: string): Promise<CoverageResponse> =>
-    fetch(`${BASE}/engagements/${engagementId}/coverage?jurisdiction=${encodeURIComponent(jurisdiction)}`)
+    afetch(`${BASE}/engagements/${engagementId}/coverage?jurisdiction=${encodeURIComponent(jurisdiction)}`)
       .then(r => parse<CoverageResponse>(r)),
 
   supplementCoverage: (
@@ -213,27 +225,27 @@ export const api = {
     fd.append("kind", body.kind)
     if (body.kind === "upload") fd.append("file", body.file)
     else fd.append("text", body.text)
-    return fetch(`${BASE}/coverage/${coverageId}/supplements`, { method: "POST", body: fd }).then(r =>
+    return afetch(`${BASE}/coverage/${coverageId}/supplements`, { method: "POST", body: fd }).then(r =>
       parse<CoverageRow>(r),
     )
   },
 
   startDraft: (engagementId: string, jurisdiction: string): Promise<DraftResponse> =>
-    fetch(`${BASE}/engagements/${engagementId}/draft?jurisdiction=${encodeURIComponent(jurisdiction)}`, {
+    afetch(`${BASE}/engagements/${engagementId}/draft?jurisdiction=${encodeURIComponent(jurisdiction)}`, {
       method: "POST",
     }).then(r => parse<DraftResponse>(r)),
 
   getDraft: (engagementId: string, jurisdiction: string): Promise<DraftResponse> =>
-    fetch(`${BASE}/engagements/${engagementId}/draft?jurisdiction=${encodeURIComponent(jurisdiction)}`)
+    afetch(`${BASE}/engagements/${engagementId}/draft?jurisdiction=${encodeURIComponent(jurisdiction)}`)
       .then(r => parse<DraftResponse>(r)),
 
   regenerateSection: (sectionId: string): Promise<DraftSection> =>
-    fetch(`${BASE}/draft-sections/${sectionId}/regenerate`, { method: "POST" }).then(r =>
+    afetch(`${BASE}/draft-sections/${sectionId}/regenerate`, { method: "POST" }).then(r =>
       parse<DraftSection>(r),
     ),
 
   startRisks: async (engagementId: string, jurisdiction: string): Promise<RiskResponse> => {
-    const res = await fetch(
+    const res = await afetch(
       `${BASE}/engagements/${engagementId}/risks?jurisdiction=${encodeURIComponent(jurisdiction)}`,
       { method: "POST" },
     )
@@ -242,6 +254,6 @@ export const api = {
   },
 
   getRisks: (engagementId: string, jurisdiction: string): Promise<RiskResponse> =>
-    fetch(`${BASE}/engagements/${engagementId}/risks?jurisdiction=${encodeURIComponent(jurisdiction)}`)
+    afetch(`${BASE}/engagements/${engagementId}/risks?jurisdiction=${encodeURIComponent(jurisdiction)}`)
       .then(r => parse<RiskResponse>(r)),
 }

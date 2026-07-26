@@ -10,7 +10,7 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from ..corpus import document_filename_map, retrieve_documents
-from ..deps import get_embedder, get_risk_analyzer, get_session, get_session_factory
+from ..deps import get_embedder, get_risk_analyzer, get_session, get_session_factory, require_engagement_owner
 from ..embeddings import Embedder
 from ..models import (
     Confidence,
@@ -178,9 +178,8 @@ async def start_risks(
     analyzer: RiskAnalyzer = Depends(get_risk_analyzer),
     embedder: Embedder = Depends(get_embedder),
     factory: async_sessionmaker = Depends(get_session_factory),
+    _owner: Engagement = Depends(require_engagement_owner),
 ) -> RiskResponse:
-    if await session.get(Engagement, engagement_id) is None:
-        raise HTTPException(status_code=404, detail="engagement not found")
     if not await draft_complete(session, engagement_id, jurisdiction):
         # The mirror of the Requirements rule: Risks runs only on the completed draft.
         raise HTTPException(status_code=409, detail=f"draft not complete for '{jurisdiction}'")
@@ -209,7 +208,6 @@ async def get_risks(
     engagement_id: uuid.UUID,
     jurisdiction: str = Query(...),
     session: AsyncSession = Depends(get_session),
+    _owner: Engagement = Depends(require_engagement_owner),
 ) -> RiskResponse:
-    if await session.get(Engagement, engagement_id) is None:
-        raise HTTPException(status_code=404, detail="engagement not found")
     return await _response(session, engagement_id, jurisdiction)

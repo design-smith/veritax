@@ -16,6 +16,7 @@ dependencies = [
     "anthropic>=0.40",
     "openai>=1.40",
     "json-repair>=0.60",  # tolerant parse of occasionally-malformed LLM tool JSON
+    "pyjwt[crypto]>=2.9",  # verify Supabase Auth JWTs (JWKS asymmetric + legacy HS256)
     "pypdf>=4.2",
     "python-docx>=1.1",
     "openpyxl>=3.1",

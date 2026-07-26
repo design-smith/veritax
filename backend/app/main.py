@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, Request
+from fastapi import Depends, FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
@@ -10,6 +10,7 @@ import logging
 
 from .assessment import AnthropicAssessor, DeepSeekAssessor, FakeAssessor
 from .config import settings
+from .deps import get_current_user
 from .db import SessionFactory, init_db
 from .drafting import AnthropicDrafter, DeepSeekDrafter, FakeDrafter
 from .embeddings import FakeEmbedder, VoyageEmbedder
@@ -99,6 +100,8 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# Every data router requires a valid Supabase token — no anonymous access. /health stays public
+# (defined directly on `app`, below). Per-user ownership is enforced inside the routes.
 for _router in (
     engagements.router,
     connectors.router,
@@ -109,7 +112,7 @@ for _router in (
     draft.router,
     risks.router,
 ):
-    app.include_router(_router)
+    app.include_router(_router, dependencies=[Depends(get_current_user)])
 
 
 @app.get("/health", tags=["health"])

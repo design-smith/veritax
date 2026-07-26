@@ -2,11 +2,12 @@ from __future__ import annotations
 
 import uuid
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from ..deps import get_session
+from ..auth import AuthUser
+from ..deps import assert_owner, get_current_user, get_session
 from ..models import Engagement, EngagementJurisdiction, Entity
 from ..schemas import DocumentRead, EngagementPatch, EngagementRead, IdResponse, SourceRead
 
@@ -33,16 +34,12 @@ def _to_read(eng: Engagement) -> EngagementRead:
     )
 
 
-async def _load(session: AsyncSession, engagement_id: uuid.UUID) -> Engagement:
-    eng = await session.get(Engagement, engagement_id)
-    if eng is None:
-        raise HTTPException(status_code=404, detail="engagement not found")
-    return eng
-
-
 @router.post("", response_model=IdResponse, status_code=201)
-async def create_engagement(session: AsyncSession = Depends(get_session)) -> IdResponse:
-    eng = Engagement()
+async def create_engagement(
+    session: AsyncSession = Depends(get_session),
+    user: AuthUser = Depends(get_current_user),
+) -> IdResponse:
+    eng = Engagement(user_id=user.id)  # stamp the owner
     session.add(eng)
     await session.commit()
     return IdResponse(id=eng.id)
@@ -50,9 +47,11 @@ async def create_engagement(session: AsyncSession = Depends(get_session)) -> IdR
 
 @router.get("/{engagement_id}", response_model=EngagementRead)
 async def get_engagement(
-    engagement_id: uuid.UUID, session: AsyncSession = Depends(get_session)
+    engagement_id: uuid.UUID,
+    session: AsyncSession = Depends(get_session),
+    user: AuthUser = Depends(get_current_user),
 ) -> EngagementRead:
-    return _to_read(await _load(session, engagement_id))
+    return _to_read(await assert_owner(session, engagement_id, user))
 
 
 @router.patch("/{engagement_id}", response_model=EngagementRead)
@@ -60,8 +59,9 @@ async def patch_engagement(
     engagement_id: uuid.UUID,
     body: EngagementPatch,
     session: AsyncSession = Depends(get_session),
+    user: AuthUser = Depends(get_current_user),
 ) -> EngagementRead:
-    eng = await _load(session, engagement_id)
+    eng = await assert_owner(session, engagement_id, user)
 
     if body.entity_name is not None:
         name = body.entity_name.strip()

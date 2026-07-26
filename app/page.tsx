@@ -1,11 +1,13 @@
 "use client"
 
 import { useEffect, useState } from "react"
+import { useRouter } from "next/navigation"
 import PlanningStep, { type SourceId } from "@/components/steps/planning"
 import RequirementsStep from "@/components/steps/requirements"
 import DraftStep from "@/components/steps/draft"
 import RisksStep from "@/components/steps/risks"
 import { api } from "@/lib/api"
+import { createClient } from "@/lib/supabase/client"
 
 type Step = 1 | 2 | 3 | 4
 
@@ -17,6 +19,7 @@ const NAV: { step: Step; label: string }[] = [
 ]
 
 export default function Page() {
+  const router = useRouter()
   const [step, setStep]       = useState<Step>(1)
   const [visited, setVisited] = useState<Set<Step>>(new Set([1]))
   const [jurisdictions, setJ] = useState<string[]>([])
@@ -36,6 +39,11 @@ export default function Page() {
   function navigate(s: Step) {
     setStep(s)
     setVisited(prev => new Set(prev).add(s))
+  }
+
+  async function signOut() {
+    await createClient().auth.signOut()
+    router.replace("/login")
   }
 
   function continueFromPlanning() {
@@ -74,6 +82,21 @@ export default function Page() {
           }}
         >
           Planning and research
+        </button>
+
+        <button
+          type="button"
+          onClick={signOut}
+          style={{
+            marginTop: "auto",
+            display: "flex", alignItems: "center",
+            padding: "0.5rem 0.75rem", border: "1px solid #e5e5e5",
+            borderRadius: "6px", background: "#fff",
+            color: "#555", fontSize: "13px", fontWeight: 500,
+            cursor: "pointer", textAlign: "left", width: "100%",
+          }}
+        >
+          Sign out
         </button>
       </aside>
 

@@ -6,7 +6,8 @@ from fastapi import APIRouter, Depends, Query
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from ..deps import get_embedder, get_session
+from ..auth import AuthUser
+from ..deps import assert_owner, get_current_user, get_embedder, get_session
 from ..embeddings import Embedder
 from ..models import Document, DocumentChunk, Engagement, Source
 from ..schemas import SearchHit
@@ -24,6 +25,7 @@ async def search(
     limit: int = Query(10, ge=1, le=50),
     session: AsyncSession = Depends(get_session),
     embedder: Embedder = Depends(get_embedder),
+    user: AuthUser = Depends(get_current_user),
 ) -> list[SearchHit]:
     query_vec = embedder.embed_documents([q])[0]
 
@@ -36,11 +38,15 @@ async def search(
             DocumentChunk.embedding.cosine_distance(query_vec).label("distance"),
         )
         .join(Document, Document.id == DocumentChunk.document_id)
+        .join(Source, Source.id == Document.source_id)
+        .join(Engagement, Engagement.id == Source.engagement_id)
     )
+    # Always scope to the caller's own data — never search across users.
     if engagement_id is not None:
-        stmt = stmt.join(Source, Source.id == Document.source_id).where(
-            Source.engagement_id == engagement_id
-        )
+        await assert_owner(session, engagement_id, user)
+        stmt = stmt.where(Source.engagement_id == engagement_id)
+    else:
+        stmt = stmt.where(Engagement.user_id == user.id)
     stmt = stmt.order_by("distance").limit(limit)
 
     rows = (await session.execute(stmt)).all()

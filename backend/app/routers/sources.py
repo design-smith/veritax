@@ -5,7 +5,7 @@ import uuid
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from ..deps import get_session
+from ..deps import get_session, require_engagement_owner
 from ..models import Connector, Engagement, Source, SourceOrigin
 from ..schemas import IdResponse, SourceCreate
 
@@ -17,10 +17,8 @@ async def create_source(
     engagement_id: uuid.UUID,
     body: SourceCreate,
     session: AsyncSession = Depends(get_session),
+    _owner: Engagement = Depends(require_engagement_owner),
 ) -> IdResponse:
-    if await session.get(Engagement, engagement_id) is None:
-        raise HTTPException(status_code=404, detail="engagement not found")
-
     if body.origin == SourceOrigin.connected:
         if not body.connector_provider:
             raise HTTPException(status_code=422, detail="connector_provider required when connected")

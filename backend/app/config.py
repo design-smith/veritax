@@ -38,6 +38,14 @@ class Settings(BaseSettings):
     deepseek_base_url: str = "https://api.deepseek.com"
     deepseek_model: str = "deepseek-v4-flash"
 
+    # ── Supabase Auth ─────────────────────────────────────────────────────────
+    # The frontend logs in with Supabase; this API verifies the access-token JWT on every request.
+    # SUPABASE_URL drives the JWKS endpoint (asymmetric signing keys) and the issuer check.
+    # SUPABASE_JWT_SECRET is only needed if the project still uses the legacy HS256 shared secret.
+    supabase_url: str = ""
+    supabase_jwt_secret: str = ""
+    supabase_jwt_aud: str = "authenticated"
+
     cors_origins: str = "http://localhost:3000"
 
     @property

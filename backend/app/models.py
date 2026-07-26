@@ -128,6 +128,9 @@ class Engagement(Base):
     __tablename__ = "engagements"
 
     id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
+    # Owner = the Supabase auth user (JWT `sub`). No FK to auth.users (avoid cross-schema coupling);
+    # nullable so pre-auth rows survive — those are legacy and belong to no one, so no user sees them.
+    user_id: Mapped[uuid.UUID | None] = mapped_column(nullable=True, index=True)
     entity_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("entities.id"), nullable=True)
     website_url: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())

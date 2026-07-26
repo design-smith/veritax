@@ -1,13 +1,16 @@
 from __future__ import annotations
 
+import uuid
 from collections.abc import AsyncIterator
 
-from fastapi import Request
+from fastapi import Depends, HTTPException, Request
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from .assessment import Assessor
+from .auth import AuthError, AuthUser, verify_token
 from .drafting import Drafter
 from .embeddings import Embedder
+from .models import Engagement
 from .risks import RiskAnalyzer
 from .storage import Storage
 
@@ -15,6 +18,36 @@ from .storage import Storage
 async def get_session(request: Request) -> AsyncIterator[AsyncSession]:
     async with request.app.state.session_factory() as session:
         yield session
+
+
+# ── Auth ─────────────────────────────────────────────────────────────────────
+def get_current_user(request: Request) -> AuthUser:
+    """Require a valid Supabase access token. Sync (runs in FastAPI's threadpool) since JWKS lookup
+    may block on the first fetch. 401 on any missing/invalid token."""
+    header = request.headers.get("Authorization", "")
+    if not header.lower().startswith("bearer "):
+        raise HTTPException(status_code=401, detail="missing bearer token")
+    try:
+        return verify_token(header.split(" ", 1)[1].strip())
+    except AuthError as exc:
+        raise HTTPException(status_code=401, detail=f"invalid token: {exc}") from exc
+
+
+async def assert_owner(session: AsyncSession, engagement_id: uuid.UUID, user: AuthUser) -> Engagement:
+    """Load an engagement and confirm the caller owns it. 404 (not 403) so ids don't leak existence."""
+    eng = await session.get(Engagement, engagement_id)
+    if eng is None or eng.user_id != user.id:
+        raise HTTPException(status_code=404, detail="engagement not found")
+    return eng
+
+
+async def require_engagement_owner(
+    engagement_id: uuid.UUID,
+    session: AsyncSession = Depends(get_session),
+    user: AuthUser = Depends(get_current_user),
+) -> Engagement:
+    """Route dependency for endpoints with an `engagement_id` path param: 404 unless the caller owns it."""
+    return await assert_owner(session, engagement_id, user)
 
 
 def get_session_factory(request: Request) -> async_sessionmaker:

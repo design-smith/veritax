@@ -43,6 +43,9 @@ async def init_db(eng=engine) -> None:
     async with eng.begin() as conn:
         await conn.execute(text("CREATE EXTENSION IF NOT EXISTS vector"))
         await conn.run_sync(Base.metadata.create_all)
+        # No Alembic: add newer columns idempotently so an already-created prod table gets them too.
+        await conn.execute(text("ALTER TABLE engagements ADD COLUMN IF NOT EXISTS user_id uuid"))
+        await conn.execute(text("CREATE INDEX IF NOT EXISTS ix_engagements_user_id ON engagements (user_id)"))
 
     async with async_sessionmaker(eng, expire_on_commit=False)() as session:
         existing = set((await session.execute(select(Connector.provider))).scalars())

@@ -22,6 +22,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from sqlalchemy.orm import selectinload
 
 from ..assessment import Assessor
+from ..auth import AuthUser
 from ..config import settings
 from ..corpus import (
     ASSESS_K,
@@ -31,7 +32,16 @@ from ..corpus import (
     retrieve_documents_batch,
     union_docs,
 )
-from ..deps import get_assessor, get_embedder, get_session, get_session_factory, get_storage
+from ..deps import (
+    assert_owner,
+    get_assessor,
+    get_current_user,
+    get_embedder,
+    get_session,
+    get_session_factory,
+    get_storage,
+    require_engagement_owner,
+)
 from ..embeddings import Embedder
 from ..ingest import embed_document, get_or_create_uploaded_source, store_upload
 from ..models import (
@@ -350,9 +360,8 @@ async def start_coverage(
     assessor: Assessor = Depends(get_assessor),
     embedder: Embedder = Depends(get_embedder),
     factory: async_sessionmaker = Depends(get_session_factory),
+    _owner: Engagement = Depends(require_engagement_owner),
 ) -> CoverageResponse:
-    if await session.get(Engagement, engagement_id) is None:
-        raise HTTPException(status_code=404, detail="engagement not found")
     elements = resolve_requirements(jurisdiction)
     if not elements:
         raise HTTPException(status_code=404, detail=f"no requirements defined for '{jurisdiction}'")
@@ -396,9 +405,8 @@ async def get_coverage(
     engagement_id: uuid.UUID,
     jurisdiction: str = Query(...),
     session: AsyncSession = Depends(get_session),
+    _owner: Engagement = Depends(require_engagement_owner),
 ) -> CoverageResponse:
-    if await session.get(Engagement, engagement_id) is None:
-        raise HTTPException(status_code=404, detail="engagement not found")
     return await _response(session, engagement_id, jurisdiction)
 
 
@@ -414,10 +422,12 @@ async def add_supplement(
     assessor: Assessor = Depends(get_assessor),
     embedder: Embedder = Depends(get_embedder),
     factory: async_sessionmaker = Depends(get_session_factory),
+    user: AuthUser = Depends(get_current_user),
 ) -> CoverageRead:
     row = await session.get(RequirementCoverage, coverage_id)
     if row is None:
         raise HTTPException(status_code=404, detail="coverage row not found")
+    await assert_owner(session, row.engagement_id, user)
 
     # Supplement material becomes a real corpus Document (so Draft consumes it) under a 'supplement' source.
     src = await get_or_create_uploaded_source(session, row.engagement_id, SourceKind.supplement)

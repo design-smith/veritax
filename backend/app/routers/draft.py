@@ -11,9 +11,18 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from sqlalchemy.orm import selectinload
 
+from ..auth import AuthUser
 from ..config import settings
 from ..corpus import DocContext, document_filename_map, element_query, retrieve_documents, retrieve_documents_batch
-from ..deps import get_drafter, get_embedder, get_session, get_session_factory
+from ..deps import (
+    assert_owner,
+    get_current_user,
+    get_drafter,
+    get_embedder,
+    get_session,
+    get_session_factory,
+    require_engagement_owner,
+)
 from ..drafting import Drafter
 from ..embeddings import Embedder
 from ..models import (
@@ -216,9 +225,8 @@ async def start_draft(
     drafter: Drafter = Depends(get_drafter),
     embedder: Embedder = Depends(get_embedder),
     factory: async_sessionmaker = Depends(get_session_factory),
+    _owner: Engagement = Depends(require_engagement_owner),
 ) -> DraftResponse:
-    if await session.get(Engagement, engagement_id) is None:
-        raise HTTPException(status_code=404, detail="engagement not found")
     elements = resolve_requirements(jurisdiction)
     if not elements:
         raise HTTPException(status_code=404, detail=f"no requirements defined for '{jurisdiction}'")
@@ -251,9 +259,8 @@ async def get_draft(
     engagement_id: uuid.UUID,
     jurisdiction: str = Query(...),
     session: AsyncSession = Depends(get_session),
+    _owner: Engagement = Depends(require_engagement_owner),
 ) -> DraftResponse:
-    if await session.get(Engagement, engagement_id) is None:
-        raise HTTPException(status_code=404, detail="engagement not found")
     return await _response(session, engagement_id, jurisdiction)
 
 
@@ -263,10 +270,12 @@ async def regenerate_section(
     session: AsyncSession = Depends(get_session),
     drafter: Drafter = Depends(get_drafter),
     embedder: Embedder = Depends(get_embedder),
+    user: AuthUser = Depends(get_current_user),
 ) -> DraftSectionRead:
     section = await session.get(DraftSection, section_id)
     if section is None:
         raise HTTPException(status_code=404, detail="draft section not found")
+    await assert_owner(session, section.engagement_id, user)
     element = next(
         (e for e in resolve_requirements(section.jurisdiction) if e.requirement_key == section.requirement_key),
         None,
