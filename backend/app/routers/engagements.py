@@ -9,7 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from ..auth import AuthUser
 from ..deps import assert_owner, get_current_user, get_session
 from ..models import Engagement, EngagementJurisdiction, Entity
-from ..schemas import DocumentRead, EngagementPatch, EngagementRead, IdResponse, SourceRead
+from ..schemas import DocumentRead, EngagementPatch, EngagementRead, EngagementSummary, IdResponse, SourceRead
 
 router = APIRouter(prefix="/engagements", tags=["engagements"])
 
@@ -43,6 +43,30 @@ async def create_engagement(
     session.add(eng)
     await session.commit()
     return IdResponse(id=eng.id)
+
+
+@router.get("", response_model=list[EngagementSummary])
+async def list_engagements(
+    session: AsyncSession = Depends(get_session),
+    user: AuthUser = Depends(get_current_user),
+) -> list[EngagementSummary]:
+    """The caller's files, newest first. Only named engagements — unnamed shells stay hidden."""
+    rows = (
+        await session.execute(
+            select(Engagement)
+            .where(Engagement.user_id == user.id, Engagement.entity_id.is_not(None))
+            .order_by(Engagement.updated_at.desc())
+        )
+    ).scalars().all()
+    return [
+        EngagementSummary(
+            id=e.id,
+            entity_name=e.entity.name if e.entity else None,
+            jurisdictions=sorted(j.jurisdiction for j in e.jurisdictions),
+            updated_at=e.updated_at,
+        )
+        for e in rows
+    ]
 
 
 @router.get("/{engagement_id}", response_model=EngagementRead)

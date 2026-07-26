@@ -64,3 +64,11 @@ async def test_engagement_is_scoped_to_owner(raw_client):
     assert (await raw_client.get(
         f"/engagements/{eid}/coverage", params={"jurisdiction": "Netherlands"}, headers=_hdr(bob)
     )).status_code == 404
+
+
+async def test_engagement_library_is_per_user(raw_client):
+    alice, bob = uuid.uuid4(), uuid.uuid4()
+    eid = (await raw_client.post("/engagements", headers=_hdr(alice))).json()["id"]
+    await raw_client.patch(f"/engagements/{eid}", json={"entity_name": "Alice Co"}, headers=_hdr(alice))
+    assert [f["id"] for f in (await raw_client.get("/engagements", headers=_hdr(alice))).json()] == [eid]
+    assert eid not in [f["id"] for f in (await raw_client.get("/engagements", headers=_hdr(bob))).json()]

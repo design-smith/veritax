@@ -45,6 +45,13 @@ export interface Engagement {
   sources: EngagementSource[]
 }
 
+export interface EngagementSummary {
+  id: string
+  entity_name: string | null
+  jurisdictions: string[]
+  updated_at: string
+}
+
 export interface Connector {
   provider: string
   display_name: string
@@ -169,6 +176,9 @@ async function parse<T>(res: Response): Promise<T> {
 export const api = {
   createEngagement: (): Promise<{ id: string }> =>
     afetch(`${BASE}/engagements`, { method: "POST" }).then(r => parse<{ id: string }>(r)),
+
+  listEngagements: (): Promise<EngagementSummary[]> =>
+    afetch(`${BASE}/engagements`).then(r => parse<EngagementSummary[]>(r)),
 
   patchEngagement: (
     id: string,

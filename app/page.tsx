@@ -1,12 +1,12 @@
 "use client"
 
-import { useEffect, useState } from "react"
+import { useCallback, useEffect, useState } from "react"
 import { useRouter } from "next/navigation"
 import PlanningStep, { type SourceId } from "@/components/steps/planning"
 import RequirementsStep from "@/components/steps/requirements"
 import DraftStep from "@/components/steps/draft"
 import RisksStep from "@/components/steps/risks"
-import { api } from "@/lib/api"
+import { api, type EngagementSummary } from "@/lib/api"
 import { createClient } from "@/lib/supabase/client"
 
 type Step = 1 | 2 | 3 | 4
@@ -18,6 +18,10 @@ const NAV: { step: Step; label: string }[] = [
   { step: 4, label: "Risks" },
 ]
 
+const LS_ID = "veritax.engagementId"     // resume the file being worked on across refreshes
+const LS_STEP = "veritax.step"
+const PLANNING_SOURCES = new Set<SourceId>(["financials", "agreements", "public", "interview"])
+
 export default function Page() {
   const router = useRouter()
   const [step, setStep]       = useState<Step>(1)
@@ -28,17 +32,73 @@ export default function Page() {
   const [engagementId, setEngagementId] = useState<string | null>(null)
   // Deep-link from a Requirements row to the draft section that fulfils it.
   const [draftJump, setDraftJump] = useState<{ jurisdiction: string; sectionId: string } | null>(null)
+  const [files, setFiles] = useState<EngagementSummary[]>([])
 
-  // Persist a planning session up front so uploads/sources have somewhere to attach.
-  useEffect(() => {
-    api.createEngagement()
-      .then(({ id }) => setEngagementId(id))
-      .catch(err => console.error("[veritax] failed to create engagement:", err))
+  const refreshFiles = useCallback(() => {
+    api.listEngagements().then(setFiles).catch(err => console.error("[veritax] failed to list files:", err))
   }, [])
+
+  // Rehydrate a file's scope from the backend (entity, jurisdictions, which source rows are on).
+  const loadEngagement = useCallback(async (id: string): Promise<boolean> => {
+    try {
+      const eng = await api.getEngagement(id)
+      setEntity(eng.entity_name ?? "")
+      setJ(eng.jurisdictions)
+      setSources(new Set(eng.sources.map(s => s.kind).filter((k): k is SourceId => PLANNING_SOURCES.has(k as SourceId))))
+      setEngagementId(id)
+      localStorage.setItem(LS_ID, id)
+      return true
+    } catch {
+      return false
+    }
+  }, [])
+
+  // Resume the file being worked on (or start a fresh one), then load the library.
+  useEffect(() => {
+    let cancelled = false
+    ;(async () => {
+      const stored = localStorage.getItem(LS_ID)
+      const resumed = stored ? await loadEngagement(stored) : false
+      if (cancelled) return
+      if (resumed) {
+        const s = Number(localStorage.getItem(LS_STEP))
+        if (s >= 2 && s <= 4) { setStep(s as Step); setVisited(new Set([1, s as Step])) }
+      } else {
+        try {
+          const { id } = await api.createEngagement()  // uploads need an id to attach to
+          if (cancelled) return
+          setEngagementId(id)
+          localStorage.setItem(LS_ID, id)
+        } catch (err) { console.error("[veritax] failed to create engagement:", err) }
+      }
+      refreshFiles()
+    })()
+    return () => { cancelled = true }
+  }, [loadEngagement, refreshFiles])
+
+  useEffect(() => { localStorage.setItem(LS_STEP, String(step)) }, [step])
 
   function navigate(s: Step) {
     setStep(s)
     setVisited(prev => new Set(prev).add(s))
+  }
+
+  async function newFile() {
+    try {
+      const { id } = await api.createEngagement()
+      setEngagementId(id)
+      localStorage.setItem(LS_ID, id)
+      setEntity(""); setJ([]); setSources(new Set()); setDraftJump(null)
+      setStep(1); setVisited(new Set([1]))
+      refreshFiles()
+    } catch (err) { console.error("[veritax] failed to create file:", err) }
+  }
+
+  async function openFile(id: string) {
+    if (id !== engagementId) await loadEngagement(id)
+    setVisited(new Set([1, 2, 3, 4]))  // an existing file — unlock all steps
+    setStep(2)                          // land on Requirements so progress is visible
+    setDraftJump(null)
   }
 
   async function signOut() {
@@ -49,6 +109,7 @@ export default function Page() {
   function continueFromPlanning() {
     if (engagementId) {
       api.patchEngagement(engagementId, { entity_name: entity, jurisdictions })
+        .then(refreshFiles)  // the newly-named file now shows in the library
         .catch(err => console.error("[veritax] failed to save engagement scope:", err))
     }
     navigate(2)
@@ -73,22 +134,51 @@ export default function Page() {
 
         <button
           type="button"
+          onClick={newFile}
           style={{
-            display: "flex", alignItems: "center",
+            display: "flex", alignItems: "center", gap: "0.375rem",
             padding: "0.5rem 0.75rem", border: "none",
             borderRadius: "6px", background: "#000",
             color: "#fff", fontSize: "13px", fontWeight: 600,
             cursor: "pointer", textAlign: "left", width: "100%",
           }}
         >
-          Planning and research
+          + New file
         </button>
+
+        {/* File library — the user's engagements */}
+        <div style={{ flex: 1, overflowY: "auto", marginTop: "1rem", display: "flex", flexDirection: "column", gap: 2 }}>
+          <p style={{ fontSize: "10px", fontWeight: 600, letterSpacing: "0.06em", textTransform: "uppercase", color: "#999", padding: "0 0.75rem", margin: "0 0 0.375rem" }}>
+            Files
+          </p>
+          {files.map(f => {
+            const active = f.id === engagementId
+            return (
+              <button key={f.id} type="button" onClick={() => openFile(f.id)} style={{
+                display: "flex", flexDirection: "column", gap: 1,
+                padding: "0.4rem 0.75rem", border: "none", borderRadius: "6px",
+                background: active ? "#ececec" : "transparent",
+                cursor: "pointer", textAlign: "left", width: "100%",
+              }}>
+                <span style={{ fontSize: "13px", fontWeight: active ? 600 : 500, color: "#000", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                  {f.entity_name || "Untitled"}
+                </span>
+                <span style={{ fontSize: "11px", color: "#888", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                  {f.jurisdictions.join(", ") || "No jurisdictions"}
+                </span>
+              </button>
+            )
+          })}
+          {files.length === 0 && (
+            <p style={{ fontSize: "12px", color: "#aaa", padding: "0 0.75rem" }}>No files yet</p>
+          )}
+        </div>
 
         <button
           type="button"
           onClick={signOut}
           style={{
-            marginTop: "auto",
+            marginTop: "0.5rem",
             display: "flex", alignItems: "center",
             padding: "0.5rem 0.75rem", border: "1px solid #e5e5e5",
             borderRadius: "6px", background: "#fff",

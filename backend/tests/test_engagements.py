@@ -39,3 +39,24 @@ async def test_patch_reuses_existing_entity(client):
 async def test_get_missing_engagement_404(client):
     r = await client.get("/engagements/00000000-0000-0000-0000-000000000000")
     assert r.status_code == 404
+
+
+async def test_list_returns_named_engagements_newest_first(client):
+    a = (await client.post("/engagements")).json()["id"]
+    await client.patch(f"/engagements/{a}", json={"entity_name": "Alpha Co", "jurisdictions": ["Netherlands"]})
+    b = (await client.post("/engagements")).json()["id"]
+    await client.patch(f"/engagements/{b}", json={"entity_name": "Beta Co"})
+    unnamed = (await client.post("/engagements")).json()["id"]  # never named — a shell
+
+    r = await client.get("/engagements")
+    assert r.status_code == 200
+    files = r.json()
+    ids = [f["id"] for f in files]
+    assert a in ids and b in ids
+    assert unnamed not in ids            # unnamed shells stay out of the library
+    assert ids.index(b) < ids.index(a)   # newest (Beta, patched last) first
+    beta = next(f for f in files if f["id"] == b)
+    assert beta["entity_name"] == "Beta Co"
+    assert beta["jurisdictions"] == []
+    alpha = next(f for f in files if f["id"] == a)
+    assert alpha["jurisdictions"] == ["Netherlands"]

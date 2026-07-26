@@ -60,6 +60,14 @@ class EngagementRead(BaseModel):
     sources: list[SourceRead]
 
 
+class EngagementSummary(BaseModel):
+    """Lightweight row for the file library — no sources/documents payload."""
+    id: uuid.UUID
+    entity_name: str | None
+    jurisdictions: list[str]
+    updated_at: datetime
+
+
 class SourceCreate(BaseModel):
     kind: SourceKind
     origin: SourceOrigin
