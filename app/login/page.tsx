@@ -47,9 +47,16 @@ export default function LoginPage() {
 
   async function verify(e: React.FormEvent) {
     e.preventDefault(); setError(null); setBusy(true)
-    const { error } = await supa().auth.verifyOtp({ email: email.trim(), token: code.trim(), type: "email" })
+    const token = code.trim()
+    const em = email.trim()
+    // signInWithOtp codes verify as type "email"; a brand-new sign-up confirmation may need "signup".
+    let res = await supa().auth.verifyOtp({ email: em, token, type: "email" })
+    if (res.error) {
+      const alt = await supa().auth.verifyOtp({ email: em, token, type: "signup" })
+      if (!alt.error) res = alt
+    }
     setBusy(false)
-    if (error) setError(error.message)
+    if (res.error) setError(res.error.message)
     else router.replace("/")
   }
 
@@ -95,10 +102,10 @@ export default function LoginPage() {
             <p style={{ fontSize: 12, color: "#888", margin: 0, textAlign: "center" }}>
               Enter the 6-digit code sent to <strong>{email}</strong>
             </p>
-            <input style={{ ...INPUT, textAlign: "center", letterSpacing: "0.3em", fontSize: 18 }}
-              inputMode="numeric" autoComplete="one-time-code" placeholder="000000" maxLength={6}
-              value={code} onChange={e => setCode(e.target.value.replace(/\D/g, ""))} />
-            <button type="submit" style={PRIMARY} disabled={busy || code.length < 6}>
+            <input style={{ ...INPUT, textAlign: "center", letterSpacing: "0.2em", fontSize: 18 }}
+              type="text" autoComplete="one-time-code" placeholder="Enter code" maxLength={12}
+              value={code} onChange={e => setCode(e.target.value.replace(/\s+/g, ""))} />
+            <button type="submit" style={PRIMARY} disabled={busy || code.trim().length < 6}>
               {busy ? "Verifying…" : "Verify & continue"}
             </button>
             <button type="button" onClick={() => { setStage("form"); setCode(""); setError(null) }}
