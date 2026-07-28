@@ -4,7 +4,9 @@
       "Bash(pnpm add *)",
       "Bash(TEST_DATABASE_URL=\"postgresql+asyncpg://veritax:veritax@localhost:5434/veritax_test\" ./.venv/Scripts/python.exe -m pytest tests/test_coverage.py -q)",
       "Bash(TEST_DATABASE_URL=\"postgresql+asyncpg://veritax:veritax@localhost:5434/veritax_test\" ./.venv/Scripts/python.exe -m pytest tests/test_risks.py -q)",
-      "Bash(TEST_DATABASE_URL=\"postgresql+asyncpg://veritax:veritax@localhost:5434/veritax_test\" ./.venv/Scripts/python.exe -m pytest -q)"
+      "Bash(TEST_DATABASE_URL=\"postgresql+asyncpg://veritax:veritax@localhost:5434/veritax_test\" ./.venv/Scripts/python.exe -m pytest -q)",
+      "Bash(./.venv/Scripts/python.exe -m pip install \"pyjwt[crypto]\")",
+      "Bash(./.venv/Scripts/python.exe -c ' *)"
     ]
   }
 }
