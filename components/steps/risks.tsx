@@ -190,7 +190,7 @@ export default function RisksStep({ engagementId, jurisdictions, entity }: {
 
           {/* Header */}
           <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: "1rem", marginBottom: "1.25rem" }}>
-            <h1 style={{ fontSize: 24, fontWeight: 600, color: "#000", margin: 0 }}>Findings</h1>
+            <h1 style={{ fontSize: 24, fontWeight: 600, color: "#000", margin: 0 }}>Risks</h1>
             {hasFindings && (
               <button type="button" onClick={exportRegister} style={{ display: "inline-flex", alignItems: "center", gap: "0.375rem", height: 30, padding: "0 0.75rem", borderRadius: 6, border: "1px solid #e5e5e5", background: "#fff", color: "#000", fontSize: 12, fontWeight: 500, cursor: "pointer", flexShrink: 0 }}>
                 <Download size={14} /> Export register

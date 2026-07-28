@@ -507,8 +507,11 @@
 
 @layer base {
   * {
-    scrollbar-color: var(--scrollbar-color) transparent;
-    scrollbar-width: thin;
+    scrollbar-width: none;
+  }
+
+  *::-webkit-scrollbar {
+    display: none;
   }
   html {
     color: var(--color-text);
@@ -562,3 +565,26 @@
 }
 .tp-draft th { background: var(--color-background-primary-soft); font-weight: var(--font-weight-medium); }
 .tp-draft td { color: var(--color-text-secondary); }
+
+/* FullCalendar (Compliance) themed to the design system via its --fc-* variables. */
+.veritax-fc {
+  --fc-border-color: var(--color-border);
+  --fc-page-bg-color: var(--color-surface);
+  --fc-neutral-bg-color: var(--color-surface-secondary);
+  --fc-neutral-text-color: var(--color-text-secondary);
+  --fc-today-bg-color: var(--color-background-primary-soft);
+  --fc-button-text-color: var(--color-text-secondary);
+  --fc-button-bg-color: var(--color-surface);
+  --fc-button-border-color: var(--color-border);
+  --fc-button-hover-bg-color: var(--color-background-primary-ghost-hover);
+  --fc-button-hover-border-color: var(--color-border-strong);
+  --fc-button-active-bg-color: var(--color-background-primary-solid);
+  --fc-button-active-border-color: var(--color-background-primary-solid);
+  color: var(--color-text);
+  font-size: var(--font-text-sm-size);
+}
+.veritax-fc .fc-button-primary.fc-button-active { color: var(--color-text-inverse); }
+.veritax-fc .fc-toolbar-title { font-size: var(--font-text-lg-size); font-weight: var(--font-weight-semibold); }
+.veritax-fc .fc-col-header-cell-cushion,
+.veritax-fc .fc-daygrid-day-number { color: var(--color-text-secondary); text-decoration: none; }
+.veritax-fc .fc-event { cursor: pointer; }

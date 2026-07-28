@@ -69,7 +69,7 @@ export default function LoginPage() {
       <div style={{ width: 360, background: "#fff", border: "1px solid #e5e5e5", borderRadius: 12, padding: "2rem", display: "flex", flexDirection: "column", gap: "1.25rem" }}>
         <div style={{ display: "flex", alignItems: "center", gap: "0.5rem", justifyContent: "center" }}>
           <img src="/VeritaxLogo.png" alt="Veritax" style={{ width: 26, height: 26, objectFit: "contain" }} />
-          <span style={{ fontFamily: "var(--font-wordmark)", fontSize: 21, fontWeight: 300, letterSpacing: "0.12em" }}>VERITAX</span>
+          <span style={{ fontFamily: "var(--font-wordmark)", fontSize: 22, fontWeight: 300, letterSpacing: 0, lineHeight: 1 }}>Veritax</span>
         </div>
 
         {/* Mode toggle */}

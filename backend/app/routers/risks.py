@@ -180,6 +180,16 @@ async def start_risks(
     factory: async_sessionmaker = Depends(get_session_factory),
     _owner: Engagement = Depends(require_engagement_owner),
 ) -> RiskResponse:
+    # Idempotent: if analysis already ran (or is running), return the stored result — never re-run on
+    # revisit/reload. Only a not-started or failed run proceeds.
+    existing = (
+        await session.execute(
+            select(RiskRun).where(RiskRun.engagement_id == engagement_id, RiskRun.jurisdiction == jurisdiction)
+        )
+    ).scalar_one_or_none()
+    if existing is not None and existing.status in (RiskRunStatus.pending, RiskRunStatus.analyzing, RiskRunStatus.done):
+        return await _response(session, engagement_id, jurisdiction)
+
     if not await draft_complete(session, engagement_id, jurisdiction):
         # The mirror of the Requirements rule: Risks runs only on the completed draft.
         raise HTTPException(status_code=409, detail=f"draft not complete for '{jurisdiction}'")
