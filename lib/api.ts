@@ -15,7 +15,7 @@ async function afetch(url: string, init: RequestInit = {}): Promise<Response> {
   return fetch(url, { ...init, headers })
 }
 
-export type SourceKind = "financials" | "agreements" | "public" | "interview"
+export type SourceKind = "financials" | "agreements" | "public" | "interview" | "supplement"
 
 export interface DocumentRead {
   id: string
@@ -96,6 +96,7 @@ export interface CoverageResponse {
     missing: number
     conditional: number
     pending: number
+    failed: number
     need_attention: number
   }
   requirements: CoverageRow[]
@@ -127,6 +128,13 @@ export interface DraftResponse {
   jurisdiction: string
   summary: { total: number; drafted: number; pending: number; failed: number }
   sections: DraftSection[]
+}
+
+export interface PipelineRecoveryResponse {
+  retried_failed: boolean
+  documents_restarted: number
+  coverage_jurisdictions_restarted: string[]
+  draft_jurisdictions_restarted: string[]
 }
 
 export type RiskKind = "discrepancy" | "exposure"
@@ -211,6 +219,11 @@ export const api = {
 
   deleteDocument: (documentId: string): Promise<void> =>
     afetch(`${BASE}/documents/${documentId}`, { method: "DELETE" }).then(parseVoid),
+
+  recoverPipeline: (engagementId: string, retryFailed = false): Promise<PipelineRecoveryResponse> =>
+    afetch(`${BASE}/engagements/${engagementId}/pipeline/recover?retry_failed=${retryFailed ? "true" : "false"}`, {
+      method: "POST",
+    }).then(r => parse<PipelineRecoveryResponse>(r)),
 
   getEngagement: (id: string): Promise<Engagement> =>
     afetch(`${BASE}/engagements/${id}`).then(r => parse<Engagement>(r)),

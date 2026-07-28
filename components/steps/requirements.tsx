@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react"
 import { Upload, Check, ShieldCheck, AlertTriangle, Loader2, FileText, ArrowRight } from "lucide-react"
 import { api, type CoverageResponse, type CoverageStatusValue } from "@/lib/api"
+import { Animate } from "@/components/ui/transition"
 
 type Seg = "present" | "partial" | "missing"
 
@@ -94,6 +95,8 @@ export default function RequirementsStep({ engagementId, jurisdictions, onContin
   const [filters, setFilters] = useState<Set<Seg>>(new Set())
   const [supplementText, setSupplementText] = useState("")
   const [submitting, setSubmitting] = useState(false)
+  const [recovering, setRecovering] = useState(false)
+  const [indexPollNonce, setIndexPollNonce] = useState(0)
   // Documents index HERE (not on the Planning screen). Assessment waits until they're all embedded.
   const [docReady, setDocReady] = useState(false)
   const [indexStatus, setIndexStatus] = useState<{ done: number; total: number; failed: number }>({ done: 0, total: 0, failed: 0 })
@@ -101,8 +104,11 @@ export default function RequirementsStep({ engagementId, jurisdictions, onContin
   const coverageRef = useRef(coverageByJuris); coverageRef.current = coverageByJuris
   const startedRef = useRef(started); startedRef.current = started
   const pollRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const draftPrimedRef = useRef<Set<string>>(new Set())
 
   const setCoverage = (j: string, data: CoverageResponse) => setCoverageByJuris(prev => ({ ...prev, [j]: data }))
+
+  useEffect(() => { draftPrimedRef.current.clear() }, [engagementId])
 
   // Poll every started jurisdiction that still has pending rows; stop when none do.
   const poll = useCallback(async () => {
@@ -139,6 +145,8 @@ export default function RequirementsStep({ engagementId, jurisdictions, onContin
     if (!engagementId) return
     let cancelled = false
     let timer: ReturnType<typeof setTimeout> | null = null
+    setDocReady(false)
+    setIndexStatus({ done: 0, total: 0, failed: 0 })
     const check = async () => {
       try {
         const eng = await api.getEngagement(engagementId)
@@ -157,7 +165,7 @@ export default function RequirementsStep({ engagementId, jurisdictions, onContin
     }
     check()
     return () => { cancelled = true; if (timer) clearTimeout(timer) }
-  }, [engagementId])
+  }, [engagementId, indexPollNonce])
 
   // Once documents are indexed, start assessing the FIRST jurisdiction. The rest stay grey until selected.
   useEffect(() => {
@@ -178,6 +186,16 @@ export default function RequirementsStep({ engagementId, jurisdictions, onContin
   const rows = coverage?.requirements ?? []
   const s = coverage?.summary
   const openReq = rows.find(r => r.id === openReqId) ?? null
+  const coverageReady = !!coverage && (s?.pending ?? 0) === 0 && (s?.failed ?? 0) === 0
+  const coverageFailed = (s?.failed ?? 0) > 0
+
+  useEffect(() => {
+    if (!engagementId || !coverageReady || activeJurisdiction !== jurisdictions[0]) return
+    if (draftPrimedRef.current.has(activeJurisdiction)) return
+    draftPrimedRef.current.add(activeJurisdiction)
+    api.startDraft(engagementId, activeJurisdiction)
+      .catch(err => console.error("[veritax] failed to prime draft:", err))
+  }, [activeJurisdiction, coverageReady, engagementId, jurisdictions])
 
   const toggleFilter = (c: Seg) => setFilters(prev => {
     const n = new Set(prev)
@@ -211,6 +229,26 @@ export default function RequirementsStep({ engagementId, jurisdictions, onContin
       console.error("[veritax] supplement failed:", e)
     } finally {
       setSubmitting(false)
+    }
+  }
+
+  async function retryPipeline() {
+    if (!engagementId) return
+    setRecovering(true)
+    setError(null)
+    try {
+      await api.recoverPipeline(engagementId, true)
+      setIndexPollNonce(n => n + 1)
+      if (startedRef.current.has(activeJurisdiction)) {
+        try { setCoverage(activeJurisdiction, await api.getCoverage(engagementId, activeJurisdiction)) }
+        catch (e) { console.error("[veritax] retry coverage refresh failed:", e) }
+        if (!pollRef.current) pollRef.current = setTimeout(poll, 600)
+      }
+    } catch (e) {
+      console.error("[veritax] pipeline retry failed:", e)
+      setError(String(e))
+    } finally {
+      setRecovering(false)
     }
   }
 
@@ -284,9 +322,14 @@ export default function RequirementsStep({ engagementId, jurisdictions, onContin
                 Requirements are assessed once the documents finish indexing.
               </p>
               {indexStatus.failed > 0 && (
-                <p style={{ fontSize: "var(--font-text-xs-size)", color: "var(--color-text-danger-soft)", margin: 0 }}>
-                  {indexStatus.failed} document{indexStatus.failed === 1 ? "" : "s"} failed to index — re-upload from Planning.
-                </p>
+                <div style={{ display: "flex", alignItems: "center", gap: "0.5rem", flexWrap: "wrap" }}>
+                  <p style={{ fontSize: "var(--font-text-xs-size)", color: "var(--color-text-danger-soft)", margin: 0 }}>
+                    {indexStatus.failed} document{indexStatus.failed === 1 ? "" : "s"} failed to index.
+                  </p>
+                  <button type="button" onClick={retryPipeline} disabled={recovering} style={{ border: "none", background: "transparent", padding: 0, cursor: recovering ? "not-allowed" : "pointer", color: "var(--color-text-info-soft)", fontSize: "var(--font-text-xs-size)", textDecoration: "underline", textUnderlineOffset: 2 }}>
+                    {recovering ? "Retrying..." : "Retry"}
+                  </button>
+                </div>
               )}
             </div>
           ) : !coverage && !error ? (
@@ -302,7 +345,8 @@ export default function RequirementsStep({ engagementId, jurisdictions, onContin
               const isLast = idx === shownRows.length - 1
               const selected = openReqId === row.id
               return (
-                <div key={row.id}
+                <Animate key={row.id} enter="slide-up" duration={140} delay={Math.min(idx, 6) * 18}>
+                <div
                   onClick={() => { setOpenReqId(row.id); setSupplementText("") }}
                   onMouseEnter={e => { if (!selected) e.currentTarget.style.background = "var(--color-background-primary-ghost-hover)" }}
                   onMouseLeave={e => { if (!selected) e.currentTarget.style.background = "transparent" }}
@@ -345,18 +389,28 @@ export default function RequirementsStep({ engagementId, jurisdictions, onContin
                     )}
                   </div>
                 </div>
+                </Animate>
               )
             })}
           </div>
 
           {/* Actions */}
           <div style={{ display: "flex", alignItems: "center", gap: "0.75rem", marginTop: "2rem" }}>
-            <button type="button" onClick={onContinue} style={{
+            <button type="button" disabled={!coverageReady} title={coverageReady ? undefined : coverageFailed ? "Retry failed requirements before drafting" : "Requirements are still assessing"} onClick={onContinue} style={{
               height: "var(--control-size-md)", padding: "0 var(--control-gutter-lg)",
               borderRadius: "var(--control-radius-md)", border: "none",
-              background: "var(--color-background-primary-solid)", color: "var(--color-text-inverse)",
-              fontSize: "var(--control-font-size-md)", fontWeight: "var(--font-weight-medium)", cursor: "pointer",
+              background: coverageReady ? "var(--color-background-primary-solid)" : "var(--alpha-08)",
+              color: coverageReady ? "var(--color-text-inverse)" : "var(--color-text-tertiary)",
+              fontSize: "var(--control-font-size-md)", fontWeight: "var(--font-weight-medium)", cursor: coverageReady ? "pointer" : "not-allowed",
             }}>Continue to Draft</button>
+            {coverageFailed && s && (
+              <button type="button" onClick={retryPipeline} disabled={recovering} style={{
+                height: "var(--control-size-md)", padding: "0 var(--control-gutter-md)",
+                borderRadius: "var(--control-radius-md)", border: "1px solid var(--color-border)",
+                background: "transparent", color: "var(--color-text-danger-soft)",
+                fontSize: "var(--control-font-size-md)", cursor: recovering ? "not-allowed" : "pointer",
+              }}>{recovering ? "Retrying..." : `Retry ${s.failed} failed`}</button>
+            )}
             <button type="button" onClick={onBack} style={{
               height: "var(--control-size-md)", padding: "0 var(--control-gutter-md)",
               borderRadius: "var(--control-radius-md)", border: "1px solid var(--color-border)",
@@ -372,7 +426,7 @@ export default function RequirementsStep({ engagementId, jurisdictions, onContin
         const cfg = STATUS_CFG[openReq.status]
         const canSupplement = openReq.status === "partial" || openReq.status === "missing" || openReq.status === "failed"
         return (
-          <aside style={{ width: 360, flexShrink: 0, borderLeft: "1px solid var(--color-border)", background: "var(--color-surface)", display: "flex", flexDirection: "column", overflowY: "auto" }}>
+          <Animate as="aside" enter="slide-up" duration={150} style={{ width: 360, flexShrink: 0, borderLeft: "1px solid var(--color-border)", background: "var(--color-surface)", display: "flex", flexDirection: "column", overflowY: "auto" }}>
             <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "0.75rem", borderBottom: "1px solid var(--color-border)", padding: "1rem 1.25rem" }}>
               <div style={{ display: "flex", alignItems: "center", gap: "0.5rem", minWidth: 0 }}>
                 <span style={{ width: 8, height: 8, borderRadius: "50%", background: cfg.dot, flexShrink: 0 }} />
@@ -479,7 +533,7 @@ export default function RequirementsStep({ engagementId, jurisdictions, onContin
                 </div>
               )}
             </div>
-          </aside>
+          </Animate>
         )
       })()}
     </div>

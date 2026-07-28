@@ -123,6 +123,7 @@ class CoverageSummary(BaseModel):
     missing: int
     conditional: int
     pending: int
+    failed: int
     need_attention: int   # partial + missing
 
 
@@ -165,6 +166,13 @@ class DraftResponse(BaseModel):
     jurisdiction: str
     summary: DraftSummary
     sections: list[DraftSectionRead]
+
+
+class PipelineRecoveryResponse(BaseModel):
+    retried_failed: bool
+    documents_restarted: int
+    coverage_jurisdictions_restarted: list[str]
+    draft_jurisdictions_restarted: list[str]
 
 
 class RiskEvidenceRead(BaseModel):

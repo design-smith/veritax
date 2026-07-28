@@ -46,6 +46,18 @@ async def init_db(eng=engine) -> None:
         # No Alembic: add newer columns idempotently so an already-created prod table gets them too.
         await conn.execute(text("ALTER TABLE engagements ADD COLUMN IF NOT EXISTS user_id uuid"))
         await conn.execute(text("CREATE INDEX IF NOT EXISTS ix_engagements_user_id ON engagements (user_id)"))
+        await conn.execute(text(
+            "ALTER TABLE documents ADD COLUMN IF NOT EXISTS status_updated_at "
+            "timestamp with time zone DEFAULT now()"
+        ))
+        await conn.execute(text(
+            "ALTER TABLE requirement_coverage ADD COLUMN IF NOT EXISTS status_updated_at "
+            "timestamp with time zone DEFAULT now()"
+        ))
+        await conn.execute(text(
+            "ALTER TABLE draft_sections ADD COLUMN IF NOT EXISTS status_updated_at "
+            "timestamp with time zone DEFAULT now()"
+        ))
 
     async with async_sessionmaker(eng, expire_on_commit=False)() as session:
         existing = set((await session.execute(select(Connector.provider))).scalars())

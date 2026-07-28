@@ -4,9 +4,11 @@ import asyncio
 import hashlib
 import logging
 import uuid
+from datetime import datetime, timezone
 
-from sqlalchemy import select
+from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import async_sessionmaker
+from sqlalchemy.orm import selectinload
 
 from .embeddings import Embedder
 from .models import Document, DocumentChunk, DocumentStatus
@@ -49,6 +51,7 @@ async def store_upload(
         storage_bucket=storage.bucket,
         storage_key=key,
         status=DocumentStatus.uploaded,
+        status_updated_at=datetime.now(timezone.utc),
     )
     session.add(doc)
     await session.flush()
@@ -73,9 +76,43 @@ async def embed_document(
         fname = doc.original_filename
         log.info("embed START doc=%s file=%s size=%d rss=%s", doc.id, fname, doc.size_bytes, _rss_mb())
         doc.status = DocumentStatus.embedding
+        doc.status_updated_at = datetime.now(timezone.utc)
+        doc.error = None
         await session.commit()
 
         try:
+            twin = (
+                await session.execute(
+                    select(Document)
+                    .where(
+                        Document.id != doc.id,
+                        Document.content_hash == doc.content_hash,
+                        Document.status == DocumentStatus.embedded,
+                    )
+                    .options(selectinload(Document.chunks))
+                    .limit(1)
+                )
+            ).scalar_one_or_none()
+            if twin is not None and twin.chunks:
+                await session.execute(delete(DocumentChunk).where(DocumentChunk.document_id == doc.id))
+                for c in sorted(twin.chunks, key=lambda item: item.chunk_index):
+                    session.add(
+                        DocumentChunk(
+                            document_id=doc.id,
+                            chunk_index=c.chunk_index,
+                            content=c.content,
+                            embedding=c.embedding,
+                            token_count=c.token_count,
+                        )
+                    )
+                doc.status = DocumentStatus.embedded
+                doc.status_updated_at = datetime.now(timezone.utc)
+                doc.error = None
+                await session.commit()
+                log.info("embed REUSED doc=%s file=%s from twin=%s chunks=%d",
+                         doc.id, fname, twin.id, len(twin.chunks))
+                return
+
             # Offload the blocking work (storage read, PDF extraction, embedding HTTP) to threads so
             # the single web worker stays responsive — otherwise a big PDF blocks the event loop long
             # enough for the platform health check to fail and restart the worker mid-embed.
@@ -84,9 +121,12 @@ async def embed_document(
             text = await asyncio.to_thread(extract_text, doc.original_filename, doc.content_type, data)
             log.info("embed: extracted %d chars from %s (rss=%s)", len(text), fname, _rss_mb())
             pieces = chunk(text)
+            if not pieces:
+                raise RuntimeError("no extractable text; OCR may be required")
             log.info("embed: %d chunk(s) for %s — embedding now (rss=%s)", len(pieces), fname, _rss_mb())
             vectors = await asyncio.to_thread(embedder.embed_documents, pieces)
             log.info("embed: got %d vector(s) for %s (rss=%s)", len(vectors), fname, _rss_mb())
+            await session.execute(delete(DocumentChunk).where(DocumentChunk.document_id == doc.id))
             for i, (piece, vec) in enumerate(zip(pieces, vectors)):
                 session.add(
                     DocumentChunk(
@@ -98,6 +138,7 @@ async def embed_document(
                     )
                 )
             doc.status = DocumentStatus.embedded
+            doc.status_updated_at = datetime.now(timezone.utc)
             doc.error = None
             await session.commit()
             log.info("embed DONE doc=%s file=%s -> embedded (rss=%s)", doc.id, fname, _rss_mb())
@@ -107,6 +148,7 @@ async def embed_document(
             doc = await session.get(Document, document_id)
             if doc is not None:
                 doc.status = DocumentStatus.failed
+                doc.status_updated_at = datetime.now(timezone.utc)
                 doc.error = str(exc)[:1000]
                 await session.commit()
 

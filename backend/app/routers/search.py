@@ -27,7 +27,7 @@ async def search(
     embedder: Embedder = Depends(get_embedder),
     user: AuthUser = Depends(get_current_user),
 ) -> list[SearchHit]:
-    query_vec = embedder.embed_documents([q])[0]
+    query_vec = embedder.embed_queries([q])[0]
 
     stmt = (
         select(

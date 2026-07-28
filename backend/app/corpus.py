@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import time
 import uuid
 from dataclasses import dataclass
 
@@ -102,7 +103,7 @@ async def retrieve_documents(
     passages) regardless of how large the underlying files are. Reads pre-embedded chunk text, so no
     PDF re-extraction. Empty until documents have been embedded.
     """
-    qvec = (await asyncio.to_thread(embedder.embed_documents, [query]))[0]
+    qvec = (await asyncio.to_thread(embedder.embed_queries, [query]))[0]
     return await _search_chunks(session, engagement_id, qvec, k)
 
 
@@ -123,11 +124,13 @@ async def retrieve_documents_batch(
     keys = list(queries)
     if not keys:
         return {}
-    vecs = await asyncio.to_thread(embedder.embed_documents, [queries[key] for key in keys])
+    t0 = time.monotonic()
+    vecs = await asyncio.to_thread(embedder.embed_queries, [queries[key] for key in keys])
     out: dict[str, list[DocContext]] = {}
     for key, vec in zip(keys, vecs):
         out[key] = await _search_chunks(session, engagement_id, vec, k)
-    log.info("retrieve_documents_batch: %d quer(y/ies) embedded in one call", len(keys))
+    log.info("retrieve_documents_batch: %d quer(y/ies) embedded + searched in %.1fs",
+             len(keys), time.monotonic() - t0)
     return out
 
 

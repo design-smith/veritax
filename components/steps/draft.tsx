@@ -5,6 +5,7 @@ import dynamic from "next/dynamic"
 import { Loader2 } from "lucide-react"
 import { api, type DraftResponse } from "@/lib/api"
 import { markdownToSfdt, type DocSection } from "@/lib/sfdt"
+import { Animate } from "@/components/ui/transition"
 
 // Syncfusion touches the DOM at load — keep it out of SSR.
 const DraftDocEditor = dynamic(() => import("./DraftDocEditor"), {
@@ -30,6 +31,7 @@ export default function DraftStep({ engagementId, jurisdictions, entity, onConti
   const [started, setStarted] = useState<Set<string>>(new Set())
   const [activeJurisdiction, setActive] = useState(jurisdictions[0] ?? "")
   const [error, setError] = useState<string | null>(null)
+  const [retrying, setRetrying] = useState(false)
 
   const draftRef = useRef(draftByJuris); draftRef.current = draftByJuris
   const startedRef = useRef(started); startedRef.current = started
@@ -78,6 +80,23 @@ export default function DraftStep({ engagementId, jurisdictions, entity, onConti
     startJurisdiction(j)
   }
 
+  async function retryDraft() {
+    if (!engagementId) return
+    setRetrying(true)
+    setError(null)
+    try {
+      await api.recoverPipeline(engagementId, true)
+      try { setDraft(activeJurisdiction, await api.getDraft(engagementId, activeJurisdiction)) }
+      catch (e) { console.error("[veritax] retry draft refresh failed:", e) }
+      if (!pollRef.current) pollRef.current = setTimeout(poll, 600)
+    } catch (e) {
+      console.error("[veritax] draft retry failed:", e)
+      setError(String(e))
+    } finally {
+      setRetrying(false)
+    }
+  }
+
   // Deep-link from Requirements: focus that jurisdiction (section-level scroll no longer applies).
   useEffect(() => {
     if (!jumpTo) return
@@ -99,7 +118,10 @@ export default function DraftStep({ engagementId, jurisdictions, entity, onConti
       markdown: stripLeadingHeading(s.content ?? ""),
       bookmark: `sec_${s.element_order}`,
     }))
-    return markdownToSfdt(`${entity || "Entity"} — ${activeJurisdiction}`, sections)
+    return markdownToSfdt(
+      { documentTitle: "Transfer Pricing Planning File", entity: entity || "Entity", jurisdiction: activeJurisdiction },
+      sections,
+    )
   }, [complete, draft, entity, activeJurisdiction])
 
   const navItems = useMemo(
@@ -144,7 +166,7 @@ export default function DraftStep({ engagementId, jurisdictions, entity, onConti
           </p>
         )}
         {!error && failed && (
-          <div style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: "0.625rem", color: "var(--color-text-tertiary)", padding: "2rem", textAlign: "center" }}>
+          <Animate enter="slide-up" duration={150} style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: "0.625rem", color: "var(--color-text-tertiary)", padding: "2rem", textAlign: "center" }}>
             <p style={{ fontSize: "var(--font-text-sm-size)", color: "var(--color-text-danger-soft)", margin: 0 }}>
               Drafting failed for {failedSections.length} section{failedSections.length === 1 ? "" : "s"} in {activeJurisdiction}.
             </p>
@@ -153,19 +175,29 @@ export default function DraftStep({ engagementId, jurisdictions, entity, onConti
                 {failedSections[0].element_name}: {failedSections[0].error || "No backend error returned."}
               </p>
             )}
-          </div>
+            <button type="button" onClick={retryDraft} disabled={retrying} style={{
+              height: "var(--control-size-md)", padding: "0 var(--control-gutter-lg)",
+              borderRadius: "var(--control-radius-md)", border: "1px solid var(--color-border)",
+              background: "transparent", color: "var(--color-text-secondary)",
+              fontSize: "var(--control-font-size-md)", cursor: retrying ? "not-allowed" : "pointer",
+            }}>{retrying ? "Retrying..." : "Retry draft"}</button>
+          </Animate>
         )}
         {!error && !failed && !complete && (
-          <div style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: "0.5rem", color: "var(--color-text-tertiary)" }}>
+          <Animate enter="fade" duration={150} style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: "0.5rem", color: "var(--color-text-tertiary)" }}>
             <p style={{ display: "flex", alignItems: "center", gap: "0.5rem", fontSize: "var(--font-text-sm-size)" }}>
               <Loader2 size={14} className="animate-spin" /> Drafting {activeJurisdiction}…
             </p>
             {draft && draft.summary.total > 0 && (
               <p style={{ fontSize: "var(--font-text-xs-size)" }}>{draft.summary.drafted} of {draft.summary.total} sections</p>
             )}
-          </div>
+          </Animate>
         )}
-        {!error && complete && <DraftDocEditor sfdt={sfdt} fileName={`${entity || "Entity"} ${activeJurisdiction}`} sections={navItems} />}
+        {!error && complete && (
+          <Animate enter="fade" duration={160} style={{ flex: 1, minHeight: 0, display: "flex", flexDirection: "column" }}>
+            <DraftDocEditor sfdt={sfdt} fileName={`${entity || "Entity"} ${activeJurisdiction}`} sections={navItems} />
+          </Animate>
+        )}
       </div>
 
       {/* Continue */}

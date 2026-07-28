@@ -43,7 +43,7 @@ def _system_prompt(web: bool) -> str:
         "knowledge and do not invent.\n"
     )
     return (
-        "You draft ONE section of a transfer-pricing PLANNING FILE for a single required element. "
+        "You draft ONE section of a transfer-pricing LOCAL FILE for a single required element. "
         "You produce verifiable, cited prose — not a chatbot answer.\n\n"
         "LAWS (non-negotiable):\n"
         "1. PROVENANCE: every factual claim must carry a citation to its source. Place inline [n] markers "

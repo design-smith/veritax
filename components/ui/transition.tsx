@@ -1,6 +1,6 @@
 "use client"
 
-import { type ReactNode } from "react"
+import { useEffect, useState, type CSSProperties, type ReactNode } from "react"
 import { cn } from "@/lib/utils"
 
 type EnterVariant = "fade" | "slide-up" | "slide-down" | "scale" | "none"
@@ -20,23 +20,41 @@ const KF_CSS = `
 @keyframes oai-scale-enter{from{opacity:0;transform:scale(0.95)}to{opacity:1;transform:scale(1)}}
 `
 
-function Animate({ children, className, enter = "fade", duration = 150, delay = 0, as: Tag = "div" }: {
+function useReducedMotion() {
+  const [reduced, setReduced] = useState(false)
+  useEffect(() => {
+    const mq = window.matchMedia("(prefers-reduced-motion: reduce)")
+    const update = () => setReduced(mq.matches)
+    update()
+    mq.addEventListener("change", update)
+    return () => mq.removeEventListener("change", update)
+  }, [])
+  return reduced
+}
+
+function Animate({ children, className, style, enter = "fade", duration = 150, delay = 0, as: Tag = "div" }: {
   children: ReactNode; className?: string; enter?: EnterVariant
-  duration?: number; delay?: number; as?: "div" | "span" | "section" | "article"
+  style?: CSSProperties; duration?: number; delay?: number
+  as?: "div" | "span" | "section" | "article" | "aside" | "main" | "nav"
 }) {
+  const reduced = useReducedMotion()
   const Comp = Tag as React.ElementType
+  const shouldAnimate = enter !== "none" && !reduced
   return (
     <>
-      {enter !== "none" && <style>{KF_CSS}</style>}
+      {shouldAnimate && <style>{KF_CSS}</style>}
       <Comp
         className={cn(className)}
-        style={enter !== "none" ? {
-          animationName: KF[enter],
-          animationDuration: `${duration}ms`,
-          animationDelay: delay ? `${delay}ms` : undefined,
-          animationTimingFunction: "var(--cubic-enter,cubic-bezier(0.19,1,0.22,1))",
-          animationFillMode: "both",
-        } : undefined}
+        style={{
+          ...style,
+          ...(shouldAnimate ? {
+            animationName: KF[enter],
+            animationDuration: `${duration}ms`,
+            animationDelay: delay ? `${delay}ms` : undefined,
+            animationTimingFunction: "var(--cubic-enter,cubic-bezier(0.19,1,0.22,1))",
+            animationFillMode: "both",
+          } : {}),
+        }}
       >
         {children}
       </Comp>

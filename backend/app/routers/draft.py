@@ -28,6 +28,7 @@ from ..drafting import Drafter, DraftResult
 from ..embeddings import Embedder
 from ..models import (
     CitationKind,
+    CoverageStatus,
     DraftCitation,
     DraftSection,
     DraftStatus,
@@ -86,6 +87,25 @@ async def _response(session: AsyncSession, engagement_id: uuid.UUID, jurisdictio
     return DraftResponse(jurisdiction=jurisdiction, summary=_summary(sections), sections=[_to_read(s) for s in sections])
 
 
+async def _draft_blocked_by_coverage(session: AsyncSession, engagement_id: uuid.UUID, jurisdiction: str) -> str | None:
+    rows = (
+        await session.execute(
+            select(RequirementCoverage.status).where(
+                RequirementCoverage.engagement_id == engagement_id,
+                RequirementCoverage.jurisdiction == jurisdiction,
+                RequirementCoverage.is_conditional.is_(False),
+            )
+        )
+    ).scalars().all()
+    if not rows:
+        return None
+    if any(status == CoverageStatus.pending for status in rows):
+        return "requirements still assessing"
+    if any(status == CoverageStatus.failed for status in rows):
+        return "requirements have failed rows"
+    return None
+
+
 # ── Drafting loop (reads documents DIRECTLY — no vector search) ───────────────
 async def _coverage_notes(session: AsyncSession, engagement_id: uuid.UUID, jurisdiction: str) -> dict[str, str]:
     rows = (
@@ -114,6 +134,7 @@ async def _write_result(session: AsyncSession, section: DraftSection, result: Dr
     section.model = settings.draft_model
     section.status = DraftStatus.drafted
     section.error = None
+    section.status_updated_at = datetime.now(timezone.utc)
     section.drafted_at = datetime.now(timezone.utc)
     await session.execute(delete(DraftCitation).where(DraftCitation.section_id == section.id))
     for c in result.citations:
@@ -135,6 +156,7 @@ async def _draft_one(session: AsyncSession, section: DraftSection, element, docu
                      coverage_note: str, drafter: Drafter, fname_to_docid: dict[str, str]) -> None:
     section.status = DraftStatus.drafting
     section.error = None
+    section.status_updated_at = datetime.now(timezone.utc)
     await session.commit()
     log.info("draft_one START section=%s '%s' docs=%d", section.id, element.element_name, len(documents))
     t0 = time.monotonic()
@@ -145,6 +167,7 @@ async def _draft_one(session: AsyncSession, section: DraftSection, element, docu
     except Exception as exc:  # noqa: BLE001 - record failure per section, keep the loop going
         log.exception("draft_one FAILED section=%s '%s' after %.1fs", section.id, element.element_name, time.monotonic() - t0)
         section.status = DraftStatus.failed
+        section.status_updated_at = datetime.now(timezone.utc)
         section.error = str(exc)[:1000]
 
 
@@ -154,6 +177,7 @@ async def _draft_batch(session: AsyncSession, sections: list[DraftSection], elem
     for section in sections:
         section.status = DraftStatus.drafting
         section.error = None
+        section.status_updated_at = datetime.now(timezone.utc)
     await session.commit()
 
     batch_elements = [elements[s.requirement_key] for s in sections]
@@ -168,6 +192,7 @@ async def _draft_batch(session: AsyncSession, sections: list[DraftSection], elem
         log.exception("draft_batch FAILED %d section(s) after %.1fs", len(sections), time.monotonic() - t0)
         for section in sections:
             section.status = DraftStatus.failed
+            section.status_updated_at = datetime.now(timezone.utc)
             section.error = str(exc)[:1000]
         await session.commit()
         return
@@ -176,6 +201,7 @@ async def _draft_batch(session: AsyncSession, sections: list[DraftSection], elem
         result = results.get(i)
         if result is None:
             section.status = DraftStatus.failed
+            section.status_updated_at = datetime.now(timezone.utc)
             section.error = "no draft returned for this section"
         else:
             await _write_result(session, section, result, fname_to_docid)
@@ -198,6 +224,7 @@ async def _mark_pending_failed(session_factory: async_sessionmaker, engagement_i
         ).scalars().all()
         for row in rows:
             row.status = DraftStatus.failed
+            row.status_updated_at = datetime.now(timezone.utc)
             row.error = error[:1000]
         await session.commit()
 
@@ -228,6 +255,7 @@ async def _copy_draft(session: AsyncSession, target: DraftSection, twin: DraftSe
     target.model = twin.model
     target.status = DraftStatus.drafted
     target.error = None
+    target.status_updated_at = datetime.now(timezone.utc)
     target.drafted_at = datetime.now(timezone.utc)
     await session.execute(delete(DraftCitation).where(DraftCitation.section_id == target.id))
     for c in twin.citations:
@@ -258,6 +286,7 @@ async def _run_draft_serial_unused(session_factory: async_sessionmaker, drafter:
             element = elements.get(section.requirement_key)
             if element is None:
                 section.status = DraftStatus.failed
+                section.status_updated_at = datetime.now(timezone.utc)
                 section.error = "requirement not found in seed"
                 await session.commit()
                 continue
@@ -309,6 +338,7 @@ async def run_draft(session_factory: async_sessionmaker, drafter: Drafter, embed
                 element = elements.get(section.requirement_key)
                 if element is None:
                     section.status = DraftStatus.failed
+                    section.status_updated_at = datetime.now(timezone.utc)
                     section.error = "requirement not found in seed"
                     await session.commit()
                     continue
@@ -364,6 +394,9 @@ async def start_draft(
     elements = resolve_requirements(jurisdiction)
     if not elements:
         raise HTTPException(status_code=404, detail=f"no requirements defined for '{jurisdiction}'")
+    blocked = await _draft_blocked_by_coverage(session, engagement_id, jurisdiction)
+    if blocked:
+        raise HTTPException(status_code=409, detail=blocked)
 
     rows = [
         {
@@ -374,6 +407,7 @@ async def start_draft(
             "element_order": e.order,
             "element_name": e.element_name,
             "status": DraftStatus.pending,
+            "status_updated_at": datetime.now(timezone.utc),
         }
         for e in elements
     ]

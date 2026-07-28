@@ -547,6 +547,21 @@
   to { transform: rotate(360deg); }
 }
 
+@keyframes vt-step-enter {
+  from { opacity: 0; transform: translateY(6px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.vt-step-panel-active {
+  animation: vt-step-enter 160ms var(--cubic-enter) both;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .vt-step-panel-active {
+    animation: none;
+  }
+}
+
 /* Planning-file draft body: react-markdown output (GFM tables, headings, lists). */
 .tp-draft { font-size: var(--font-text-sm-size); line-height: 1.75; color: var(--color-text); overflow-wrap: break-word; }
 .tp-draft p { margin: 0 0 0.75rem; }

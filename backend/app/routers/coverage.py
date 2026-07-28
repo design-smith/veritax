@@ -36,12 +36,14 @@ from ..deps import (
     assert_owner,
     get_assessor,
     get_current_user,
+    get_drafter,
     get_embedder,
     get_session,
     get_session_factory,
     get_storage,
     require_engagement_owner,
 )
+from ..drafting import Drafter
 from ..embeddings import Embedder
 from ..ingest import embed_document, get_or_create_uploaded_source, store_upload
 from ..models import (
@@ -50,7 +52,9 @@ from ..models import (
     CoverageStatus,
     CoverageSupplement,
     Document,
+    DraftCitation,
     DraftSection,
+    DraftStatus,
     Engagement,
     RequirementCoverage,
     Source,
@@ -108,7 +112,7 @@ def _summary(rows: list[RequirementCoverage]) -> CoverageSummary:
         return sum(1 for r in rows if r.status == status)
 
     present, partial, missing = n(CoverageStatus.present), n(CoverageStatus.partial), n(CoverageStatus.missing)
-    conditional, pending = n(CoverageStatus.conditional), n(CoverageStatus.pending)
+    conditional, pending, failed = n(CoverageStatus.conditional), n(CoverageStatus.pending), n(CoverageStatus.failed)
     return CoverageSummary(
         total=len(rows),
         required_total=sum(1 for r in rows if not r.is_conditional),
@@ -117,6 +121,7 @@ def _summary(rows: list[RequirementCoverage]) -> CoverageSummary:
         missing=missing,
         conditional=conditional,
         pending=pending,
+        failed=failed,
         need_attention=partial + missing,
     )
 
@@ -146,6 +151,30 @@ async def _draft_section_by_key(session: AsyncSession, engagement_id: uuid.UUID,
         )
     ).all()
     return {rk: sid for rk, sid in rows}
+
+
+async def _invalidate_drafts_for_element(session: AsyncSession, row: RequirementCoverage) -> list[str]:
+    sections = (
+        await session.execute(
+            select(DraftSection).where(
+                DraftSection.engagement_id == row.engagement_id,
+                DraftSection.element_name == row.element_name,
+                DraftSection.element_order == row.element_order,
+                DraftSection.status.in_([DraftStatus.drafted, DraftStatus.failed]),
+            )
+        )
+    ).scalars().all()
+    if not sections:
+        return []
+    now = datetime.now(timezone.utc)
+    section_ids = [section.id for section in sections]
+    await session.execute(delete(DraftCitation).where(DraftCitation.section_id.in_(section_ids)))
+    for section in sections:
+        section.status = DraftStatus.pending
+        section.status_updated_at = now
+        section.content = None
+        section.error = None
+    return sorted({section.jurisdiction for section in sections})
 
 
 async def _response(session: AsyncSession, engagement_id: uuid.UUID, jurisdiction: str) -> CoverageResponse:
@@ -210,6 +239,7 @@ async def _copy_assessment(session: AsyncSession, target_id: uuid.UUID, twin: Re
     row.whats_missing = twin.whats_missing
     row.confidence = twin.confidence
     row.error = None
+    row.status_updated_at = datetime.now(timezone.utc)
     row.assessed_at = datetime.now(timezone.utc)
     await session.execute(delete(CoverageEvidence).where(CoverageEvidence.coverage_id == target_id))
     for e in twin.evidence:
@@ -244,19 +274,23 @@ async def _assess_group(session_factory: async_sessionmaker, assessor: Assessor,
             try:
                 if err is not None:
                     row.status, row.error = CoverageStatus.failed, str(err)[:1000]
+                    row.status_updated_at = datetime.now(timezone.utc)
                 elif result is None:
                     row.status, row.error = CoverageStatus.failed, "no assessment returned for this element"
+                    row.status_updated_at = datetime.now(timezone.utc)
                 else:
                     row.status = CoverageStatus(result.status)
                     row.whats_present = result.whats_present or None
                     row.whats_missing = result.whats_missing or None
                     row.confidence = Confidence(result.confidence)
                     row.error = None
+                    row.status_updated_at = datetime.now(timezone.utc)
                     row.assessed_at = datetime.now(timezone.utc)
                     await _write_evidence(s, row.id, result.evidence, fname_to_docid)
             except Exception:  # noqa: BLE001 - one row's write error can't sink the rest of the batch
                 log.exception("assess write FAILED for '%s'", row.element_name)
                 row.status, row.error = CoverageStatus.failed, "assessment write error"
+                row.status_updated_at = datetime.now(timezone.utc)
         await s.commit()
 
 
@@ -269,11 +303,13 @@ async def _apply(session: AsyncSession, row: RequirementCoverage, element, docum
         row.whats_missing = result.whats_missing or None
         row.confidence = Confidence(result.confidence)
         row.error = None
+        row.status_updated_at = datetime.now(timezone.utc)
         row.assessed_at = datetime.now(timezone.utc)
         await _write_evidence(session, row.id, result.evidence, fname_to_docid)
     except Exception as exc:  # noqa: BLE001 - record failure per row, keep the loop going
         log.exception("assess FAILED for '%s': %s", row.element_name, exc)
         row.status = CoverageStatus.failed
+        row.status_updated_at = datetime.now(timezone.utc)
         row.error = str(exc)[:1000]
 
 
@@ -291,6 +327,7 @@ async def _mark_pending_failed(session_factory: async_sessionmaker, engagement_i
         ).scalars().all()
         for row in rows:
             row.status = CoverageStatus.failed
+            row.status_updated_at = datetime.now(timezone.utc)
             row.error = error[:1000]
         await session.commit()
 
@@ -330,6 +367,7 @@ async def run_assessment(session_factory: async_sessionmaker, assessor: Assessor
                     row = await session.get(RequirementCoverage, rid)
                     if row is not None:
                         row.status, row.error = CoverageStatus.failed, "requirement not found in seed"
+                        row.status_updated_at = datetime.now(timezone.utc)
                     await session.commit()
                     continue
                 twin = await _find_assessed_twin(session, engagement_id, element)
@@ -401,6 +439,7 @@ async def start_coverage(
             "verified": e.verified,
             # Conditional (required:false) elements aren't flagged missing — no trigger evaluated.
             "status": CoverageStatus.pending if e.required else CoverageStatus.conditional,
+            "status_updated_at": datetime.now(timezone.utc),
         }
         for e in elements
     ]
@@ -439,6 +478,7 @@ async def add_supplement(
     session: AsyncSession = Depends(get_session),
     storage: Storage = Depends(get_storage),
     assessor: Assessor = Depends(get_assessor),
+    drafter: Drafter = Depends(get_drafter),
     embedder: Embedder = Depends(get_embedder),
     factory: async_sessionmaker = Depends(get_session_factory),
     user: AuthUser = Depends(get_current_user),
@@ -473,11 +513,18 @@ async def add_supplement(
 
     # Re-assess just this requirement now that the supplement is in the corpus.
     element = next((e for e in resolve_requirements(row.jurisdiction) if e.requirement_key == row.requirement_key), None)
+    redraft_jurisdictions: list[str] = []
     if element is not None:
         fname_to_docid = await document_filename_map(session, row.engagement_id)
         documents = await retrieve_documents(session, row.engagement_id, embedder, element_query(element))
         await _apply(session, row, element, documents, assessor, fname_to_docid)
+        redraft_jurisdictions = await _invalidate_drafts_for_element(session, row)
         await session.commit()
+        if redraft_jurisdictions:
+            from .draft import run_draft
+
+            for jurisdiction in redraft_jurisdictions:
+                background.add_task(run_draft, factory, drafter, embedder, row.engagement_id, jurisdiction)
 
     doc_kind = await _doc_kind(session, row.engagement_id)
     section_by_key = await _draft_section_by_key(session, row.engagement_id, row.jurisdiction)

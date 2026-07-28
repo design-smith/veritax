@@ -88,6 +88,10 @@ export default function Page() {
 
   useEffect(() => { localStorage.setItem(LS_STEP, String(step)) }, [step])
   useEffect(() => { setMounted(m => (m.has(step) ? m : new Set([...m, step]))) }, [step])  // mount a step on first visit, keep it
+  useEffect(() => {
+    if (!engagementId) return
+    api.recoverPipeline(engagementId).catch(err => console.error("[veritax] pipeline recovery failed:", err))
+  }, [engagementId])
 
   function navigate(s: Step) {
     setStep(s)
@@ -329,7 +333,7 @@ export default function Page() {
             results + in-flight polling persist and revisiting shows the stored output, never a re-run. */}
         <div style={{ flex: 1, display: "flex", overflow: "hidden" }}>
           {mounted.has(1) && (
-            <div style={{ flex: 1, minWidth: 0, display: step === 1 ? "flex" : "none" }}>
+            <div className={step === 1 ? "vt-step-panel vt-step-panel-active" : "vt-step-panel"} style={{ flex: 1, minWidth: 0, display: step === 1 ? "flex" : "none" }}>
               <PlanningStep
                 engagementId={engagementId}
                 jurisdictions={jurisdictions} onJurisdictionsChange={setJ}
@@ -340,7 +344,7 @@ export default function Page() {
             </div>
           )}
           {mounted.has(2) && (
-            <div style={{ flex: 1, minWidth: 0, display: step === 2 ? "flex" : "none" }}>
+            <div className={step === 2 ? "vt-step-panel vt-step-panel-active" : "vt-step-panel"} style={{ flex: 1, minWidth: 0, display: step === 2 ? "flex" : "none" }}>
               <RequirementsStep
                 engagementId={engagementId} jurisdictions={jurisdictions}
                 onContinue={() => navigate(3)} onBack={() => navigate(1)}
@@ -349,7 +353,7 @@ export default function Page() {
             </div>
           )}
           {mounted.has(3) && (
-            <div style={{ flex: 1, minWidth: 0, display: step === 3 ? "flex" : "none" }}>
+            <div className={step === 3 ? "vt-step-panel vt-step-panel-active" : "vt-step-panel"} style={{ flex: 1, minWidth: 0, display: step === 3 ? "flex" : "none" }}>
               <DraftStep
                 engagementId={engagementId} jurisdictions={jurisdictions} entity={entity}
                 onContinue={() => navigate(4)}
@@ -358,7 +362,7 @@ export default function Page() {
             </div>
           )}
           {mounted.has(4) && (
-            <div style={{ flex: 1, minWidth: 0, display: step === 4 ? "flex" : "none" }}>
+            <div className={step === 4 ? "vt-step-panel vt-step-panel-active" : "vt-step-panel"} style={{ flex: 1, minWidth: 0, display: step === 4 ? "flex" : "none" }}>
               <RisksStep engagementId={engagementId} jurisdictions={jurisdictions} entity={entity} />
             </div>
           )}

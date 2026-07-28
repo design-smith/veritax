@@ -10,6 +10,7 @@ class Embedder(Protocol):
     dim: int
 
     def embed_documents(self, texts: list[str]) -> list[list[float]]: ...
+    def embed_queries(self, texts: list[str]) -> list[list[float]]: ...
 
 
 # Voyage caps a single embed request (docs + tokens). Stay well under both — a full annual report
@@ -33,15 +34,21 @@ class VoyageEmbedder:
             self._client = voyageai.Client(api_key=settings.voyage_api_key)
         return self._client
 
-    def embed_documents(self, texts: list[str]) -> list[list[float]]:
+    def _embed(self, texts: list[str], *, input_type: str) -> list[list[float]]:
         if not texts:
             return []
         client = self._get_client()
         out: list[list[float]] = []
         for i in range(0, len(texts), _VOYAGE_BATCH):
             batch = texts[i : i + _VOYAGE_BATCH]
-            out.extend(client.embed(batch, model=self._model, input_type="document").embeddings)
+            out.extend(client.embed(batch, model=self._model, input_type=input_type).embeddings)
         return out
+
+    def embed_documents(self, texts: list[str]) -> list[list[float]]:
+        return self._embed(texts, input_type="document")
+
+    def embed_queries(self, texts: list[str]) -> list[list[float]]:
+        return self._embed(texts, input_type="query")
 
 
 class FakeEmbedder:
@@ -57,3 +64,6 @@ class FakeEmbedder:
             vec = [((seed[i % len(seed)] / 255.0) - 0.5) for i in range(self.dim)]
             out.append(vec)
         return out
+
+    def embed_queries(self, texts: list[str]) -> list[list[float]]:
+        return self.embed_documents(texts)

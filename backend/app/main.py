@@ -15,7 +15,7 @@ from .db import SessionFactory, init_db
 from .drafting import AnthropicDrafter, DeepSeekDrafter, FakeDrafter
 from .embeddings import FakeEmbedder, VoyageEmbedder
 from .risks import AnthropicRiskAnalyzer, DeepSeekRiskAnalyzer, FakeRiskAnalyzer
-from .routers import connectors, coverage, documents, draft, engagements, risks, search, sources
+from .routers import connectors, coverage, documents, draft, engagements, pipeline, risks, search, sources
 from .storage import LocalStorage, S3Storage
 
 log = logging.getLogger("veritax")
@@ -110,6 +110,7 @@ for _router in (
     search.router,
     coverage.router,
     draft.router,
+    pipeline.router,
     risks.router,
 ):
     app.include_router(_router, dependencies=[Depends(get_current_user)])

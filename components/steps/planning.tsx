@@ -4,6 +4,7 @@ import { createContext, useContext, useEffect, useRef, useState, type CSSPropert
 import { Check, ChevronDown, Globe, Upload, X } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { api, type DocumentRead } from "@/lib/api"
+import { Animate } from "@/components/ui/transition"
 
 export type SourceId = "financials" | "agreements" | "public" | "interview"
 
@@ -198,6 +199,18 @@ function UploadZone({ kind, accept = "*", hint }: { kind: SourceId; accept?: str
     }
   }
 
+  const retryFile = async (item: UploadItem) => {
+    if (!engagementId || !item.documentId) return
+    setItems(p => p.map(x => (x.id === item.id ? { ...x, status: "processing", error: undefined } : x)))
+    try {
+      await api.recoverPipeline(engagementId, true)
+      void pollDoc(item.id, item.documentId)
+    } catch (err) {
+      console.error("[veritax] retry document failed:", err)
+      setItems(p => p.map(x => (x.id === item.id ? { ...x, status: "error", error: uploadErrorMessage(err) } : x)))
+    }
+  }
+
   return (
     <div>
       <div role="button" tabIndex={0}
@@ -227,8 +240,9 @@ function UploadZone({ kind, accept = "*", hint }: { kind: SourceId; accept?: str
       {items.length > 0 && (
         <div style={{ display: "flex", flexDirection: "column", gap: "0.375rem", marginTop: "0.5rem" }}>
           <div style={{ display: "flex", flexWrap: "wrap", gap: "0.375rem" }}>
-            {items.map(f => (
-              <span key={f.id} title={f.status === "error" ? f.error : STATUS_LABEL[f.status]} style={{
+            {items.map((f, idx) => (
+              <Animate key={f.id} as="span" enter="slide-up" duration={130} delay={Math.min(idx, 6) * 16}>
+              <span title={f.status === "error" ? f.error : STATUS_LABEL[f.status]} style={{
                 display: "inline-flex", alignItems: "center", gap: "0.375rem",
                 padding: "0.125rem 0.375rem 0.125rem 0.5rem", borderRadius: "var(--radius-xs)",
                 background: f.status === "error" ? "var(--color-background-danger-soft)" : "var(--color-background-primary-soft)",
@@ -240,11 +254,18 @@ function UploadZone({ kind, accept = "*", hint }: { kind: SourceId; accept?: str
                 {f.status === "done" && <Check size={11} style={{ color: "var(--color-text-success-soft)", flexShrink: 0 }} />}
                 {f.status === "error" && <span style={{ color: "var(--color-text-danger-soft)" }}>!</span>}
                 <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{f.name}</span>
+                {f.status === "error" && f.documentId && (
+                  <button type="button" onClick={e => { e.stopPropagation(); void retryFile(f) }}
+                    style={{ background: "none", border: "none", cursor: "pointer", color: "var(--color-text-info-soft)", lineHeight: 1, padding: 0, flexShrink: 0, fontSize: "10px" }}>
+                    Retry
+                  </button>
+                )}
                 <button type="button" onClick={e => { e.stopPropagation(); removeFile(f) }}
                   style={{ background: "none", border: "none", cursor: "pointer", color: "var(--color-text-tertiary)", lineHeight: 1, padding: 0, flexShrink: 0 }}>
                   <X size={10} />
                 </button>
               </span>
+              </Animate>
             ))}
           </div>
           {items.filter(f => f.status === "error" && f.error).map(f => (

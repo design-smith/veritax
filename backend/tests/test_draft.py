@@ -64,6 +64,8 @@ async def test_unknown_jurisdiction_404(client):
 
 def test_system_prompt_encodes_the_laws():
     p = SYSTEM_PROMPT.lower()
+    assert "local file" in p
+    assert "planning file" not in p
     assert "citation" in p                      # L1: cite every claim
     assert "never" in p and "number" in p       # L3: numbers never generated
     assert "web_search only" in p or "gaps" in p  # confidential-first / web gap-filler
