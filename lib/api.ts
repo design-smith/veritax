@@ -173,6 +173,13 @@ async function parse<T>(res: Response): Promise<T> {
   return res.json() as Promise<T>
 }
 
+async function parseVoid(res: Response): Promise<void> {
+  if (!res.ok) {
+    const text = await res.text().catch(() => "")
+    throw new Error(`API ${res.status} ${res.url}: ${text}`)
+  }
+}
+
 export const api = {
   createEngagement: (): Promise<{ id: string }> =>
     afetch(`${BASE}/engagements`, { method: "POST" }).then(r => parse<{ id: string }>(r)),
@@ -201,6 +208,9 @@ export const api = {
 
   getDocument: (documentId: string): Promise<DocumentRead> =>
     afetch(`${BASE}/documents/${documentId}`).then(r => parse<DocumentRead>(r)),
+
+  deleteDocument: (documentId: string): Promise<void> =>
+    afetch(`${BASE}/documents/${documentId}`, { method: "DELETE" }).then(parseVoid),
 
   getEngagement: (id: string): Promise<Engagement> =>
     afetch(`${BASE}/engagements/${id}`).then(r => parse<Engagement>(r)),

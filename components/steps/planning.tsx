@@ -3,7 +3,7 @@
 import { createContext, useContext, useEffect, useRef, useState, type CSSProperties, type ReactNode } from "react"
 import { Check, ChevronDown, Globe, Upload, X } from "lucide-react"
 import { cn } from "@/lib/utils"
-import { api } from "@/lib/api"
+import { api, type DocumentRead } from "@/lib/api"
 
 export type SourceId = "financials" | "agreements" | "public" | "interview"
 
@@ -96,7 +96,7 @@ function uploadErrorMessage(err: unknown): string {
 
 // uploading → sent, awaiting response; processing → backend embedding; done → embedded; error → rejected/failed
 type UploadStatus = "uploading" | "processing" | "done" | "error"
-interface UploadItem { id: number; name: string; status: UploadStatus; error?: string }
+interface UploadItem { id: number; documentId?: string; name: string; status: UploadStatus; error?: string }
 
 // Backend DocumentStatus → chip status. Poll until it settles (embedded/failed).
 const DOC_STATUS: Record<string, UploadStatus> = {
@@ -106,12 +106,41 @@ const STATUS_LABEL: Record<UploadStatus, string> = {
   uploading: "Uploading…", processing: "Processing…", done: "Processed", error: "Failed",
 }
 
+const uploadItemFromDocument = (doc: DocumentRead, id: number): UploadItem => ({
+  id,
+  documentId: doc.id,
+  name: doc.original_filename,
+  status: DOC_STATUS[doc.status] ?? "processing",
+  error: doc.error ?? undefined,
+})
+
 function UploadZone({ kind, accept = "*", hint }: { kind: SourceId; accept?: string; hint?: string }) {
   const { engagementId } = useContext(PlanningCtx)
   const [dragging, setDragging] = useState(false)
   const [items, setItems] = useState<UploadItem[]>([])
   const inputRef = useRef<HTMLInputElement>(null)
   const nextId = useRef(0)
+
+  useEffect(() => {
+    if (!engagementId) {
+      setItems([])
+      return
+    }
+    let cancelled = false
+    api.getEngagement(engagementId)
+      .then(eng => {
+        if (cancelled) return
+        const docs = eng.sources.filter(source => source.kind === kind).flatMap(source => source.documents)
+        const entries = docs.map(doc => uploadItemFromDocument(doc, nextId.current++))
+        setItems(entries)
+        entries.forEach(entry => {
+          if (entry.documentId && entry.status === "processing") void pollDoc(entry.id, entry.documentId)
+        })
+      })
+      .catch(err => console.error("[veritax] failed to load uploaded documents:", err))
+    return () => { cancelled = true }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [engagementId, kind])
 
   // Poll one document's processing status until it settles, then reflect it on its chip.
   // Ceiling is generous — extracting + embedding a large PDF can take a few minutes.
@@ -150,7 +179,7 @@ function UploadZone({ kind, accept = "*", hint }: { kind: SourceId; accept?: str
       // Backend returns documents in file order — correlate each chip to its doc and poll.
       setItems(p => p.map(x => {
         const idx = entries.findIndex(e => e.id === x.id)
-        return idx >= 0 && docs[idx] ? { ...x, status: "processing" as UploadStatus } : x
+        return idx >= 0 && docs[idx] ? { ...x, documentId: docs[idx].id, status: DOC_STATUS[docs[idx].status] ?? "processing" } : x
       }))
       entries.forEach((e, idx) => { if (docs[idx]) void pollDoc(e.id, docs[idx].id) })
     } catch (err) {
@@ -159,7 +188,15 @@ function UploadZone({ kind, accept = "*", hint }: { kind: SourceId; accept?: str
     }
   }
 
-  const removeFile = (id: number) => setItems(p => p.filter(x => x.id !== id))
+  const removeFile = (item: UploadItem) => {
+    setItems(p => p.filter(x => x.id !== item.id))
+    if (item.documentId) {
+      api.deleteDocument(item.documentId).catch(err => {
+        console.error("[veritax] delete document failed:", err)
+        setItems(p => [...p, item])
+      })
+    }
+  }
 
   return (
     <div>
@@ -203,7 +240,7 @@ function UploadZone({ kind, accept = "*", hint }: { kind: SourceId; accept?: str
                 {f.status === "done" && <Check size={11} style={{ color: "var(--color-text-success-soft)", flexShrink: 0 }} />}
                 {f.status === "error" && <span style={{ color: "var(--color-text-danger-soft)" }}>!</span>}
                 <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{f.name}</span>
-                <button type="button" onClick={e => { e.stopPropagation(); removeFile(f.id) }}
+                <button type="button" onClick={e => { e.stopPropagation(); removeFile(f) }}
                   style={{ background: "none", border: "none", cursor: "pointer", color: "var(--color-text-tertiary)", lineHeight: 1, padding: 0, flexShrink: 0 }}>
                   <X size={10} />
                 </button>

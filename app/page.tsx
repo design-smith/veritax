@@ -207,49 +207,55 @@ export default function Page() {
           </>
         )}
 
-        {/* Compliance — a second top-level page */}
+        {/* Demo-only pages stay visible, but disabled on the live app until backend support exists. */}
         <button
           type="button"
-          onClick={() => setPage("compliance")}
+          disabled
+          title="Coming soon"
           style={{
             display: "flex", alignItems: "center", gap: "0.5rem", marginTop: "0.25rem",
             padding: "0.6rem 0.75rem", border: "none", borderRadius: "6px",
-            background: page === "compliance" ? "#ececec" : "transparent",
-            cursor: "pointer", width: "100%",
-            fontSize: "14px", fontWeight: 400, color: "#000",
+            background: "transparent",
+            cursor: "not-allowed", width: "100%",
+            fontSize: "14px", fontWeight: 400, color: "#aaa",
+            opacity: 0.55,
           }}
         >
-          <CalendarDays size={16} strokeWidth={1.5} style={{ flexShrink: 0 }} />
+          <CalendarDays size={16} strokeWidth={1.5} style={{ flexShrink: 0, color: "#aaa" }} />
           <span style={{ flex: 1, textAlign: "left" }}>Compliance</span>
         </button>
 
         <button
           type="button"
-          onClick={() => setPage("monitoring")}
+          disabled
+          title="Coming soon"
           style={{
             display: "flex", alignItems: "center", gap: "0.5rem", marginTop: "0.25rem",
             padding: "0.6rem 0.75rem", border: "none", borderRadius: "6px",
-            background: page === "monitoring" ? "#ececec" : "transparent",
-            cursor: "pointer", width: "100%",
-            fontSize: "14px", fontWeight: 400, color: "#000",
+            background: "transparent",
+            cursor: "not-allowed", width: "100%",
+            fontSize: "14px", fontWeight: 400, color: "#aaa",
+            opacity: 0.55,
           }}
         >
-          <Activity size={16} strokeWidth={1.5} style={{ flexShrink: 0 }} />
+          <Activity size={16} strokeWidth={1.5} style={{ flexShrink: 0, color: "#aaa" }} />
           <span style={{ flex: 1, textAlign: "left" }}>Monitoring</span>
         </button>
 
         <button
           type="button"
-          onClick={() => setPage("defense")}
+          disabled
+          title="Coming soon"
           style={{
             display: "flex", alignItems: "center", gap: "0.5rem", marginTop: "0.25rem",
             padding: "0.6rem 0.75rem", border: "none", borderRadius: "6px",
-            background: page === "defense" ? "#ececec" : "transparent",
-            cursor: "pointer", width: "100%",
-            fontSize: "14px", fontWeight: 400, color: "#000",
+            background: "transparent",
+            cursor: "not-allowed", width: "100%",
+            fontSize: "14px", fontWeight: 400, color: "#aaa",
+            opacity: 0.55,
           }}
         >
-          <ShieldCheck size={16} strokeWidth={1.5} style={{ flexShrink: 0 }} />
+          <ShieldCheck size={16} strokeWidth={1.5} style={{ flexShrink: 0, color: "#aaa" }} />
           <span style={{ flex: 1, textAlign: "left" }}>Defense</span>
         </button>
 
