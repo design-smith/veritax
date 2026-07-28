@@ -44,7 +44,7 @@ async def draft_complete(session: AsyncSession, engagement_id: uuid.UUID, jurisd
     ).scalars().all()
     if not rows:
         return False
-    return all(s not in (DraftStatus.pending, DraftStatus.drafting) for s in rows)
+    return all(s == DraftStatus.drafted for s in rows)
 
 
 # ── Read helpers ─────────────────────────────────────────────────────────────

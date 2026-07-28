@@ -8,12 +8,16 @@ research is a gap-filler only. Documents are passed in directly (no vector searc
 from __future__ import annotations
 
 import json_repair
+import logging
+import time
 from dataclasses import dataclass
 from typing import Protocol
 
 from .config import settings
 from .corpus import DocContext
 from .requirements import ResolvedElement
+
+log = logging.getLogger("veritax")
 
 REGISTER_VOICE = {
     "local": (
@@ -105,6 +109,32 @@ WRITE_SECTION_TOOL = {
     },
 }
 
+WRITE_SECTIONS_TOOL = {
+    "name": "write_sections",
+    "description": "Record drafted section prose and citations for each requested local-file section.",
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "sections": {
+                "type": "array",
+                "description": "Exactly one drafted section per requested section.",
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "section_number": {
+                            "type": "integer",
+                            "description": "The requested section number exactly as listed in the prompt.",
+                        },
+                        **WRITE_SECTION_TOOL["input_schema"]["properties"],
+                    },
+                    "required": ["section_number", *WRITE_SECTION_TOOL["input_schema"]["required"]],
+                },
+            }
+        },
+        "required": ["sections"],
+    },
+}
+
 
 @dataclass
 class Citation:
@@ -124,6 +154,13 @@ class DraftResult:
 class Drafter(Protocol):
     def draft(self, element: ResolvedElement, register: str, documents: list[DocContext],
               coverage_note: str) -> DraftResult: ...
+    def draft_batch(
+        self,
+        elements: list[ResolvedElement],
+        register: str,
+        documents: list[DocContext],
+        coverage_notes: dict[int, str],
+    ) -> dict[int, DraftResult]: ...
 
 
 def _prompt(element: ResolvedElement, register: str, documents: list[DocContext], coverage_note: str) -> str:
@@ -144,6 +181,64 @@ def _prompt(element: ResolvedElement, register: str, documents: list[DocContext]
         f"{docs}\n\n"
         "Draft this one section now and call write_section."
     )
+
+
+def _batch_prompt(
+    elements: list[ResolvedElement],
+    register: str,
+    documents: list[DocContext],
+    coverage_notes: dict[int, str],
+) -> str:
+    docs = "\n\n".join(
+        f"--- SOURCE: {d.filename} (type: {d.kind}) ---\n{d.text.strip() or '(no extractable text)'}"
+        for d in documents
+    ) or "(no confidential documents were provided)"
+    voice = REGISTER_VOICE.get(register, REGISTER_VOICE["local"])
+    blocks: list[str] = []
+    for i, element in enumerate(elements, 1):
+        subs = "\n".join(f"    - {s}" for s in element.sub_requirements) or "    (none)"
+        note = coverage_notes.get(i, "")
+        blocks.append(
+            f"SECTION {i}: {element.element_name}\n"
+            f"  WHAT THIS SECTION MUST CONTAIN: {element.description}\n"
+            f"  SUB-REQUIREMENTS:\n{subs}\n"
+            f"  COVERAGE NOTE: {note or '(none)'}"
+        )
+    return (
+        f"{voice}\n\n"
+        f"Draft EACH of these {len(elements)} transfer-pricing local-file sections against the same "
+        "confidential source materials. Each section must stand on its own, but the narrative should "
+        "be consistent across the batch. Do not merge sections. Do not skip sections.\n\n"
+        f"{chr(10).join(blocks)}\n\n"
+        f"CONFIDENTIAL SOURCE MATERIALS (primary authority):\n{docs}\n\n"
+        "Call write_sections once with exactly one entry per section_number."
+    )
+
+
+def _draft_result_from(payload: dict) -> DraftResult:
+    cites = [
+        Citation(
+            marker=c["marker"],
+            kind=c["kind"],
+            source_label=c["source_label"],
+            quote=c.get("quote", ""),
+            url=c.get("url"),
+        )
+        for c in payload.get("citations", [])
+    ]
+    return DraftResult(content=payload["content"], citations=cites)
+
+
+def _draft_results_from(payload: dict) -> dict[int, DraftResult]:
+    out: dict[int, DraftResult] = {}
+    for item in payload.get("sections", []):
+        if not isinstance(item, dict):
+            continue
+        section_number = item.get("section_number")
+        if not isinstance(section_number, int) or not item.get("content"):
+            continue
+        out[section_number] = _draft_result_from(item)
+    return out
 
 
 class AnthropicDrafter:
@@ -170,19 +265,28 @@ class AnthropicDrafter:
         )
         for block in resp.content:
             if getattr(block, "type", None) == "tool_use" and block.name == "write_section":
-                d = block.input
-                cites = [
-                    Citation(
-                        marker=c["marker"],
-                        kind=c["kind"],
-                        source_label=c["source_label"],
-                        quote=c.get("quote", ""),
-                        url=c.get("url"),
-                    )
-                    for c in d.get("citations", [])
-                ]
-                return DraftResult(content=d["content"], citations=cites)
+                return _draft_result_from(block.input)
         raise RuntimeError("drafter returned no write_section block")
+
+    def draft_batch(self, elements, register, documents, coverage_notes):
+        prompt = _batch_prompt(elements, register, documents, coverage_notes)
+        log.info("draft_batch[anthropic] START %d section(s) (prompt %d chars, %d docs)",
+                 len(elements), len(prompt), len(documents))
+        t0 = time.monotonic()
+        resp = self._get_client().messages.create(
+            model=self._model,
+            max_tokens=8000,
+            system=SYSTEM_PROMPT,
+            tools=[WEB_SEARCH_TOOL, WRITE_SECTIONS_TOOL],
+            messages=[{"role": "user", "content": prompt}],
+        )
+        for block in resp.content:
+            if getattr(block, "type", None) == "tool_use" and block.name == "write_sections":
+                results = _draft_results_from(block.input)
+                log.info("draft_batch[anthropic] DONE %d/%d section(s) in %.1fs",
+                         len(results), len(elements), time.monotonic() - t0)
+                return results
+        raise RuntimeError("drafter returned no write_sections block")
 
 
 class DeepSeekDrafter:
@@ -220,22 +324,49 @@ class DeepSeekDrafter:
             tools=[tool],
             tool_choice={"type": "function", "function": {"name": "write_section"}},
             extra_body={"thinking": {"type": "disabled"}},  # off: faster, no token burn, forced tool_choice works
+            timeout=120,
         )
         msg = resp.choices[0].message
         if not msg.tool_calls:
             raise RuntimeError(f"DeepSeek returned no tool call: {(msg.content or '')[:200]}")
-        d = json_repair.loads(msg.tool_calls[0].function.arguments)  # tolerant of malformed tool JSON
-        cites = [
-            Citation(
-                marker=c["marker"],
-                kind=c["kind"],
-                source_label=c["source_label"],
-                quote=c.get("quote", ""),
-                url=c.get("url"),
+        return _draft_result_from(json_repair.loads(msg.tool_calls[0].function.arguments))
+
+    def draft_batch(self, elements, register, documents, coverage_notes):
+        tool = {
+            "type": "function",
+            "function": {
+                "name": "write_sections",
+                "description": WRITE_SECTIONS_TOOL["description"],
+                "parameters": WRITE_SECTIONS_TOOL["input_schema"],
+            },
+        }
+        prompt = _batch_prompt(elements, register, documents, coverage_notes)
+        log.info("draft_batch[deepseek] START %d section(s) (prompt %d chars, %d docs)",
+                 len(elements), len(prompt), len(documents))
+        t0 = time.monotonic()
+        try:
+            resp = self._get_client().chat.completions.create(
+                model=self._model,
+                max_tokens=8192,
+                messages=[
+                    {"role": "system", "content": SYSTEM_PROMPT_NO_WEB},
+                    {"role": "user", "content": prompt},
+                ],
+                tools=[tool],
+                tool_choice={"type": "function", "function": {"name": "write_sections"}},
+                extra_body={"thinking": {"type": "disabled"}},
+                timeout=180,
             )
-            for c in d.get("citations", [])
-        ]
-        return DraftResult(content=d["content"], citations=cites)
+        except Exception:
+            log.exception("draft_batch[deepseek] call FAILED after %.1fs", time.monotonic() - t0)
+            raise
+        msg = resp.choices[0].message
+        if not msg.tool_calls:
+            raise RuntimeError(f"DeepSeek returned no tool call: {(msg.content or '')[:200]}")
+        results = _draft_results_from(json_repair.loads(msg.tool_calls[0].function.arguments))
+        log.info("draft_batch[deepseek] DONE %d/%d section(s) in %.1fs",
+                 len(results), len(elements), time.monotonic() - t0)
+        return results
 
 
 class FakeDrafter:
@@ -256,3 +387,9 @@ class FakeDrafter:
             f"Requirements."
         )
         return DraftResult(content, [])
+
+    def draft_batch(self, elements, register, documents, coverage_notes):
+        return {
+            i: self.draft(element, register, documents, coverage_notes.get(i, ""))
+            for i, element in enumerate(elements, 1)
+        }

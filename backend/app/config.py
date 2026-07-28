@@ -26,6 +26,7 @@ class Settings(BaseSettings):
     # Requirements assessed this many elements per LLM call (shared context sent once). 1 = strict
     # one-call-per-element (today's behaviour) — the instant rollback if batching ever regresses quality.
     assess_batch_size: int = 5
+    draft_batch_size: int = 4
 
     # Anthropic — ASSESSMENT_MODEL (fast, per-requirement) + DRAFT_MODEL (quality, draft & risks).
     anthropic_api_key: str = ""

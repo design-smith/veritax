@@ -277,6 +277,24 @@ async def _apply(session: AsyncSession, row: RequirementCoverage, element, docum
         row.error = str(exc)[:1000]
 
 
+async def _mark_pending_failed(session_factory: async_sessionmaker, engagement_id: uuid.UUID,
+                               jurisdiction: str, error: str) -> None:
+    async with session_factory() as session:
+        rows = (
+            await session.execute(
+                select(RequirementCoverage).where(
+                    RequirementCoverage.engagement_id == engagement_id,
+                    RequirementCoverage.jurisdiction == jurisdiction,
+                    RequirementCoverage.status == CoverageStatus.pending,
+                )
+            )
+        ).scalars().all()
+        for row in rows:
+            row.status = CoverageStatus.failed
+            row.error = error[:1000]
+        await session.commit()
+
+
 async def run_assessment(session_factory: async_sessionmaker, assessor: Assessor, embedder: Embedder,
                          engagement_id: uuid.UUID, jurisdiction: str) -> None:
     """Background job. Two passes over the pending rows:
@@ -348,6 +366,7 @@ async def run_assessment(session_factory: async_sessionmaker, assessor: Assessor
         # A crash here (setup/retrieval) would otherwise leave rows stuck 'pending' silently.
         log.exception("run_assessment CRASHED engagement=%s jurisdiction=%s after %.1fs",
                       engagement_id, jurisdiction, time.monotonic() - t0)
+        await _mark_pending_failed(session_factory, engagement_id, jurisdiction, "assessment job crashed")
 
 
 # ── Endpoints ────────────────────────────────────────────────────────────────

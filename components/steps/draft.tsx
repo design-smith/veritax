@@ -87,7 +87,9 @@ export default function DraftStep({ engagementId, jurisdictions, entity, onConti
   }, [jumpTo])
 
   const draft = draftByJuris[activeJurisdiction] ?? null
-  const complete = !!draft && draft.summary.total > 0 && draft.summary.pending === 0
+  const failedSections = draft?.sections.filter(s => s.status === "failed") ?? []
+  const failed = failedSections.length > 0
+  const complete = !!draft && draft.summary.total > 0 && draft.summary.pending === 0 && !failed
 
   // Assemble the whole jurisdiction into one A4 document once its sections are all drafted.
   const sfdt = useMemo(() => {
@@ -141,7 +143,19 @@ export default function DraftStep({ engagementId, jurisdictions, entity, onConti
             Couldn’t load draft. Is the backend running? ({error})
           </p>
         )}
-        {!error && !complete && (
+        {!error && failed && (
+          <div style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: "0.625rem", color: "var(--color-text-tertiary)", padding: "2rem", textAlign: "center" }}>
+            <p style={{ fontSize: "var(--font-text-sm-size)", color: "var(--color-text-danger-soft)", margin: 0 }}>
+              Drafting failed for {failedSections.length} section{failedSections.length === 1 ? "" : "s"} in {activeJurisdiction}.
+            </p>
+            {failedSections[0] && (
+              <p style={{ fontSize: "var(--font-text-xs-size)", color: "var(--color-text-secondary)", margin: 0, maxWidth: 520 }}>
+                {failedSections[0].element_name}: {failedSections[0].error || "No backend error returned."}
+              </p>
+            )}
+          </div>
+        )}
+        {!error && !failed && !complete && (
           <div style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: "0.5rem", color: "var(--color-text-tertiary)" }}>
             <p style={{ display: "flex", alignItems: "center", gap: "0.5rem", fontSize: "var(--font-text-sm-size)" }}>
               <Loader2 size={14} className="animate-spin" /> Drafting {activeJurisdiction}…
@@ -156,11 +170,12 @@ export default function DraftStep({ engagementId, jurisdictions, entity, onConti
 
       {/* Continue */}
       <div style={{ borderTop: "1px solid var(--color-border)", padding: "0.875rem 3.5rem", background: "var(--color-surface)", flexShrink: 0 }}>
-        <button type="button" onClick={onContinue} style={{
+        <button type="button" disabled={!complete} onClick={onContinue} style={{
           height: "var(--control-size-md)", padding: "0 var(--control-gutter-lg)",
           borderRadius: "var(--control-radius-md)", border: "none",
-          background: "var(--color-background-primary-solid)", color: "var(--color-text-inverse)",
-          fontSize: "var(--control-font-size-md)", fontWeight: "var(--font-weight-medium)", cursor: "pointer",
+          background: complete ? "var(--color-background-primary-solid)" : "var(--alpha-08)",
+          color: complete ? "var(--color-text-inverse)" : "var(--color-text-tertiary)",
+          fontSize: "var(--control-font-size-md)", fontWeight: "var(--font-weight-medium)", cursor: complete ? "pointer" : "not-allowed",
         }}>Continue to Risks</button>
       </div>
     </div>
