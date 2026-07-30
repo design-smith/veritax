@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import logging
+import time
 from collections.abc import AsyncIterator
 
 from sqlalchemy import select, text
@@ -10,6 +12,8 @@ from .models import CONNECTOR_SEED, Base, Connector
 
 # ponytail: create_all + a seed helper instead of Alembic. Greenfield, single schema, no data to
 # migrate yet. Add Alembic when the Requirements stage starts evolving the schema.
+
+log = logging.getLogger("veritax")
 
 
 def _normalize_db_url(url: str) -> str:
@@ -27,7 +31,9 @@ _url = _normalize_db_url(settings.database_url)
 # Managed Postgres (Supabase) requires SSL; its pooler (pgbouncer) rejects cached prepared
 # statements. Apply both for any non-local database; skip for localhost.
 _is_local = "localhost" in _url or "127.0.0.1" in _url
-_connect_args: dict = {} if _is_local else {"ssl": "require", "statement_cache_size": 0}
+_connect_args: dict = {"timeout": settings.database_connect_timeout}
+if not _is_local:
+    _connect_args.update({"ssl": "require", "statement_cache_size": 0})
 
 engine = create_async_engine(_url, pool_pre_ping=True, connect_args=_connect_args)
 SessionFactory = async_sessionmaker(engine, expire_on_commit=False)
@@ -40,28 +46,51 @@ async def get_session() -> AsyncIterator[AsyncSession]:
 
 async def init_db(eng=engine) -> None:
     """Create the pgvector extension, all tables, and seed the connector registry."""
-    async with eng.begin() as conn:
-        await conn.execute(text("CREATE EXTENSION IF NOT EXISTS vector"))
-        await conn.run_sync(Base.metadata.create_all)
-        # No Alembic: add newer columns idempotently so an already-created prod table gets them too.
-        await conn.execute(text("ALTER TABLE engagements ADD COLUMN IF NOT EXISTS user_id uuid"))
-        await conn.execute(text("CREATE INDEX IF NOT EXISTS ix_engagements_user_id ON engagements (user_id)"))
-        await conn.execute(text(
-            "ALTER TABLE documents ADD COLUMN IF NOT EXISTS status_updated_at "
-            "timestamp with time zone DEFAULT now()"
-        ))
-        await conn.execute(text(
-            "ALTER TABLE requirement_coverage ADD COLUMN IF NOT EXISTS status_updated_at "
-            "timestamp with time zone DEFAULT now()"
-        ))
-        await conn.execute(text(
-            "ALTER TABLE draft_sections ADD COLUMN IF NOT EXISTS status_updated_at "
-            "timestamp with time zone DEFAULT now()"
-        ))
+    t0 = time.monotonic()
+    log.info("db init: starting against %s database", "local" if _is_local else "managed")
+    try:
+        async with eng.begin() as conn:
+            log.info("db init: connected in %.1fs", time.monotonic() - t0)
+            await conn.execute(text("CREATE EXTENSION IF NOT EXISTS vector"))
+            log.info("db init: pgvector extension ready")
+            await conn.run_sync(Base.metadata.create_all)
+            log.info("db init: metadata schema ready")
+            # No Alembic: add newer columns idempotently so an already-created prod table gets them too.
+            await conn.execute(text("ALTER TABLE engagements ADD COLUMN IF NOT EXISTS user_id uuid"))
+            await conn.execute(text("CREATE INDEX IF NOT EXISTS ix_engagements_user_id ON engagements (user_id)"))
+            await conn.execute(text(
+                "ALTER TABLE documents ADD COLUMN IF NOT EXISTS status_updated_at "
+                "timestamp with time zone DEFAULT now()"
+            ))
+            await conn.execute(text(
+                "ALTER TABLE requirement_coverage ADD COLUMN IF NOT EXISTS status_updated_at "
+                "timestamp with time zone DEFAULT now()"
+            ))
+            await conn.execute(text(
+                "ALTER TABLE draft_sections ADD COLUMN IF NOT EXISTS status_updated_at "
+                "timestamp with time zone DEFAULT now()"
+            ))
+            await conn.execute(text(
+                "ALTER TABLE draft_sections ADD COLUMN IF NOT EXISTS tables jsonb NOT NULL DEFAULT '[]'::jsonb"
+            ))
+            await conn.execute(text(
+                "ALTER TABLE draft_sections ADD COLUMN IF NOT EXISTS charts jsonb NOT NULL DEFAULT '[]'::jsonb"
+            ))
+            await conn.execute(text(
+                "ALTER TABLE risk_evidence ADD COLUMN IF NOT EXISTS source_label text"
+            ))
+            await conn.execute(text(
+                "ALTER TABLE risk_evidence ADD COLUMN IF NOT EXISTS verified boolean NOT NULL DEFAULT false"
+            ))
+            log.info("db init: idempotent column updates ready")
 
-    async with async_sessionmaker(eng, expire_on_commit=False)() as session:
-        existing = set((await session.execute(select(Connector.provider))).scalars())
-        for row in CONNECTOR_SEED:
-            if row["provider"] not in existing:
-                session.add(Connector(**row))
-        await session.commit()
+        async with async_sessionmaker(eng, expire_on_commit=False)() as session:
+            existing = set((await session.execute(select(Connector.provider))).scalars())
+            for row in CONNECTOR_SEED:
+                if row["provider"] not in existing:
+                    session.add(Connector(**row))
+            await session.commit()
+        log.info("db init: complete in %.1fs", time.monotonic() - t0)
+    except Exception:
+        log.exception("db init: failed after %.1fs", time.monotonic() - t0)
+        raise

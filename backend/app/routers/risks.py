@@ -5,11 +5,13 @@ import uuid
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
-from sqlalchemy import delete, select
+from sqlalchemy import delete, func, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
+from sqlalchemy.orm import selectinload
 
-from ..corpus import document_filename_map, retrieve_documents
+from ..config import settings
+from ..corpus import document_contexts_by_id, document_filename_map, retrieve_documents, union_docs
 from ..deps import get_embedder, get_risk_analyzer, get_session, get_session_factory, require_engagement_owner
 from ..embeddings import Embedder
 from ..models import (
@@ -31,6 +33,54 @@ from ..schemas import RiskEvidenceRead, RiskFindingRead, RiskResponse, RiskSumma
 router = APIRouter(tags=["risks"])
 
 SEV_RANK = {RiskSeverity.critical: 0, RiskSeverity.high: 1, RiskSeverity.medium: 2, RiskSeverity.low: 3}
+
+
+def _analysis_mode() -> str:
+    provider = settings.llm_provider.strip().lower()
+    if provider:
+        return provider
+    if settings.deepseek_api_key:
+        return "deepseek"
+    if settings.anthropic_api_key:
+        return "anthropic"
+    return "fake"
+
+
+def _norm(text: str) -> str:
+    return " ".join(text.lower().split())
+
+
+def _evidence_verified(detail: str, draft_text: str, documents, source_filename: str | None) -> bool:
+    needle = _norm(detail)
+    if len(needle) < 16:
+        return False
+    haystacks = [draft_text]
+    if source_filename:
+        haystacks.extend(d.text for d in documents if d.filename == source_filename)
+    else:
+        haystacks.extend(d.text for d in documents)
+    return any(needle in _norm(text) for text in haystacks if text)
+
+
+async def _latest_draft_update(
+    session: AsyncSession,
+    engagement_id: uuid.UUID,
+    jurisdiction: str,
+) -> datetime | None:
+    return (
+        await session.execute(
+            select(func.max(DraftSection.status_updated_at)).where(
+                DraftSection.engagement_id == engagement_id,
+                DraftSection.jurisdiction == jurisdiction,
+            )
+        )
+    ).scalar_one_or_none()
+
+
+def _run_is_fresh(run: RiskRun, latest_draft_update: datetime | None) -> bool:
+    if run.status != RiskRunStatus.done or run.completed_at is None:
+        return False
+    return latest_draft_update is None or latest_draft_update <= run.completed_at
 
 
 # ── Draft-complete gate (Risks runs only on the finished file) ────────────────
@@ -81,10 +131,13 @@ async def _response(session: AsyncSession, engagement_id: uuid.UUID, jurisdictio
         )
     ).scalar_one_or_none()
     findings = list(run.findings) if run else []
+    latest = await _latest_draft_update(session, engagement_id, jurisdiction)
     return RiskResponse(
         jurisdiction=jurisdiction,
         status=run.status.value if run else "not_started",
         error=run.error if run else None,
+        analysis_mode=_analysis_mode(),
+        stale=bool(run and run.status == RiskRunStatus.done and not _run_is_fresh(run, latest)),
         summary=_summary(findings),
         findings=[_to_finding_read(f) for f in findings],
     )
@@ -111,6 +164,7 @@ async def run_analysis(session_factory: async_sessionmaker, analyzer: RiskAnalyz
             sections = (
                 await session.execute(
                     select(DraftSection)
+                    .options(selectinload(DraftSection.citations))
                     .where(DraftSection.engagement_id == engagement_id, DraftSection.jurisdiction == jurisdiction)
                     .order_by(DraftSection.element_order)
                 )
@@ -125,7 +179,11 @@ async def run_analysis(session_factory: async_sessionmaker, analyzer: RiskAnalyz
                 "intercompany services agreement comparables method arm's length intangibles"
             )
             documents = await retrieve_documents(session, engagement_id, embedder, risk_query, k=24)
+            cited_ids = [c.document_id for s in sections for c in s.citations if c.document_id]
+            cited_documents = await document_contexts_by_id(session, cited_ids)
+            documents = union_docs([documents, cited_documents])
             fname_to_docid = await document_filename_map(session, engagement_id)
+            fname_to_docid_ci = {fn.lower(): docid for fn, docid in fname_to_docid.items()}
 
             findings = await asyncio.to_thread(analyzer.analyze, entity_name, jurisdiction, draft_text, documents)
 
@@ -148,9 +206,13 @@ async def run_analysis(session_factory: async_sessionmaker, analyzer: RiskAnalyz
                 session.add(finding)
                 await session.flush()
                 for e in f.evidence:
-                    docid = fname_to_docid.get(e.source_filename) if e.source_filename else None
+                    docid = None
+                    if e.source_filename:
+                        docid = fname_to_docid.get(e.source_filename) or fname_to_docid_ci.get(e.source_filename.lower())
                     session.add(RiskEvidence(
                         finding_id=finding.id, kind=e.kind, reference=e.reference, detail=e.detail,
+                        source_label=e.source_filename,
+                        verified=_evidence_verified(e.detail, draft_text, documents, e.source_filename),
                         document_id=uuid.UUID(docid) if docid else None,
                     ))
                 for i, rec in enumerate(f.recommendations):
@@ -187,7 +249,9 @@ async def start_risks(
             select(RiskRun).where(RiskRun.engagement_id == engagement_id, RiskRun.jurisdiction == jurisdiction)
         )
     ).scalar_one_or_none()
-    if existing is not None and existing.status in (RiskRunStatus.pending, RiskRunStatus.analyzing, RiskRunStatus.done):
+    if existing is not None and existing.status in (RiskRunStatus.pending, RiskRunStatus.analyzing):
+        return await _response(session, engagement_id, jurisdiction)
+    if existing is not None and _run_is_fresh(existing, await _latest_draft_update(session, engagement_id, jurisdiction)):
         return await _response(session, engagement_id, jurisdiction)
 
     if not await draft_complete(session, engagement_id, jurisdiction):

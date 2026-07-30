@@ -1,4 +1,10 @@
 from app.risks import SYSTEM_PROMPT
+from app.requirements import resolve_requirements
+
+
+def _ready_text(jurisdiction: str, text: bytes) -> bytes:
+    required = " ".join(f"{e.element_name} {e.description}" for e in resolve_requirements(jurisdiction))
+    return text + b" " + required.encode()
 
 
 async def _engagement_with_doc(client, text: bytes) -> str:
@@ -12,20 +18,23 @@ async def _engagement_with_doc(client, text: bytes) -> str:
 
 
 async def _draft(client, eid: str, jurisdiction: str) -> None:
+    await client.post(f"/engagements/{eid}/coverage", params={"jurisdiction": jurisdiction})
+    coverage = (await client.get(f"/engagements/{eid}/coverage", params={"jurisdiction": jurisdiction})).json()
+    assert coverage["summary"]["draft_ready"] is True
     await client.post(f"/engagements/{eid}/draft", params={"jurisdiction": jurisdiction})
     # FakeDrafter completes within the request (ASGITransport background).
     await client.get(f"/engagements/{eid}/draft", params={"jurisdiction": jurisdiction})
 
 
 async def test_risks_blocked_until_draft_complete(client):
-    eid = await _engagement_with_doc(client, b"limited-risk distributor; royalty five percent")
+    eid = await _engagement_with_doc(client, _ready_text("Canada", b"limited-risk distributor; royalty five percent"))
     # No draft yet → 409 (mirror of the Requirements rule).
     r = await client.post(f"/engagements/{eid}/risks", params={"jurisdiction": "Canada"})
     assert r.status_code == 409
 
 
 async def test_risks_produces_both_kinds_with_evidence(client):
-    eid = await _engagement_with_doc(client, b"limited-risk distributor; royalty five percent; services at cost")
+    eid = await _engagement_with_doc(client, _ready_text("Canada", b"limited-risk distributor; royalty five percent; services at cost"))
     await _draft(client, eid, "Canada")
 
     started = await client.post(f"/engagements/{eid}/risks", params={"jurisdiction": "Canada"})
@@ -59,7 +68,7 @@ async def test_get_before_start_is_not_started(client):
 
 
 async def test_rerun_replaces_findings(client):
-    eid = await _engagement_with_doc(client, b"placeholder draft material")
+    eid = await _engagement_with_doc(client, _ready_text("Canada", b"placeholder draft material"))
     await _draft(client, eid, "Canada")
     await client.post(f"/engagements/{eid}/risks", params={"jurisdiction": "Canada"})
     await client.post(f"/engagements/{eid}/risks", params={"jurisdiction": "Canada"})

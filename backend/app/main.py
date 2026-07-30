@@ -1,10 +1,13 @@
 from __future__ import annotations
 
+import asyncio
+import time
 from contextlib import asynccontextmanager
 
 from fastapi import Depends, FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from sqlalchemy import text
 
 import logging
 
@@ -30,7 +33,10 @@ if not log.handlers:
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    t0 = time.monotonic()
+    log.info("startup: init_db starting")
     await init_db()
+    log.info("startup: init_db complete in %.1fs", time.monotonic() - t0)
     app.state.session_factory = SessionFactory
     # S3/MinIO when configured; otherwise local filesystem (no external bucket needed).
     if settings.s3_endpoint_url:
@@ -38,10 +44,21 @@ async def lifespan(app: FastAPI):
     else:
         log.warning("No S3 endpoint set — using local filesystem storage at %s", settings.storage_dir)
         storage = LocalStorage()
+    storage_t0 = time.monotonic()
+    log.info("startup: storage init starting (%s)", type(storage).__name__)
     try:
         storage.ensure_bucket()
-    except Exception:  # noqa: BLE001 - app should still boot if storage isn't ready yet
-        log.warning("could not initialise object storage yet")
+        log.info("startup: storage ready in %.1fs", time.monotonic() - storage_t0)
+    except Exception as exc:  # noqa: BLE001 - app should still boot if storage isn't ready yet
+        log.warning("could not initialise object storage yet after %.1fs: %s",
+                    time.monotonic() - storage_t0, exc)
+        if settings.s3_endpoint_url and (
+            "localhost" in settings.s3_endpoint_url or "127.0.0.1" in settings.s3_endpoint_url
+        ):
+            log.warning("startup: local S3 endpoint is unavailable; falling back to filesystem storage at %s",
+                        settings.storage_dir)
+            storage = LocalStorage()
+            storage.ensure_bucket()
     app.state.storage = storage
     if settings.voyage_api_key:
         app.state.embedder = VoyageEmbedder()
@@ -75,6 +92,11 @@ async def lifespan(app: FastAPI):
         app.state.assessor = FakeAssessor()
         app.state.drafter = FakeDrafter()
         app.state.risk_analyzer = FakeRiskAnalyzer()
+    has_satisfied_route = any(
+        getattr(route, "path", None) == "/coverage/{coverage_id}/satisfied"
+        for route in app.routes
+    )
+    log.info("startup: coverage satisfied route registered=%s", has_satisfied_route)
     yield
 
 
@@ -119,3 +141,17 @@ for _router in (
 @app.get("/health", tags=["health"])
 async def health() -> dict:
     return {"ok": True}
+
+
+@app.get("/health/db", tags=["health"])
+async def health_db():
+    try:
+        async with SessionFactory() as session:
+            await asyncio.wait_for(session.execute(text("SELECT 1")), timeout=3)
+        return {"ok": True, "db": True}
+    except Exception as exc:  # noqa: BLE001 - diagnostics endpoint, no traceback needed for every poll
+        log.warning("health/db failed: %s: %s", type(exc).__name__, exc)
+        return JSONResponse(
+            status_code=503,
+            content={"ok": False, "db": False, "error": type(exc).__name__},
+        )

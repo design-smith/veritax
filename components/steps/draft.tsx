@@ -1,23 +1,141 @@
 "use client"
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
-import dynamic from "next/dynamic"
 import { Loader2 } from "lucide-react"
-import { api, type DraftResponse } from "@/lib/api"
-import { markdownToSfdt, type DocSection } from "@/lib/sfdt"
+import { api, type DraftResponse, type DraftSection } from "@/lib/api"
 import { Animate } from "@/components/ui/transition"
+import DraftDocument, { DraftCover } from "./DraftDocument"
 
-// Syncfusion touches the DOM at load — keep it out of SSR.
-const DraftDocEditor = dynamic(() => import("./DraftDocEditor"), {
-  ssr: false,
-  loading: () => (
-    <div style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", color: "var(--color-text-tertiary)", fontSize: "var(--font-text-sm-size)" }}>
-      <Loader2 size={16} className="animate-spin" style={{ marginRight: "0.5rem" }} /> Loading editor…
-    </div>
-  ),
-})
+const FIRST_REVEAL_SECTIONS = 5
+const TYPE_CHARS_PER_TICK = 3
+const TYPE_TICK_MS = 24
 
 const stripLeadingHeading = (content: string) => content.replace(/^\s*#{1,4}\s+.*\n+/, "")
+const stripObjectMarkers = (content: string) => content.replace(/\[\[(table|chart):([^\]]+)\]\]/g, "")
+
+function statusPhrases(entity: string, jurisdiction: string) {
+  const company = entity.trim() || "the company"
+  return [
+    "Merging requirements into the file structure",
+    `Reading the ${company} source record`,
+    "Reconciling coverage notes with source evidence",
+    `Writing cited ${jurisdiction} local-file language`,
+    "Threading citations back to the record",
+    "Smoothing the section narrative",
+  ]
+}
+
+function draftedSections(draft: DraftResponse | null): DraftSection[] {
+  return [...(draft?.sections ?? [])]
+    .filter(s => s.status === "drafted" && !!s.content)
+    .sort((a, b) => a.element_order - b.element_order)
+}
+
+function sectionText(section: DraftSection) {
+  const body = stripObjectMarkers(stripLeadingHeading(section.content ?? "")).trim()
+  return `## ${section.element_order}. ${section.element_name}\n\n${body}\n\n`
+}
+
+function TypedDraftText({ text }: { text: string }) {
+  const blocks = text.split(/\n{2,}/)
+  return (
+    <div style={{ color: "var(--color-text)" }}>
+      {blocks.map((block, idx) => {
+        const value = block.trimEnd()
+        if (!value && idx < blocks.length - 1) return null
+        const heading = value.match(/^(#{1,6})\s*(.*)$/)
+        if (heading) {
+          const level = heading[1].length
+          const HeadingTag = (level <= 2 ? "h2" : "h3") as "h2" | "h3"
+          const style = level <= 2
+            ? { fontSize: "18px", fontWeight: "var(--font-weight-semibold)", margin: "1.5rem 0 0.5rem", color: "var(--color-text)" }
+            : { fontSize: "15px", fontWeight: "var(--font-weight-medium)", margin: "1rem 0 0.375rem", color: "var(--color-text)" }
+          return (
+            <HeadingTag key={idx} style={style}>
+              {heading[2]}
+              {idx === blocks.length - 1 && <span className="vt-type-cursor" />}
+            </HeadingTag>
+          )
+        }
+        return (
+          <p key={idx} style={{ whiteSpace: "pre-wrap", fontSize: "var(--font-text-sm-size)", lineHeight: 1.75, color: "var(--color-text-secondary)", margin: "0 0 0.875rem" }}>
+            {value}
+            {idx === blocks.length - 1 && <span className="vt-type-cursor" />}
+          </p>
+        )
+      })}
+    </div>
+  )
+}
+
+function DraftGenerationPreview({ draft, entity, jurisdiction, complete, onTypedComplete }: {
+  draft: DraftResponse | null
+  entity: string
+  jurisdiction: string
+  complete: boolean
+  onTypedComplete: () => void
+}) {
+  const [typedText, setTypedText] = useState("")
+  const [phraseIndex, setPhraseIndex] = useState(0)
+  const phrases = useMemo(() => statusPhrases(entity, jurisdiction), [entity, jurisdiction])
+  const readySections = useMemo(() => draftedSections(draft), [draft])
+  const total = draft?.summary.total ?? 0
+  const revealAt = Math.min(FIRST_REVEAL_SECTIONS, total || FIRST_REVEAL_SECTIONS)
+  const readyToType = readySections.length >= revealAt || (complete && readySections.length > 0)
+  const sourceText = useMemo(() => readySections.map(sectionText).join("\n"), [readySections])
+
+  useEffect(() => {
+    setTypedText("")
+    setPhraseIndex(0)
+  }, [jurisdiction])
+
+  useEffect(() => {
+    setTypedText(prev => (sourceText.startsWith(prev) ? prev : ""))
+  }, [sourceText])
+
+  useEffect(() => {
+    const timer = setInterval(() => setPhraseIndex(i => (i + 1) % phrases.length), 2600)
+    return () => clearInterval(timer)
+  }, [phrases.length])
+
+  useEffect(() => {
+    if (!readyToType || typedText.length >= sourceText.length) return
+    const timer = setTimeout(() => {
+      setTypedText(sourceText.slice(0, Math.min(sourceText.length, typedText.length + TYPE_CHARS_PER_TICK)))
+    }, TYPE_TICK_MS)
+    return () => clearTimeout(timer)
+  }, [readyToType, sourceText, typedText])
+
+  useEffect(() => {
+    if (complete && sourceText && typedText.length >= sourceText.length) onTypedComplete()
+  }, [complete, onTypedComplete, sourceText, typedText.length])
+
+  if (!readyToType) {
+    return (
+      <Animate enter="fade" duration={150} style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: "0.625rem", color: "var(--color-text-tertiary)", padding: "2rem", textAlign: "center" }}>
+        <Loader2 size={16} className="animate-spin" />
+        <p style={{ fontSize: "var(--font-text-sm-size)", color: "var(--color-text-secondary)", margin: 0 }}>
+          {phrases[phraseIndex]}
+        </p>
+      </Animate>
+    )
+  }
+
+  return (
+    <Animate enter="fade" duration={160} style={{ flex: 1, minHeight: 0, display: "flex", flexDirection: "column", background: "var(--color-surface-secondary)" }}>
+      <div style={{ flexShrink: 0, padding: "0.65rem 3.5rem", display: "flex", alignItems: "center", gap: "0.5rem", color: "var(--color-text-tertiary)", fontSize: "var(--font-text-xs-size)" }}>
+        {!complete && <Loader2 size={12} className="animate-spin" />}
+        <span>{complete ? "Finishing the file" : phrases[phraseIndex]}</span>
+      </div>
+      <div style={{ flex: 1, minHeight: 0, overflowY: "auto" }}>
+        <article style={{ maxWidth: 820, margin: "0 auto 1.5rem", background: "var(--color-surface)", border: "1px solid var(--color-border)", borderRadius: "var(--radius-lg)", padding: "3rem 3.5rem", minHeight: "72vh" }}>
+          <DraftCover entity={entity} jurisdiction={jurisdiction} />
+          <TypedDraftText text={typedText} />
+        </article>
+      </div>
+    </Animate>
+  )
+}
 
 export default function DraftStep({ engagementId, jurisdictions, entity, onContinue, jumpTo, onJumped }: {
   engagementId: string | null
@@ -32,6 +150,7 @@ export default function DraftStep({ engagementId, jurisdictions, entity, onConti
   const [activeJurisdiction, setActive] = useState(jurisdictions[0] ?? "")
   const [error, setError] = useState<string | null>(null)
   const [retrying, setRetrying] = useState(false)
+  const [typedDoneByJuris, setTypedDoneByJuris] = useState<Record<string, boolean>>({})
 
   const draftRef = useRef(draftByJuris); draftRef.current = draftByJuris
   const startedRef = useRef(started); startedRef.current = started
@@ -109,25 +228,11 @@ export default function DraftStep({ engagementId, jurisdictions, entity, onConti
   const failedSections = draft?.sections.filter(s => s.status === "failed") ?? []
   const failed = failedSections.length > 0
   const complete = !!draft && draft.summary.total > 0 && draft.summary.pending === 0 && !failed
+  const typedDone = typedDoneByJuris[activeJurisdiction] === true
 
-  // Assemble the whole jurisdiction into one A4 document once its sections are all drafted.
-  const sfdt = useMemo(() => {
-    if (!complete || !draft) return ""
-    const sections: DocSection[] = draft.sections.map(s => ({
-      heading: `${s.element_order}. ${s.element_name}`,
-      markdown: stripLeadingHeading(s.content ?? ""),
-      bookmark: `sec_${s.element_order}`,
-    }))
-    return markdownToSfdt(
-      { documentTitle: "Transfer Pricing Planning File", entity: entity || "Entity", jurisdiction: activeJurisdiction },
-      sections,
-    )
-  }, [complete, draft, entity, activeJurisdiction])
-
-  const navItems = useMemo(
-    () => (draft?.sections ?? []).map(s => ({ order: s.element_order, name: s.element_name, bookmark: `sec_${s.element_order}` })),
-    [draft],
-  )
+  useEffect(() => {
+    if (!complete) setTypedDoneByJuris(prev => ({ ...prev, [activeJurisdiction]: false }))
+  }, [activeJurisdiction, complete])
 
   if (!engagementId) return <main style={{ flex: 1, padding: "3rem 3.5rem", color: "var(--color-text-tertiary)" }}>Preparing session…</main>
   if (jurisdictions.length === 0) return <main style={{ flex: 1, padding: "3rem 3.5rem", color: "var(--color-text-tertiary)" }}>Select a jurisdiction in Planning first.</main>
@@ -136,26 +241,35 @@ export default function DraftStep({ engagementId, jurisdictions, entity, onConti
     <div style={{ flex: 1, display: "flex", flexDirection: "column", overflow: "hidden" }}>
 
       {/* Jurisdiction tabs */}
-      <div style={{ background: "var(--color-surface)", padding: "1rem 3.5rem 0.75rem", display: "flex", gap: "0.375rem", flexWrap: "wrap", borderBottom: "1px solid var(--color-border)" }}>
-        {jurisdictions.map(j => {
-          const isActive = j === activeJurisdiction
-          const d = draftByJuris[j]
-          const isStarted = started.has(j)
-          const processing = isStarted && (!d || d.summary.pending > 0)
-          return (
-            <button key={j} type="button" onClick={() => selectJurisdiction(j)} title={isStarted ? undefined : "Not drafted yet — click to draft"} style={{
-              display: "inline-flex", alignItems: "center", gap: "0.375rem",
-              padding: "0.25rem 0.75rem", borderRadius: "9999px", border: "none", cursor: "pointer",
-              background: isActive ? "var(--color-background-primary-solid)" : isStarted ? "var(--alpha-06)" : "transparent",
-              color: isActive ? "var(--color-text-inverse)" : isStarted ? "var(--color-text-secondary)" : "var(--color-text-tertiary)",
-              fontSize: "var(--font-text-xs-size)", fontWeight: "var(--font-weight-medium)",
-              opacity: isStarted ? 1 : 0.55, transition: "all var(--transition-duration-basic)",
-            }}>
-              {processing && <Loader2 size={11} className="animate-spin" />}
-              {j}
-            </button>
-          )
-        })}
+      <div style={{ background: "var(--color-surface)", padding: "1rem 3.5rem 0.75rem", display: "flex", alignItems: "center", gap: "0.75rem" }}>
+        <div style={{ flex: 1, minWidth: 0, display: "flex", gap: "0.375rem", flexWrap: "wrap" }}>
+          {jurisdictions.map(j => {
+            const isActive = j === activeJurisdiction
+            const d = draftByJuris[j]
+            const isStarted = started.has(j)
+            const processing = isStarted && (!d || d.summary.pending > 0)
+            return (
+              <button key={j} type="button" onClick={() => selectJurisdiction(j)} title={isStarted ? undefined : "Not drafted yet — click to draft"} style={{
+                display: "inline-flex", alignItems: "center", gap: "0.375rem",
+                padding: "0.25rem 0.75rem", borderRadius: "9999px", border: "none", cursor: "pointer",
+                background: isActive ? "var(--color-background-primary-solid)" : isStarted ? "var(--alpha-06)" : "transparent",
+                color: isActive ? "var(--color-text-inverse)" : isStarted ? "var(--color-text-secondary)" : "var(--color-text-tertiary)",
+                fontSize: "var(--font-text-xs-size)", fontWeight: "var(--font-weight-medium)",
+                opacity: isStarted ? 1 : 0.55, transition: "all var(--transition-duration-basic)",
+              }}>
+                {processing && <Loader2 size={11} className="animate-spin" />}
+                {j}
+              </button>
+            )
+          })}
+        </div>
+        <button type="button" disabled={!complete} onClick={onContinue} style={{
+          height: "var(--control-size-md)", padding: "0 var(--control-gutter-lg)",
+          borderRadius: "var(--control-radius-md)", border: "none", flexShrink: 0,
+          background: complete ? "var(--color-background-primary-solid)" : "var(--alpha-08)",
+          color: complete ? "var(--color-text-inverse)" : "var(--color-text-tertiary)",
+          fontSize: "var(--control-font-size-md)", fontWeight: "var(--font-weight-medium)", cursor: complete ? "pointer" : "not-allowed",
+        }}>Continue to Risks</button>
       </div>
 
       {/* Body — the document editor once drafting is complete, otherwise progress */}
@@ -163,6 +277,11 @@ export default function DraftStep({ engagementId, jurisdictions, entity, onConti
         {error && (
           <p style={{ padding: "1rem 3.5rem", fontSize: "var(--font-text-sm-size)", color: "var(--color-text-danger-soft)" }}>
             Couldn’t load draft. Is the backend running? ({error})
+          </p>
+        )}
+        {draft?.draft_mode === "fake" && (
+          <p style={{ padding: "0.625rem 3.5rem", margin: 0, fontSize: "var(--font-text-xs-size)", color: "#8a5a00", background: "#fff8e5", borderTop: "1px solid #f0d58c", borderBottom: "1px solid #f0d58c" }}>
+            Development mode: this draft is generated by the fake drafter, not a real model.
           </p>
         )}
         {!error && failed && (
@@ -183,32 +302,20 @@ export default function DraftStep({ engagementId, jurisdictions, entity, onConti
             }}>{retrying ? "Retrying..." : "Retry draft"}</button>
           </Animate>
         )}
-        {!error && !failed && !complete && (
-          <Animate enter="fade" duration={150} style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: "0.5rem", color: "var(--color-text-tertiary)" }}>
-            <p style={{ display: "flex", alignItems: "center", gap: "0.5rem", fontSize: "var(--font-text-sm-size)" }}>
-              <Loader2 size={14} className="animate-spin" /> Drafting {activeJurisdiction}…
-            </p>
-            {draft && draft.summary.total > 0 && (
-              <p style={{ fontSize: "var(--font-text-xs-size)" }}>{draft.summary.drafted} of {draft.summary.total} sections</p>
-            )}
-          </Animate>
+        {!error && !failed && (!complete || !typedDone) && (
+          <DraftGenerationPreview
+            draft={draft}
+            entity={entity}
+            jurisdiction={activeJurisdiction}
+            complete={complete}
+            onTypedComplete={() => setTypedDoneByJuris(prev => ({ ...prev, [activeJurisdiction]: true }))}
+          />
         )}
-        {!error && complete && (
+        {!error && complete && typedDone && draft && (
           <Animate enter="fade" duration={160} style={{ flex: 1, minHeight: 0, display: "flex", flexDirection: "column" }}>
-            <DraftDocEditor sfdt={sfdt} fileName={`${entity || "Entity"} ${activeJurisdiction}`} sections={navItems} />
+            <DraftDocument engagementId={engagementId} jurisdiction={activeJurisdiction} entity={entity} sections={draft.sections} />
           </Animate>
         )}
-      </div>
-
-      {/* Continue */}
-      <div style={{ borderTop: "1px solid var(--color-border)", padding: "0.875rem 3.5rem", background: "var(--color-surface)", flexShrink: 0 }}>
-        <button type="button" disabled={!complete} onClick={onContinue} style={{
-          height: "var(--control-size-md)", padding: "0 var(--control-gutter-lg)",
-          borderRadius: "var(--control-radius-md)", border: "none",
-          background: complete ? "var(--color-background-primary-solid)" : "var(--alpha-08)",
-          color: complete ? "var(--color-text-inverse)" : "var(--color-text-tertiary)",
-          fontSize: "var(--control-font-size-md)", fontWeight: "var(--font-weight-medium)", cursor: complete ? "pointer" : "not-allowed",
-        }}>Continue to Risks</button>
       </div>
     </div>
   )

@@ -3,6 +3,7 @@ from __future__ import annotations
 import uuid
 
 from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, HTTPException, UploadFile
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from ..auth import AuthUser
@@ -17,8 +18,8 @@ from ..deps import (
 )
 from ..embeddings import Embedder
 from ..ingest import embed_document, get_or_create_uploaded_source, store_upload
-from ..models import Document, Engagement, Source, SourceKind
-from ..schemas import DocumentRead
+from ..models import Document, DocumentChunk, Engagement, Source, SourceKind
+from ..schemas import DocumentRead, DocumentTextRead
 from ..storage import Storage
 
 router = APIRouter(tags=["documents"])
@@ -85,6 +86,30 @@ async def get_document(
     user: AuthUser = Depends(get_current_user),
 ) -> Document:
     return await _owned_document(session, document_id, user)
+
+
+@router.get("/documents/{document_id}/text", response_model=DocumentTextRead)
+async def get_document_text(
+    document_id: uuid.UUID,
+    session: AsyncSession = Depends(get_session),
+    user: AuthUser = Depends(get_current_user),
+) -> DocumentTextRead:
+    doc = await _owned_document(session, document_id, user)
+    chunks = (
+        await session.execute(
+            select(DocumentChunk.content)
+            .where(DocumentChunk.document_id == doc.id)
+            .order_by(DocumentChunk.chunk_index)
+        )
+    ).scalars().all()
+    if not chunks:
+        raise HTTPException(status_code=409, detail="document text is not indexed yet")
+    return DocumentTextRead(
+        id=doc.id,
+        original_filename=doc.original_filename,
+        status=doc.status,
+        text="\n\n".join(chunks),
+    )
 
 
 @router.delete("/documents/{document_id}", status_code=204)

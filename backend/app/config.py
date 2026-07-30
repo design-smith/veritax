@@ -1,10 +1,15 @@
+from pathlib import Path
+
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+BACKEND_DIR = Path(__file__).resolve().parents[1]
 
 
 class Settings(BaseSettings):
-    model_config = SettingsConfigDict(env_file=".env", extra="ignore")
+    model_config = SettingsConfigDict(env_file=BACKEND_DIR / ".env", extra="ignore")
 
     database_url: str = "postgresql+asyncpg://veritax:veritax@localhost:5432/veritax"
+    database_connect_timeout: float = 4.0
 
     # Object storage. Leave S3_ENDPOINT_URL unset to use local filesystem storage (no bucket needed).
     s3_endpoint_url: str = ""

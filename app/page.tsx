@@ -43,9 +43,13 @@ export default function Page() {
   const [localOpen, setLocalOpen] = useState(true)
   const [mounted, setMounted] = useState<Set<Step>>(new Set([1]))  // steps stay mounted once visited
   const [page, setPage] = useState<"workflow" | "compliance" | "monitoring" | "defense">("workflow")
+  const [apiOffline, setApiOffline] = useState(false)
+  const [draftReady, setDraftReady] = useState(false)
 
   const refreshFiles = useCallback(() => {
-    api.listEngagements().then(setFiles).catch(err => console.error("[veritax] failed to list files:", err))
+    api.listEngagements()
+      .then(list => { setFiles(list); setApiOffline(false) })
+      .catch(() => { setFiles([]); setApiOffline(true) })
   }, [])
 
   // Rehydrate a file's scope from the backend (entity, jurisdictions, which source rows are on).
@@ -67,19 +71,30 @@ export default function Page() {
   useEffect(() => {
     let cancelled = false
     ;(async () => {
+      try {
+        await api.health()
+        if (!cancelled) setApiOffline(false)
+      } catch {
+        if (!cancelled) setApiOffline(true)
+        return
+      }
       const stored = localStorage.getItem(LS_ID)
       const resumed = stored ? await loadEngagement(stored) : false
       if (cancelled) return
       if (resumed) {
         const s = Number(localStorage.getItem(LS_STEP))
-        if (s >= 2 && s <= 4) { setStep(s as Step); setVisited(new Set([1, s as Step])) }
+        if (s >= 2 && s <= 4) {
+          const resumedStep = (s >= 3 ? 2 : s) as Step
+          setStep(resumedStep)
+          setVisited(new Set([1, resumedStep]))
+        }
       } else {
         try {
           const { id } = await api.createEngagement()  // uploads need an id to attach to
           if (cancelled) return
           setEngagementId(id)
           localStorage.setItem(LS_ID, id)
-        } catch (err) { console.error("[veritax] failed to create engagement:", err) }
+        } catch { setApiOffline(true) }
       }
       refreshFiles()
     })()
@@ -90,29 +105,37 @@ export default function Page() {
   useEffect(() => { setMounted(m => (m.has(step) ? m : new Set([...m, step]))) }, [step])  // mount a step on first visit, keep it
   useEffect(() => {
     if (!engagementId) return
-    api.recoverPipeline(engagementId).catch(err => console.error("[veritax] pipeline recovery failed:", err))
+    api.recoverPipeline(engagementId).catch(() => setApiOffline(true))
   }, [engagementId])
 
   function navigate(s: Step) {
+    if (s >= 3 && !draftReady) return
     setStep(s)
     setVisited(prev => new Set(prev).add(s))
+  }
+
+  function continueToDraft() {
+    setDraftReady(true)
+    setStep(3)
+    setVisited(prev => new Set(prev).add(3))
   }
 
   function newFile() {
     // Start a fresh Local File pipeline: jump into Planning immediately, then create the engagement
     // in the background so the pipeline shows instantly even if the create call is slow.
-    setEntity(""); setJ([]); setSources(new Set()); setDraftJump(null)
+    setEntity(""); setJ([]); setSources(new Set()); setDraftJump(null); setDraftReady(false)
     setVisited(new Set([1])); setStep(1); setMounted(new Set([1]))
     setPage("workflow")
     setEngagementId(null)
     api.createEngagement()
-      .then(({ id }) => { setEngagementId(id); localStorage.setItem(LS_ID, id); refreshFiles() })
-      .catch(err => console.error("[veritax] failed to create file:", err))
+      .then(({ id }) => { setApiOffline(false); setEngagementId(id); localStorage.setItem(LS_ID, id); refreshFiles() })
+      .catch(() => setApiOffline(true))
   }
 
   async function openFile(id: string) {
     if (id !== engagementId) await loadEngagement(id)
-    setVisited(new Set([1, 2, 3, 4]))  // an existing file — unlock all steps
+    setDraftReady(false)
+    setVisited(new Set([1, 2]))
     setMounted(new Set([2]))           // fresh mount for the opened file
     setStep(2)                          // land on Requirements so progress is visible
     setDraftJump(null)
@@ -120,16 +143,30 @@ export default function Page() {
   }
 
   async function signOut() {
-    await createClient().auth.signOut()
+    const supabase = createClient()
+    await supabase.auth.signOut({ scope: "local" }).catch(error => {
+      console.warn("[veritax] local sign-out failed", {
+        name: error instanceof Error ? error.name : "UnknownError",
+        message: error instanceof Error ? error.message : String(error),
+      })
+    })
+    supabase.auth.signOut().catch(error => {
+      console.warn("[veritax] remote sign-out failed", {
+        name: error instanceof Error ? error.name : "UnknownError",
+        message: error instanceof Error ? error.message : String(error),
+      })
+    })
     router.replace("/login")
+    router.refresh()
   }
 
   function continueFromPlanning() {
     if (engagementId) {
       api.patchEngagement(engagementId, { entity_name: entity, jurisdictions })
         .then(refreshFiles)  // the newly-named file now shows in the library
-        .catch(err => console.error("[veritax] failed to save engagement scope:", err))
+        .catch(() => setApiOffline(true))
     }
+    setDraftReady(false)
     navigate(2)
   }
 
@@ -293,6 +330,19 @@ export default function Page() {
         ) : (
           <>
 
+        {apiOffline && (
+          <div style={{
+            flexShrink: 0,
+            padding: "0.625rem 2rem",
+            borderBottom: "1px solid #e5e5e5",
+            background: "#fafafa",
+            color: "#555",
+            fontSize: "12px",
+          }}>
+            Backend or database is unavailable. Check your connection, keep the backend running with <code>pnpm dev</code> from the <code>backend</code> folder, then refresh.
+          </div>
+        )}
+
         {/* Horizontal section tabs */}
         <nav style={{
           borderBottom: "1px solid #e5e5e5",
@@ -306,23 +356,27 @@ export default function Page() {
           {NAV.map(({ step: s, label }) => {
             const active = step === s
             const seen   = visited.has(s)
+            const locked = s >= 3 && !draftReady
             return (
               <button
                 key={s}
                 type="button"
+                disabled={locked}
+                title={locked ? "Complete Requirements before drafting" : undefined}
                 onClick={() => navigate(s)}
                 style={{
                   display: "flex", alignItems: "center", gap: "0.4rem",
                   padding: "0 1rem", border: "none",
                   borderBottom: active ? "2px solid #000" : "2px solid transparent",
-                  background: "transparent", cursor: "pointer",
-                  color: active ? "#000" : seen ? "#000" : "#bbb",
+                  background: "transparent", cursor: locked ? "not-allowed" : "pointer",
+                  color: locked ? "#c7c7c7" : active ? "#000" : seen ? "#000" : "#bbb",
                   fontSize: "13px",
                   fontWeight: active ? 600 : 400,
+                  opacity: locked ? 0.55 : 1,
                   transition: "color 150ms ease, border-color 150ms ease",
                 }}
               >
-                <span style={{ fontSize: "10px", letterSpacing: "0.06em", color: active ? "#000" : seen ? "#888" : "#ccc" }}>0{s}</span>
+                <span style={{ fontSize: "10px", letterSpacing: "0.06em", color: locked ? "#d0d0d0" : active ? "#000" : seen ? "#888" : "#ccc" }}>0{s}</span>
                 <span>{label}</span>
               </button>
             )
@@ -347,8 +401,9 @@ export default function Page() {
             <div className={step === 2 ? "vt-step-panel vt-step-panel-active" : "vt-step-panel"} style={{ flex: 1, minWidth: 0, display: step === 2 ? "flex" : "none" }}>
               <RequirementsStep
                 engagementId={engagementId} jurisdictions={jurisdictions}
-                onContinue={() => navigate(3)} onBack={() => navigate(1)}
-                onOpenDraftSection={(jurisdiction, sectionId) => { setDraftJump({ jurisdiction, sectionId }); navigate(3) }}
+                onContinue={continueToDraft}
+                onOpenDraftSection={(jurisdiction, sectionId) => { setDraftJump({ jurisdiction, sectionId }); continueToDraft() }}
+                onDraftReadinessChange={setDraftReady}
               />
             </div>
           )}

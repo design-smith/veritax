@@ -42,6 +42,13 @@ class DocumentRead(BaseModel):
     created_at: datetime
 
 
+class DocumentTextRead(BaseModel):
+    id: uuid.UUID
+    original_filename: str
+    status: DocumentStatus
+    text: str
+
+
 class SourceRead(BaseModel):
     model_config = ConfigDict(from_attributes=True)
     id: uuid.UUID
@@ -125,6 +132,10 @@ class CoverageSummary(BaseModel):
     pending: int
     failed: int
     need_attention: int   # partial + missing
+    draft_ready: bool
+    draft_blocker: str | None
+    present_ratio: float
+    draft_min_present_ratio: float
 
 
 class CoverageResponse(BaseModel):
@@ -151,6 +162,8 @@ class DraftSectionRead(BaseModel):
     element_name: str
     status: DraftStatus
     content: str | None
+    tables: list = []   # [{id, title, columns[], rows[][]}]
+    charts: list = []   # [{id, type, title, categories[], series[{name, values[]}]}]
     error: str | None
     citations: list[DraftCitationRead]
 
@@ -164,6 +177,7 @@ class DraftSummary(BaseModel):
 
 class DraftResponse(BaseModel):
     jurisdiction: str
+    draft_mode: str
     summary: DraftSummary
     sections: list[DraftSectionRead]
 
@@ -180,6 +194,8 @@ class RiskEvidenceRead(BaseModel):
     kind: str
     reference: str
     detail: str
+    source_label: str | None
+    verified: bool
     document_id: uuid.UUID | None
 
 
@@ -208,5 +224,7 @@ class RiskResponse(BaseModel):
     jurisdiction: str
     status: str        # not_started | pending | analyzing | done | failed
     error: str | None
+    analysis_mode: str
+    stale: bool
     summary: RiskSummary
     findings: list[RiskFindingRead]

@@ -8,6 +8,7 @@ from app.drafting import FakeDrafter
 from app.embeddings import FakeEmbedder
 from app.main import app
 from app.models import Document, DocumentChunk, DocumentStatus, RequirementCoverage, CoverageStatus
+from app.requirements import resolve_requirements
 from sqlalchemy import select
 
 
@@ -37,6 +38,11 @@ class CountingDrafter(FakeDrafter):
 
 async def _engagement(client) -> str:
     return (await client.post("/engagements")).json()["id"]
+
+
+def _ready_text(jurisdiction: str, text: bytes) -> bytes:
+    required = " ".join(f"{e.element_name} {e.description}" for e in resolve_requirements(jurisdiction))
+    return text + b" " + required.encode()
 
 
 async def test_duplicate_upload_reuses_existing_chunks(client):
@@ -137,7 +143,7 @@ async def test_draft_blocked_while_coverage_pending(client):
     await client.post(
         f"/engagements/{eid}/documents",
         data={"kind": "interview"},
-        files={"files": ("notes.txt", b"management structure and reporting lines", "text/plain")},
+        files={"files": ("notes.txt", _ready_text("Netherlands", b"management structure and reporting lines"), "text/plain")},
     )
     await client.post(f"/engagements/{eid}/coverage", params={"jurisdiction": "Netherlands"})
 

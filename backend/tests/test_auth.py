@@ -32,6 +32,9 @@ def _hdr(sub: uuid.UUID, **kw) -> dict:
 @pytest.fixture(autouse=True)
 def _secret(monkeypatch):
     monkeypatch.setattr(settings, "supabase_jwt_secret", SECRET)
+    # Keep the suite hermetic: a real SUPABASE_URL in .env would turn on issuer verification,
+    # which these HS256 test tokens (no `iss` claim) don't satisfy. Unset it so only sig+aud+exp check.
+    monkeypatch.setattr(settings, "supabase_url", "")
 
 
 async def test_no_token_is_401(raw_client):

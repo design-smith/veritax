@@ -365,6 +365,10 @@ class DraftSection(Base):
         Enum(DraftStatus, name="draft_status"), nullable=False, default=DraftStatus.pending
     )
     content: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Structured renderables — rendered natively on-screen and in the .docx; referenced from `content`
+    # by [[table:id]] / [[chart:id]] markers.
+    tables: Mapped[list] = mapped_column(JSONB, nullable=False, default=list)
+    charts: Mapped[list] = mapped_column(JSONB, nullable=False, default=list)
     model: Mapped[str | None] = mapped_column(Text, nullable=True)
     error: Mapped[str | None] = mapped_column(Text, nullable=True)
     status_updated_at: Mapped[datetime | None] = mapped_column(
@@ -460,6 +464,8 @@ class RiskEvidence(Base):
     kind: Mapped[str] = mapped_column(Text, nullable=False)  # section | figure | document
     reference: Mapped[str] = mapped_column(Text, nullable=False)
     detail: Mapped[str] = mapped_column(Text, nullable=False)
+    source_label: Mapped[str | None] = mapped_column(Text, nullable=True)
+    verified: Mapped[bool] = mapped_column(default=False)
     document_id: Mapped[uuid.UUID | None] = mapped_column(
         ForeignKey("documents.id", ondelete="SET NULL"), nullable=True
     )

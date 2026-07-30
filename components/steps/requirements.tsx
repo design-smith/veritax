@@ -1,8 +1,8 @@
 "use client"
 
 import { useCallback, useEffect, useRef, useState } from "react"
-import { Upload, Check, ShieldCheck, AlertTriangle, Loader2, FileText, ArrowRight } from "lucide-react"
-import { api, type CoverageResponse, type CoverageStatusValue } from "@/lib/api"
+import { Upload, Check, AlertTriangle, Loader2, FileText, ArrowRight, RefreshCw } from "lucide-react"
+import { api, type CoverageResponse, type CoverageRow, type CoverageStatusValue } from "@/lib/api"
 import { Animate } from "@/components/ui/transition"
 
 type Seg = "present" | "partial" | "missing"
@@ -16,12 +16,39 @@ const STATUS_CFG: Record<CoverageStatusValue, { label: string; bg: string; text:
   failed:      { label: "Failed",      bg: "var(--color-background-danger-soft)",  text: "var(--color-text-danger-soft)",  dot: "var(--red-400)" },
 }
 
-const KIND_CHIP: Record<string, { bg: string; text: string; label: string }> = {
-  financials: { bg: "var(--color-background-success-soft)", text: "var(--color-text-success-soft)", label: "Financials" },
-  agreements: { bg: "var(--color-background-info-soft)",    text: "var(--color-text-info-soft)",    label: "Agreements" },
-  public:     { bg: "var(--color-background-caution-soft)", text: "var(--color-text-caution-soft)", label: "Website" },
-  interview:  { bg: "var(--color-background-discovery-soft)", text: "var(--color-text-discovery-soft)", label: "Interview" },
-  supplement: { bg: "var(--color-background-primary-soft)", text: "var(--color-text)",              label: "Supplement" },
+function withCoverageRow(data: CoverageResponse, updated: CoverageRow, opts: { unlockDraft?: boolean } = {}): CoverageResponse {
+  const requirements = data.requirements.map(row => row.id === updated.id ? updated : row)
+  const requiredRows = requirements.filter(row => !row.is_conditional)
+  const n = (status: CoverageStatusValue) => requirements.filter(row => row.status === status).length
+  const present = n("present")
+  const partial = n("partial")
+  const missing = n("missing")
+  const pending = n("pending")
+  const failed = n("failed")
+  const conditional = n("conditional")
+  const required_total = requiredRows.length
+  const present_ratio = required_total > 0 ? requiredRows.filter(row => row.status === "present").length / required_total : 0
+  const minRatio = data.summary.draft_min_present_ratio
+  const draft_ready = opts.unlockDraft !== false && required_total > 0 && pending === 0 && failed === 0 && missing === 0 && present_ratio >= minRatio
+  return {
+    ...data,
+    requirements,
+    summary: {
+      ...data.summary,
+      total: requirements.length,
+      required_total,
+      present,
+      partial,
+      missing,
+      conditional,
+      pending,
+      failed,
+      need_attention: partial + missing,
+      present_ratio,
+      draft_ready,
+      draft_blocker: draft_ready ? null : data.summary.draft_blocker,
+    },
+  }
 }
 
 function CoverageDonut({ present, partial, missing, active, onToggle, size = 52 }: {
@@ -80,12 +107,12 @@ function CoverageDonut({ present, partial, missing, active, onToggle, size = 52 
   )
 }
 
-export default function RequirementsStep({ engagementId, jurisdictions, onContinue, onBack, onOpenDraftSection }: {
+export default function RequirementsStep({ engagementId, jurisdictions, onContinue, onOpenDraftSection, onDraftReadinessChange }: {
   engagementId: string | null
   jurisdictions: string[]
   onContinue: () => void
-  onBack: () => void
   onOpenDraftSection: (jurisdiction: string, sectionId: string) => void
+  onDraftReadinessChange?: (ready: boolean) => void
 }) {
   const [coverageByJuris, setCoverageByJuris] = useState<Record<string, CoverageResponse>>({})
   const [started, setStarted] = useState<Set<string>>(new Set())
@@ -95,7 +122,10 @@ export default function RequirementsStep({ engagementId, jurisdictions, onContin
   const [filters, setFilters] = useState<Set<Seg>>(new Set())
   const [supplementText, setSupplementText] = useState("")
   const [submitting, setSubmitting] = useState(false)
+  const [markingSatisfied, setMarkingSatisfied] = useState(false)
   const [recovering, setRecovering] = useState(false)
+  const [refreshing, setRefreshing] = useState(false)
+  const [hoverLock, setHoverLock] = useState(false)
   const [indexPollNonce, setIndexPollNonce] = useState(0)
   // Documents index HERE (not on the Planning screen). Assessment waits until they're all embedded.
   const [docReady, setDocReady] = useState(false)
@@ -105,8 +135,17 @@ export default function RequirementsStep({ engagementId, jurisdictions, onContin
   const startedRef = useRef(started); startedRef.current = started
   const pollRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const draftPrimedRef = useRef<Set<string>>(new Set())
+  const draftPrimingRef = useRef<Set<string>>(new Set())
+  const satisfyingRef = useRef<Set<string>>(new Set())
 
   const setCoverage = (j: string, data: CoverageResponse) => setCoverageByJuris(prev => ({ ...prev, [j]: data }))
+  const patchCoverageRow = (j: string, row: CoverageRow, opts?: { unlockDraft?: boolean }) => {
+    setCoverageByJuris(prev => {
+      const current = prev[j]
+      if (!current) return prev
+      return { ...prev, [j]: withCoverageRow(current, row, opts) }
+    })
+  }
 
   useEffect(() => { draftPrimedRef.current.clear() }, [engagementId])
 
@@ -186,15 +225,34 @@ export default function RequirementsStep({ engagementId, jurisdictions, onContin
   const rows = coverage?.requirements ?? []
   const s = coverage?.summary
   const openReq = rows.find(r => r.id === openReqId) ?? null
-  const coverageReady = !!coverage && (s?.pending ?? 0) === 0 && (s?.failed ?? 0) === 0
+  const coverageReady = !!coverage && s?.draft_ready === true
   const coverageFailed = (s?.failed ?? 0) > 0
+  const readinessMessage = coverageReady ? null : (
+    s?.draft_blocker ??
+    (!docReady ? "documents are still indexing" : coverage ? "requirements are not ready for drafting" : "requirements have not been assessed")
+  )
+  const readinessAction = coverageFailed
+    ? "Retry failed requirements before drafting."
+    : (s?.pending ?? 0) > 0
+    ? "Assessment is still running. Draft will unlock automatically if the file clears the evidence threshold."
+    : "Add source material to the Missing and Partial requirements here, then re-assess."
+
+  useEffect(() => {
+    onDraftReadinessChange?.(coverageReady)
+  }, [coverageReady, onDraftReadinessChange])
 
   useEffect(() => {
     if (!engagementId || !coverageReady || activeJurisdiction !== jurisdictions[0]) return
-    if (draftPrimedRef.current.has(activeJurisdiction)) return
-    draftPrimedRef.current.add(activeJurisdiction)
+    if (draftPrimedRef.current.has(activeJurisdiction) || draftPrimingRef.current.has(activeJurisdiction)) return
+    draftPrimingRef.current.add(activeJurisdiction)
     api.startDraft(engagementId, activeJurisdiction)
-      .catch(err => console.error("[veritax] failed to prime draft:", err))
+      .then(() => { draftPrimedRef.current.add(activeJurisdiction) })
+      .catch(err => {
+        const msg = String(err)
+        if (msg.includes("API 409")) console.info("[veritax] draft not ready to prime yet:", err)
+        else console.error("[veritax] failed to prime draft:", err)
+      })
+      .finally(() => { draftPrimingRef.current.delete(activeJurisdiction) })
   }, [activeJurisdiction, coverageReady, engagementId, jurisdictions])
 
   const toggleFilter = (c: Seg) => setFilters(prev => {
@@ -220,15 +278,88 @@ export default function RequirementsStep({ engagementId, jurisdictions, onContin
 
   async function supplement(body: { kind: "upload"; file: File } | { kind: "text"; text: string }) {
     if (!openReq || !engagementId) return
+    const target = openReq
+    const jurisdiction = activeJurisdiction
+    const optimistic: CoverageRow = {
+      ...target,
+      status: "present",
+      whats_present: target.whats_present ?? `User-supplied supplement satisfies ${target.element_name}.`,
+      whats_missing: null,
+      confidence: "high",
+      error: null,
+      evidence: target.evidence.length > 0 ? target.evidence : [
+        {
+          document_id: null,
+          source_label: body.kind === "upload" ? body.file.name : "Supplement",
+          locator: body.kind === "upload" ? `Uploaded supplement: ${body.file.name}` : body.text.slice(0, 180),
+        },
+      ],
+    }
+    patchCoverageRow(jurisdiction, optimistic, { unlockDraft: false })
     setSubmitting(true)
     try {
-      await api.supplementCoverage(openReq.id, body)
-      setCoverage(activeJurisdiction, await api.getCoverage(engagementId, activeJurisdiction))
+      const row = await api.supplementCoverage(target.id, body)
+      patchCoverageRow(jurisdiction, row)
+      void api.getCoverage(engagementId, jurisdiction)
+        .then(data => setCoverage(jurisdiction, data))
+        .catch(e => console.error("[veritax] supplement refresh failed:", e))
       setSupplementText("")
     } catch (e) {
       console.error("[veritax] supplement failed:", e)
+      try { setCoverage(jurisdiction, await api.getCoverage(engagementId, jurisdiction)) }
+      catch (refreshError) { console.error("[veritax] supplement rollback refresh failed:", refreshError) }
     } finally {
       setSubmitting(false)
+    }
+  }
+
+  async function markSatisfied() {
+    if (!openReq || !engagementId || openReq.status === "present") return
+    const target = openReq
+    const jurisdiction = activeJurisdiction
+    if (satisfyingRef.current.has(target.id)) return
+    satisfyingRef.current.add(target.id)
+    const optimistic: CoverageRow = {
+      ...target,
+      status: "present",
+      whats_present: target.whats_present ?? `User marked ${target.element_name} satisfied.`,
+      whats_missing: null,
+      confidence: "high",
+      error: null,
+      evidence: target.evidence.length > 0 ? target.evidence : [
+        { document_id: null, source_label: "Manual", locator: "Marked satisfied by user" },
+      ],
+    }
+    patchCoverageRow(jurisdiction, optimistic, { unlockDraft: false })
+    setMarkingSatisfied(true)
+    try {
+      const row = await api.markCoverageSatisfied(target.id)
+      patchCoverageRow(jurisdiction, row)
+      void api.getCoverage(engagementId, jurisdiction)
+        .then(data => setCoverage(jurisdiction, data))
+        .catch(e => console.error("[veritax] mark satisfied refresh failed:", e))
+    } catch (e) {
+      console.error("[veritax] mark satisfied failed:", e)
+      try { setCoverage(jurisdiction, await api.getCoverage(engagementId, jurisdiction)) }
+      catch (refreshError) { console.error("[veritax] mark satisfied rollback refresh failed:", refreshError) }
+    } finally {
+      satisfyingRef.current.delete(target.id)
+      setMarkingSatisfied(false)
+    }
+  }
+
+  // Re-run requirements matching against whatever changed in planning (sources, entity).
+  async function refresh() {
+    if (!engagementId || !activeJurisdiction) return
+    setRefreshing(true)
+    try {
+      const d = await api.startCoverage(engagementId, activeJurisdiction, true)
+      setCoverage(activeJurisdiction, d)
+      if (!pollRef.current) pollRef.current = setTimeout(poll, 600)
+    } catch (e) {
+      console.error("[veritax] refresh (re-assess) failed:", e)
+    } finally {
+      setRefreshing(false)
     }
   }
 
@@ -264,27 +395,66 @@ export default function RequirementsStep({ engagementId, jurisdictions, onContin
       <div style={{ flex: 1, overflowY: "auto", position: "relative" }}>
 
         {/* Jurisdiction tabs — all picked jurisdictions (like Draft) */}
-        <div style={{ position: "sticky", top: 0, zIndex: 10, background: "var(--color-surface)", padding: "1rem 3.5rem 0.75rem", display: "flex", gap: "0.375rem", flexWrap: "wrap" }}>
-          {jurisdictions.map(j => {
-            const isActive = j === activeJurisdiction
-            const cov = coverageByJuris[j]
-            const isStarted = started.has(j)
-            const processing = isStarted && (!cov || cov.summary.pending > 0)
-            return (
-              <button key={j} type="button" onClick={() => selectJurisdiction(j)} title={isStarted ? undefined : "Not processed yet — click to assess"} style={{
-                display: "inline-flex", alignItems: "center", gap: "0.375rem",
-                padding: "0.25rem 0.75rem", borderRadius: "9999px", border: "none", cursor: "pointer",
-                background: isActive ? "var(--color-background-primary-solid)" : isStarted ? "var(--alpha-06)" : "transparent",
-                color: isActive ? "var(--color-text-inverse)" : isStarted ? "var(--color-text-secondary)" : "var(--color-text-tertiary)",
-                fontSize: "var(--font-text-xs-size)", fontWeight: "var(--font-weight-medium)",
-                opacity: isStarted ? 1 : 0.55,  // grey when not yet processed
-                transition: "all var(--transition-duration-basic)",
-              }}>
-                {processing && <Loader2 size={11} className="animate-spin" />}
-                {j}
-              </button>
-            )
-          })}
+        <div style={{ position: "sticky", top: 0, zIndex: 10, background: "var(--color-surface)", padding: "1rem 3.5rem 0.75rem", display: "flex", alignItems: "center", gap: "0.75rem" }}>
+          <div style={{ flex: 1, minWidth: 0, display: "flex", gap: "0.375rem", flexWrap: "wrap" }}>
+            {jurisdictions.map(j => {
+              const isActive = j === activeJurisdiction
+              const cov = coverageByJuris[j]
+              const isStarted = started.has(j)
+              const processing = isStarted && (!cov || cov.summary.pending > 0)
+              return (
+                <button key={j} type="button" onClick={() => selectJurisdiction(j)} title={isStarted ? undefined : "Not processed yet — click to assess"} style={{
+                  display: "inline-flex", alignItems: "center", gap: "0.375rem",
+                  padding: "0.25rem 0.75rem", borderRadius: "9999px", border: "none", cursor: "pointer",
+                  background: isActive ? "var(--color-background-primary-solid)" : isStarted ? "var(--alpha-06)" : "transparent",
+                  color: isActive ? "var(--color-text-inverse)" : isStarted ? "var(--color-text-secondary)" : "var(--color-text-tertiary)",
+                  fontSize: "var(--font-text-xs-size)", fontWeight: "var(--font-weight-medium)",
+                  opacity: isStarted ? 1 : 0.55,  // grey when not yet processed
+                  transition: "all var(--transition-duration-basic)",
+                }}>
+                  {processing && <Loader2 size={11} className="animate-spin" />}
+                  {j}
+                </button>
+              )
+            })}
+          </div>
+          <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: "0.5rem", flexShrink: 0 }}>
+            {coverageFailed && s && (
+              <button type="button" onClick={retryPipeline} disabled={recovering} style={{
+                height: "var(--control-size-md)", padding: "0 var(--control-gutter-md)",
+                borderRadius: "var(--control-radius-md)", border: "1px solid var(--color-border)",
+                background: "transparent", color: "var(--color-text-danger-soft)",
+                fontSize: "var(--control-font-size-md)", cursor: recovering ? "not-allowed" : "pointer",
+              }}>{recovering ? "Retrying..." : `Retry ${s.failed} failed`}</button>
+            )}
+            <div style={{ position: "relative" }} onMouseEnter={() => setHoverLock(true)} onMouseLeave={() => setHoverLock(false)}>
+              <button type="button" disabled={!coverageReady} onClick={onContinue} style={{
+                height: "var(--control-size-md)", padding: "0 var(--control-gutter-lg)",
+                borderRadius: "var(--control-radius-md)", border: "none",
+                background: coverageReady ? "var(--color-background-primary-solid)" : "var(--alpha-08)",
+                color: coverageReady ? "var(--color-text-inverse)" : "var(--color-text-tertiary)",
+                fontSize: "var(--control-font-size-md)", fontWeight: "var(--font-weight-medium)", cursor: coverageReady ? "pointer" : "not-allowed",
+              }}>Continue to Draft</button>
+              {hoverLock && !coverageReady && readinessMessage && (
+                <div style={{
+                  position: "absolute", top: "calc(100% + 8px)", right: 0, zIndex: 30, width: 320,
+                  display: "grid", gridTemplateColumns: "auto 1fr", gap: "0.625rem", alignItems: "start",
+                  padding: "0.75rem 0.875rem", borderRadius: "var(--radius-md)", textAlign: "left",
+                  background: "var(--color-background-caution-soft)", boxShadow: "var(--shadow-300)",
+                }}>
+                  <AlertTriangle size={14} style={{ color: "var(--color-text-caution-soft)", marginTop: 2 }} />
+                  <div>
+                    <p style={{ fontSize: "var(--font-text-sm-size)", fontWeight: "var(--font-weight-medium)", margin: "0 0 0.25rem", color: "var(--color-text)" }}>
+                      Draft is locked until the file has enough source support.
+                    </p>
+                    <p style={{ fontSize: "var(--font-text-xs-size)", color: "var(--color-text-secondary)", margin: 0, lineHeight: 1.5 }}>
+                      {readinessMessage}. {readinessAction}
+                    </p>
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
         </div>
 
         <div style={{ padding: "1.5rem 3.5rem 3rem", maxWidth: 760 }}>
@@ -292,9 +462,18 @@ export default function RequirementsStep({ engagementId, jurisdictions, onContin
           {/* Header — question + summary + inline donut */}
           <div style={{ marginBottom: "1.5rem", display: "flex", alignItems: "center", justifyContent: "space-between", gap: "1.5rem" }}>
             <div>
-              <h1 style={{ fontSize: "var(--font-text-xl-size)", fontWeight: "var(--font-weight-semibold)", color: "var(--color-text)", margin: "0 0 0.375rem" }}>
-                What does this file legally need to contain?
-              </h1>
+              <div style={{ display: "flex", alignItems: "center", gap: "0.5rem", margin: "0 0 0.375rem" }}>
+                <h1 style={{ fontSize: "var(--font-text-xl-size)", fontWeight: "var(--font-weight-semibold)", color: "var(--color-text)", margin: 0 }}>
+                  What does this file legally need to contain?
+                </h1>
+                <button type="button" onClick={refresh} disabled={refreshing} aria-label="Re-run assessment" title="Re-run assessment" style={{
+                  display: "inline-flex", alignItems: "center", justifyContent: "center", width: 24, height: 24, flexShrink: 0,
+                  borderRadius: "var(--radius-md)", border: "none", background: "transparent",
+                  color: "var(--color-text-tertiary)", cursor: refreshing ? "not-allowed" : "pointer",
+                }}>
+                  <RefreshCw size={13} className={refreshing ? "animate-spin" : undefined} />
+                </button>
+              </div>
               {s && (
                 <p style={{ fontSize: "var(--font-text-sm-size)", color: "var(--color-text-secondary)", margin: 0 }}>
                   {s.present} of {s.required_total} covered
@@ -379,14 +558,6 @@ export default function RequirementsStep({ engagementId, jurisdictions, onContin
                     <span style={{ padding: "2px 8px", borderRadius: "9999px", fontSize: "var(--font-text-xs-size)", fontWeight: "var(--font-weight-medium)", background: cfg.bg, color: cfg.text, whiteSpace: "nowrap" }}>
                       {cfg.label}
                     </span>
-                    {row.sources_used.length > 0 && (
-                      <div style={{ display: "flex", gap: "0.25rem", flexWrap: "wrap", justifyContent: "flex-end" }}>
-                        {row.sources_used.map(k => {
-                          const c = KIND_CHIP[k] ?? { bg: "var(--alpha-06)", text: "var(--color-text-tertiary)", label: k }
-                          return <span key={k} style={{ padding: "1px 6px", borderRadius: "var(--radius-xs)", fontSize: "10px", fontWeight: "var(--font-weight-medium)", background: c.bg, color: c.text }}>{c.label}</span>
-                        })}
-                      </div>
-                    )}
                   </div>
                 </div>
                 </Animate>
@@ -394,30 +565,6 @@ export default function RequirementsStep({ engagementId, jurisdictions, onContin
             })}
           </div>
 
-          {/* Actions */}
-          <div style={{ display: "flex", alignItems: "center", gap: "0.75rem", marginTop: "2rem" }}>
-            <button type="button" disabled={!coverageReady} title={coverageReady ? undefined : coverageFailed ? "Retry failed requirements before drafting" : "Requirements are still assessing"} onClick={onContinue} style={{
-              height: "var(--control-size-md)", padding: "0 var(--control-gutter-lg)",
-              borderRadius: "var(--control-radius-md)", border: "none",
-              background: coverageReady ? "var(--color-background-primary-solid)" : "var(--alpha-08)",
-              color: coverageReady ? "var(--color-text-inverse)" : "var(--color-text-tertiary)",
-              fontSize: "var(--control-font-size-md)", fontWeight: "var(--font-weight-medium)", cursor: coverageReady ? "pointer" : "not-allowed",
-            }}>Continue to Draft</button>
-            {coverageFailed && s && (
-              <button type="button" onClick={retryPipeline} disabled={recovering} style={{
-                height: "var(--control-size-md)", padding: "0 var(--control-gutter-md)",
-                borderRadius: "var(--control-radius-md)", border: "1px solid var(--color-border)",
-                background: "transparent", color: "var(--color-text-danger-soft)",
-                fontSize: "var(--control-font-size-md)", cursor: recovering ? "not-allowed" : "pointer",
-              }}>{recovering ? "Retrying..." : `Retry ${s.failed} failed`}</button>
-            )}
-            <button type="button" onClick={onBack} style={{
-              height: "var(--control-size-md)", padding: "0 var(--control-gutter-md)",
-              borderRadius: "var(--control-radius-md)", border: "1px solid var(--color-border)",
-              background: "transparent", color: "var(--color-text-secondary)",
-              fontSize: "var(--control-font-size-md)", cursor: "pointer",
-            }}>← Back to sources</button>
-          </div>
         </div>
       </div>
 
@@ -425,6 +572,7 @@ export default function RequirementsStep({ engagementId, jurisdictions, onContin
       {openReq && (() => {
         const cfg = STATUS_CFG[openReq.status]
         const canSupplement = openReq.status === "partial" || openReq.status === "missing" || openReq.status === "failed"
+        const canMarkSatisfied = openReq.status !== "present" && openReq.status !== "pending" && openReq.status !== "conditional"
         return (
           <Animate as="aside" enter="slide-up" duration={150} style={{ width: 360, flexShrink: 0, borderLeft: "1px solid var(--color-border)", background: "var(--color-surface)", display: "flex", flexDirection: "column", overflowY: "auto" }}>
             <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "0.75rem", borderBottom: "1px solid var(--color-border)", padding: "1rem 1.25rem" }}>
@@ -439,10 +587,24 @@ export default function RequirementsStep({ engagementId, jurisdictions, onContin
               <div>
                 <h3 style={{ fontSize: "var(--font-text-lg-size)", fontWeight: "var(--font-weight-semibold)", color: "var(--color-text)", margin: "0 0 0.5rem" }}>{openReq.element_name}</h3>
                 <p style={{ fontSize: "var(--font-text-sm-size)", lineHeight: 1.6, color: "var(--color-text-secondary)", margin: 0 }}>{openReq.element_description}</p>
-                <div style={{ display: "flex", alignItems: "center", gap: "0.375rem", marginTop: "0.625rem", fontSize: "var(--font-text-xs-size)", color: openReq.verified ? "var(--color-text-success-soft)" : "var(--color-text-caution-soft)" }}>
-                  {openReq.verified ? <ShieldCheck size={13} /> : <AlertTriangle size={13} />}
-                  {openReq.verified ? "Confirmed against statute" : "Needs review — not yet confirmed against statute"}
-                </div>
+                <label style={{
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: "0.5rem",
+                  marginTop: "0.875rem",
+                  fontSize: "var(--font-text-sm-size)",
+                  color: openReq.status === "present" ? "var(--color-text-success-soft)" : "var(--color-text-secondary)",
+                  cursor: canMarkSatisfied && !markingSatisfied ? "pointer" : "default",
+                }}>
+                  <input
+                    type="checkbox"
+                    checked={openReq.status === "present"}
+                    disabled={!canMarkSatisfied || markingSatisfied}
+                    onChange={e => { if (e.currentTarget.checked) void markSatisfied() }}
+                    style={{ width: 14, height: 14, accentColor: "var(--green-500)" }}
+                  />
+                  {markingSatisfied ? "Marking satisfied..." : openReq.status === "present" ? "Satisfied" : "Mark satisfied"}
+                </label>
               </div>
 
               {openReq.whats_present && (
@@ -456,15 +618,6 @@ export default function RequirementsStep({ engagementId, jurisdictions, onContin
                 <div>
                   <p style={{ fontSize: "var(--font-text-xs-size)", fontWeight: "var(--font-weight-semibold)", textTransform: "uppercase", letterSpacing: "0.04em", color: "var(--color-text-tertiary)", margin: "0 0 0.375rem" }}>What’s missing</p>
                   <p style={{ fontSize: "var(--font-text-sm-size)", color: "var(--color-text)", margin: 0, lineHeight: 1.6 }}>{openReq.whats_missing}</p>
-                </div>
-              )}
-
-              {openReq.sources_used.length > 0 && (
-                <div style={{ display: "flex", gap: "0.25rem", flexWrap: "wrap" }}>
-                  {openReq.sources_used.map(k => {
-                    const c = KIND_CHIP[k] ?? { bg: "var(--alpha-06)", text: "var(--color-text-tertiary)", label: k }
-                    return <span key={k} style={{ padding: "1px 8px", borderRadius: "9999px", fontSize: "var(--font-text-xs-size)", fontWeight: "var(--font-weight-medium)", background: c.bg, color: c.text }}>{c.label}</span>
-                  })}
                 </div>
               )}
 
@@ -487,7 +640,7 @@ export default function RequirementsStep({ engagementId, jurisdictions, onContin
               )}
 
               {/* Requirements → draft: jump to the section that fulfils this requirement */}
-              {openReq.draft_section_id && (
+              {coverageReady && openReq.draft_section_id && (
                 <button type="button" onClick={() => onOpenDraftSection(activeJurisdiction, openReq.draft_section_id!)}
                   style={{ display: "inline-flex", alignItems: "center", gap: "0.375rem", alignSelf: "flex-start", height: "var(--control-size-sm)", padding: "0 var(--control-gutter-sm)", borderRadius: "var(--control-radius-md)", border: "1px solid var(--color-border)", background: "transparent", color: "var(--color-text-secondary)", fontSize: "var(--control-font-size-md)", fontWeight: "var(--font-weight-medium)", cursor: "pointer" }}>
                   Covered in the draft <ArrowRight size={13} />

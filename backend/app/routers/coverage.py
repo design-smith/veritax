@@ -16,7 +16,7 @@ from fastapi import (
     Query,
     UploadFile,
 )
-from sqlalchemy import delete, select
+from sqlalchemy import delete, select, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from sqlalchemy.orm import selectinload
@@ -24,6 +24,7 @@ from sqlalchemy.orm import selectinload
 from ..assessment import Assessor
 from ..auth import AuthUser
 from ..config import settings
+from ..coverage_readiness import draft_readiness_for_rows
 from ..corpus import (
     ASSESS_K,
     document_filename_map,
@@ -113,6 +114,7 @@ def _summary(rows: list[RequirementCoverage]) -> CoverageSummary:
 
     present, partial, missing = n(CoverageStatus.present), n(CoverageStatus.partial), n(CoverageStatus.missing)
     conditional, pending, failed = n(CoverageStatus.conditional), n(CoverageStatus.pending), n(CoverageStatus.failed)
+    readiness = draft_readiness_for_rows(rows)
     return CoverageSummary(
         total=len(rows),
         required_total=sum(1 for r in rows if not r.is_conditional),
@@ -123,6 +125,10 @@ def _summary(rows: list[RequirementCoverage]) -> CoverageSummary:
         pending=pending,
         failed=failed,
         need_attention=partial + missing,
+        draft_ready=readiness.ready,
+        draft_blocker=readiness.blocker,
+        present_ratio=readiness.present_ratio,
+        draft_min_present_ratio=readiness.min_present_ratio,
     )
 
 
@@ -209,6 +215,56 @@ async def _write_evidence(session: AsyncSession, coverage_id: uuid.UUID, evidenc
 
 
 # ── Cross-jurisdiction dedup: reuse a byte-identical element already assessed in this engagement ──
+def _locator_snippet(text: str, fallback: str) -> str:
+    value = " ".join(text.split())
+    if not value:
+        return fallback
+    return value[:177] + "..." if len(value) > 180 else value
+
+
+async def _mark_present(
+    session: AsyncSession,
+    row: RequirementCoverage,
+    *,
+    source_label: str,
+    locator: str,
+    document_id: uuid.UUID | None = None,
+    whats_present: str | None = None,
+) -> None:
+    row.status = CoverageStatus.present
+    row.whats_present = whats_present or "Marked satisfied by user."
+    row.whats_missing = None
+    row.confidence = Confidence.high
+    row.error = None
+    row.status_updated_at = datetime.now(timezone.utc)
+    row.assessed_at = datetime.now(timezone.utc)
+    await session.execute(delete(CoverageEvidence).where(CoverageEvidence.coverage_id == row.id))
+    session.add(
+        CoverageEvidence(
+            coverage_id=row.id,
+            document_id=document_id,
+            source_label=source_label,
+            locator=locator,
+        )
+    )
+
+
+async def _restart_draft_if_needed(
+    background: BackgroundTasks,
+    factory: async_sessionmaker,
+    drafter: Drafter,
+    embedder: Embedder,
+    engagement_id: uuid.UUID,
+    jurisdictions: list[str],
+) -> None:
+    if not jurisdictions:
+        return
+    from .draft import run_draft
+
+    for jurisdiction in jurisdictions:
+        background.add_task(run_draft, factory, drafter, embedder, engagement_id, jurisdiction)
+
+
 async def _find_assessed_twin(session: AsyncSession, engagement_id: uuid.UUID, element) -> RequirementCoverage | None:
     """A completed assessment of the same element elsewhere in this engagement. Shared base templates
     give jurisdictions byte-identical (name, description) elements, so the verdict is the same over the
@@ -413,6 +469,7 @@ async def start_coverage(
     engagement_id: uuid.UUID,
     background: BackgroundTasks,
     jurisdiction: str = Query(...),
+    force: bool = Query(False),  # user hit "refresh": re-run matching against the current corpus
     session: AsyncSession = Depends(get_session),
     assessor: Assessor = Depends(get_assessor),
     embedder: Embedder = Depends(get_embedder),
@@ -422,6 +479,23 @@ async def start_coverage(
     elements = resolve_requirements(jurisdiction)
     if not elements:
         raise HTTPException(status_code=404, detail=f"no requirements defined for '{jurisdiction}'")
+
+    # Force re-run: reset this jurisdiction's assessed rows back to pending so run_assessment
+    # re-evaluates every requirement against whatever changed in planning (sources, entity).
+    # ponytail: reuses a cross-jurisdiction twin if another jurisdiction is still assessed;
+    #           re-run those too if stale-twin reuse ever matters.
+    if force:
+        await session.execute(
+            update(RequirementCoverage)
+            .where(
+                RequirementCoverage.engagement_id == engagement_id,
+                RequirementCoverage.jurisdiction == jurisdiction,
+                RequirementCoverage.is_conditional.is_(False),
+            )
+            .values(status=CoverageStatus.pending, error=None,
+                    status_updated_at=datetime.now(timezone.utc))
+        )
+        await session.commit()
 
     # Idempotent + race-safe: the frontend effect (React StrictMode) can fire two POSTs at once.
     # ON CONFLICT DO NOTHING lets both land without a unique-violation; rowcount tells us who
@@ -450,10 +524,10 @@ async def start_coverage(
     await session.commit()
 
     inserted = result.rowcount or 0
-    log.info("start_coverage engagement=%s jurisdiction=%s: %d new row(s), %s",
-             engagement_id, jurisdiction, inserted,
-             "scheduling assessment" if inserted > 0 else "already assessed/queued (no-op)")
-    if inserted > 0:
+    log.info("start_coverage engagement=%s jurisdiction=%s force=%s: %d new row(s), %s",
+             engagement_id, jurisdiction, force, inserted,
+             "scheduling assessment" if inserted > 0 or force else "already assessed/queued (no-op)")
+    if inserted > 0 or force:
         background.add_task(run_assessment, factory, assessor, embedder, engagement_id, jurisdiction)
     return await _response(session, engagement_id, jurisdiction)
 
@@ -477,7 +551,6 @@ async def add_supplement(
     file: UploadFile | None = File(default=None),
     session: AsyncSession = Depends(get_session),
     storage: Storage = Depends(get_storage),
-    assessor: Assessor = Depends(get_assessor),
     drafter: Drafter = Depends(get_drafter),
     embedder: Embedder = Depends(get_embedder),
     factory: async_sessionmaker = Depends(get_session_factory),
@@ -508,23 +581,59 @@ async def add_supplement(
     doc = await store_upload(session, storage, row.engagement_id, src.id, filename, content_type, data)
     session.add(CoverageSupplement(coverage_id=row.id, kind=kind, document_id=doc.id, text=text_value))
     await session.commit()
-    # Embed the supplement INLINE (not background) so its chunks are retrievable for the re-assess below.
+    # Embed the supplement INLINE (not background) so Draft can retrieve it immediately.
     await embed_document(factory, storage, embedder, doc.id)
 
-    # Re-assess just this requirement now that the supplement is in the corpus.
-    element = next((e for e in resolve_requirements(row.jurisdiction) if e.requirement_key == row.requirement_key), None)
-    redraft_jurisdictions: list[str] = []
-    if element is not None:
-        fname_to_docid = await document_filename_map(session, row.engagement_id)
-        documents = await retrieve_documents(session, row.engagement_id, embedder, element_query(element))
-        await _apply(session, row, element, documents, assessor, fname_to_docid)
-        redraft_jurisdictions = await _invalidate_drafts_for_element(session, row)
-        await session.commit()
-        if redraft_jurisdictions:
-            from .draft import run_draft
+    locator = (
+        f"Uploaded supplement: {filename}"
+        if kind == SupplementKind.upload
+        else _locator_snippet(text or "", "Text supplement added by user")
+    )
+    await _mark_present(
+        session,
+        row,
+        source_label=filename,
+        locator=locator,
+        document_id=doc.id,
+        whats_present=f"User-supplied supplement satisfies {row.element_name}.",
+    )
+    redraft_jurisdictions = await _invalidate_drafts_for_element(session, row)
+    await session.commit()
+    await _restart_draft_if_needed(background, factory, drafter, embedder, row.engagement_id, redraft_jurisdictions)
 
-            for jurisdiction in redraft_jurisdictions:
-                background.add_task(run_draft, factory, drafter, embedder, row.engagement_id, jurisdiction)
+    doc_kind = await _doc_kind(session, row.engagement_id)
+    section_by_key = await _draft_section_by_key(session, row.engagement_id, row.jurisdiction)
+    await session.refresh(row)
+    return _to_read(row, doc_kind, section_by_key)
+
+
+@router.post("/coverage/{coverage_id}/satisfied", response_model=CoverageRead)
+async def mark_satisfied(
+    coverage_id: uuid.UUID,
+    background: BackgroundTasks,
+    session: AsyncSession = Depends(get_session),
+    drafter: Drafter = Depends(get_drafter),
+    embedder: Embedder = Depends(get_embedder),
+    factory: async_sessionmaker = Depends(get_session_factory),
+    user: AuthUser = Depends(get_current_user),
+) -> CoverageRead:
+    row = await session.get(RequirementCoverage, coverage_id)
+    if row is None:
+        raise HTTPException(status_code=404, detail="coverage row not found")
+    await assert_owner(session, row.engagement_id, user)
+    if row.is_conditional:
+        raise HTTPException(status_code=409, detail="conditional requirement cannot be manually satisfied")
+
+    await _mark_present(
+        session,
+        row,
+        source_label="Manual",
+        locator="Marked satisfied by user",
+        whats_present=f"User marked {row.element_name} satisfied.",
+    )
+    redraft_jurisdictions = await _invalidate_drafts_for_element(session, row)
+    await session.commit()
+    await _restart_draft_if_needed(background, factory, drafter, embedder, row.engagement_id, redraft_jurisdictions)
 
     doc_kind = await _doc_kind(session, row.engagement_id)
     section_by_key = await _draft_section_by_key(session, row.engagement_id, row.jurisdiction)

@@ -28,6 +28,13 @@ export interface DocumentRead {
   created_at: string
 }
 
+export interface DocumentTextRead {
+  id: string
+  original_filename: string
+  status: "uploaded" | "embedding" | "embedded" | "failed"
+  text: string
+}
+
 export interface EngagementSource {
   id: string
   kind: SourceKind
@@ -98,6 +105,10 @@ export interface CoverageResponse {
     pending: number
     failed: number
     need_attention: number
+    draft_ready: boolean
+    draft_blocker: string | null
+    present_ratio: number
+    draft_min_present_ratio: number
   }
   requirements: CoverageRow[]
 }
@@ -113,6 +124,15 @@ export interface DraftCitation {
   quote: string
 }
 
+export interface DocTable { id: string; title: string; columns: string[]; rows: string[][] }
+export interface DocChart {
+  id: string
+  type: "bar" | "column" | "line" | "pie"
+  title: string
+  categories: string[]
+  series: { name: string; values: number[] }[]
+}
+
 export interface DraftSection {
   id: string
   requirement_key: string
@@ -120,12 +140,15 @@ export interface DraftSection {
   element_name: string
   status: DraftStatusValue
   content: string | null
+  tables: DocTable[]
+  charts: DocChart[]
   error: string | null
   citations: DraftCitation[]
 }
 
 export interface DraftResponse {
   jurisdiction: string
+  draft_mode: string
   summary: { total: number; drafted: number; pending: number; failed: number }
   sections: DraftSection[]
 }
@@ -144,6 +167,8 @@ export interface RiskEvidence {
   kind: string
   reference: string
   detail: string
+  source_label: string | null
+  verified: boolean
   document_id: string | null
 }
 
@@ -166,6 +191,8 @@ export interface RiskResponse {
   jurisdiction: string
   status: "not_started" | "pending" | "analyzing" | "done" | "failed"
   error: string | null
+  analysis_mode: string
+  stale: boolean
   summary: { total: number; by_severity: Record<string, number>; by_kind: Record<string, number> }
   findings: RiskFinding[]
 }
@@ -189,6 +216,9 @@ async function parseVoid(res: Response): Promise<void> {
 }
 
 export const api = {
+  health: (): Promise<{ ok: boolean; db?: boolean; error?: string }> =>
+    fetch(`${BASE}/health/db`).then(r => parse<{ ok: boolean; db?: boolean; error?: string }>(r)),
+
   createEngagement: (): Promise<{ id: string }> =>
     afetch(`${BASE}/engagements`, { method: "POST" }).then(r => parse<{ id: string }>(r)),
 
@@ -217,6 +247,9 @@ export const api = {
   getDocument: (documentId: string): Promise<DocumentRead> =>
     afetch(`${BASE}/documents/${documentId}`).then(r => parse<DocumentRead>(r)),
 
+  getDocumentText: (documentId: string): Promise<DocumentTextRead> =>
+    afetch(`${BASE}/documents/${documentId}/text`).then(r => parse<DocumentTextRead>(r)),
+
   deleteDocument: (documentId: string): Promise<void> =>
     afetch(`${BASE}/documents/${documentId}`, { method: "DELETE" }).then(parseVoid),
 
@@ -241,8 +274,8 @@ export const api = {
   getConnectors: (): Promise<Connector[]> =>
     afetch(`${BASE}/connectors`).then(r => parse<Connector[]>(r)),
 
-  startCoverage: (engagementId: string, jurisdiction: string): Promise<CoverageResponse> =>
-    afetch(`${BASE}/engagements/${engagementId}/coverage?jurisdiction=${encodeURIComponent(jurisdiction)}`, {
+  startCoverage: (engagementId: string, jurisdiction: string, force = false): Promise<CoverageResponse> =>
+    afetch(`${BASE}/engagements/${engagementId}/coverage?jurisdiction=${encodeURIComponent(jurisdiction)}${force ? "&force=true" : ""}`, {
       method: "POST",
     }).then(r => parse<CoverageResponse>(r)),
 
@@ -263,6 +296,9 @@ export const api = {
     )
   },
 
+  markCoverageSatisfied: (coverageId: string): Promise<CoverageRow> =>
+    afetch(`${BASE}/coverage/${coverageId}/satisfied`, { method: "POST" }).then(r => parse<CoverageRow>(r)),
+
   startDraft: (engagementId: string, jurisdiction: string): Promise<DraftResponse> =>
     afetch(`${BASE}/engagements/${engagementId}/draft?jurisdiction=${encodeURIComponent(jurisdiction)}`, {
       method: "POST",
@@ -271,6 +307,12 @@ export const api = {
   getDraft: (engagementId: string, jurisdiction: string): Promise<DraftResponse> =>
     afetch(`${BASE}/engagements/${engagementId}/draft?jurisdiction=${encodeURIComponent(jurisdiction)}`)
       .then(r => parse<DraftResponse>(r)),
+
+  downloadDraftDocx: async (engagementId: string, jurisdiction: string): Promise<Blob> => {
+    const res = await afetch(`${BASE}/engagements/${engagementId}/draft.docx?jurisdiction=${encodeURIComponent(jurisdiction)}`)
+    if (!res.ok) throw new Error(`API ${res.status} ${res.url}: ${await res.text().catch(() => "")}`)
+    return res.blob()
+  },
 
   regenerateSection: (sectionId: string): Promise<DraftSection> =>
     afetch(`${BASE}/draft-sections/${sectionId}/regenerate`, { method: "POST" }).then(r =>

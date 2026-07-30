@@ -138,7 +138,7 @@ function UploadZone({ kind, accept = "*", hint }: { kind: SourceId; accept?: str
           if (entry.documentId && entry.status === "processing") void pollDoc(entry.id, entry.documentId)
         })
       })
-      .catch(err => console.error("[veritax] failed to load uploaded documents:", err))
+      .catch(() => {})
     return () => { cancelled = true }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [engagementId, kind])
@@ -153,10 +153,9 @@ function UploadZone({ kind, accept = "*", hint }: { kind: SourceId; accept?: str
         const status = DOC_STATUS[doc.status] ?? "processing"
         setItems(p => p.map(x => (x.id === itemId ? { ...x, status, error: doc.error ?? undefined } : x)))
         if (status === "done" || status === "error") return
-      } catch (err) {
-        console.error("[veritax] status poll failed:", err)
-        return
-      }
+    } catch (err) {
+      return
+    }
     }
   }
 
@@ -171,7 +170,6 @@ function UploadZone({ kind, accept = "*", hint }: { kind: SourceId; accept?: str
 
     if (!engagementId) {
       // No backend session yet — keep the local chip UX so the user isn't blocked.
-      console.warn("[veritax] no engagement id; file kept locally, not uploaded")
       markAll("done")
       return
     }
@@ -316,7 +314,7 @@ function ConnectorGrid({ kind, connectors }: { kind: SourceId; connectors: Conne
   useEffect(() => {
     api.getConnectors()
       .then(list => setStatusByProvider(Object.fromEntries(list.map(c => [c.provider, c.status]))))
-      .catch(err => console.error("[veritax] failed to load connectors:", err))
+      .catch(() => {})
   }, [])
 
   function toggle(name: string) {
@@ -459,8 +457,8 @@ export default function PlanningStep({
 
   return (
     <PlanningCtx.Provider value={{ engagementId }}>
-    <main style={{ flex: 1, display: "flex", flexDirection: "column", padding: "3rem 3.5rem", maxWidth: 640, overflowY: "auto" }}>
-      <div style={{ display: "flex", gap: "0.75rem", marginBottom: "2.5rem" }}>
+    <main style={{ flex: 1, display: "flex", flexDirection: "column", padding: "3rem 3.5rem", maxWidth: 760, overflowY: "auto" }}>
+      <div style={{ display: "flex", alignItems: "flex-end", gap: "0.75rem", marginBottom: "2.5rem" }}>
         <div style={{ flex: "0 0 240px" }}>
           <label style={FIELD_LABEL}>Jurisdiction</label>
           <MultiSelect options={JURISDICTIONS} value={jurisdictions} onChange={onJurisdictionsChange} placeholder="Select jurisdiction" />
@@ -472,6 +470,15 @@ export default function PlanningStep({
             onBlur={e => { e.currentTarget.style.borderColor = "var(--input-outline-border-color)" }}
             style={OUTLINE_INPUT} />
         </div>
+        <button type="button" disabled={!canContinue} onClick={onContinue} style={{
+          height: "var(--control-size-md)", padding: "0 var(--control-gutter-lg)",
+          borderRadius: "var(--control-radius-md)", border: "none", flexShrink: 0,
+          background: canContinue ? "var(--color-background-primary-solid)" : "var(--alpha-08)",
+          color: canContinue ? "var(--color-text-inverse)" : "var(--color-text-tertiary)",
+          fontSize: "var(--control-font-size-md)", fontWeight: "var(--font-weight-medium)",
+          cursor: canContinue ? "pointer" : "not-allowed",
+          transition: "background var(--transition-duration-basic), color var(--transition-duration-basic)",
+        }}>Continue</button>
       </div>
 
       <p style={{ fontSize: "var(--font-text-sm-size)", color: "var(--color-text-tertiary)", marginBottom: "0.75rem", letterSpacing: "0.02em", textTransform: "uppercase", fontWeight: "var(--font-weight-medium)" }}>
@@ -525,18 +532,6 @@ export default function PlanningStep({
           )
         })}
       </ul>
-
-      <div style={{ marginTop: "2rem" }}>
-        <button type="button" disabled={!canContinue} onClick={onContinue} style={{
-          height: "var(--control-size-md)", padding: "0 var(--control-gutter-lg)",
-          borderRadius: "var(--control-radius-md)", border: "none",
-          background: canContinue ? "var(--color-background-primary-solid)" : "var(--alpha-08)",
-          color: canContinue ? "var(--color-text-inverse)" : "var(--color-text-tertiary)",
-          fontSize: "var(--control-font-size-md)", fontWeight: "var(--font-weight-medium)",
-          cursor: canContinue ? "pointer" : "not-allowed",
-          transition: "background var(--transition-duration-basic), color var(--transition-duration-basic)",
-        }}>Continue</button>
-      </div>
     </main>
     </PlanningCtx.Provider>
   )

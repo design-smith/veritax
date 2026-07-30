@@ -13,6 +13,7 @@ import logging
 import time
 import uuid
 from dataclasses import dataclass
+from collections.abc import Iterable
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -87,6 +88,54 @@ async def document_filename_map(session: AsyncSession, engagement_id: uuid.UUID)
         )
     ).all()
     return {fn: str(did) for fn, did in rows}
+
+
+async def document_contexts_by_id(
+    session: AsyncSession,
+    document_ids: Iterable[uuid.UUID],
+    *,
+    max_chunks_per_doc: int = 10,
+) -> list[DocContext]:
+    """Load indexed chunks for specific documents already cited by the draft.
+
+    Risk review needs recall more than novelty: if the draft cites an agreement or financial schedule,
+    the risk pass should see that source even when a generic risk-search query would not retrieve it.
+    """
+    ids = list(dict.fromkeys(document_ids))
+    if not ids:
+        return []
+    rows = (
+        await session.execute(
+            select(
+                DocumentChunk.document_id,
+                DocumentChunk.chunk_index,
+                DocumentChunk.content,
+                Document.original_filename,
+                Source.kind,
+                Source.id.label("source_id"),
+            )
+            .join(Document, Document.id == DocumentChunk.document_id)
+            .join(Source, Source.id == Document.source_id)
+            .where(Document.id.in_(ids))
+            .order_by(DocumentChunk.document_id, DocumentChunk.chunk_index)
+        )
+    ).all()
+
+    grouped: dict[str, dict] = {}
+    for r in rows:
+        g = grouped.setdefault(
+            str(r.document_id),
+            {"source_id": str(r.source_id), "kind": r.kind.value,
+             "filename": r.original_filename, "chunks": []},
+        )
+        if len(g["chunks"]) < max_chunks_per_doc:
+            g["chunks"].append((r.chunk_index, r.content))
+
+    docs: list[DocContext] = []
+    for doc_id, g in grouped.items():
+        text = _CHUNK_SEP.join(content for _, content in g["chunks"])
+        docs.append(DocContext(g["source_id"], doc_id, g["kind"], g["filename"], text))
+    return docs
 
 
 async def retrieve_documents(

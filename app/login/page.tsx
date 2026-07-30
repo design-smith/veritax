@@ -33,6 +33,14 @@ export default function LoginPage() {
 
   async function sendCode(e: React.FormEvent) {
     e.preventDefault(); setError(null); setBusy(true)
+    // If middleware could not validate auth during a weak-network moment, the user may reach
+    // /login while an old local session cookie still exists. Clear it before starting OTP.
+    await supa().auth.signOut({ scope: "local" }).catch(error => {
+      console.warn("[veritax] local sign-out before OTP failed", {
+        name: error instanceof Error ? error.name : "UnknownError",
+        message: error instanceof Error ? error.message : String(error),
+      })
+    })
     // Sign up creates the account and stores the name; login only sends a code to an existing account.
     const options = mode === "signup"
       ? { shouldCreateUser: true, data: { full_name: name.trim() } }

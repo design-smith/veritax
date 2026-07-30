@@ -10,7 +10,7 @@ from __future__ import annotations
 import json_repair
 import logging
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Protocol
 
 from .config import settings
@@ -25,7 +25,7 @@ REGISTER_VOICE = {
         "leave no doubt. State positions factually and support each with its source."
     ),
     "planning": (
-        "Write in the register of a transfer-pricing PLANNING FILE: forward-looking and management-facing. "
+        "Write in the register of a transfer-pricing planning memo: forward-looking and management-facing. "
         "Address the group's management, and where appropriate make recommendations (\"we recommend the "
         "group adopt…\", \"the group should consider…\"). It advises on a go-forward position rather than "
         "defending a filed one — but every claim is still grounded in a source."
@@ -61,11 +61,14 @@ def _system_prompt(web: bool) -> str:
         "earns. A reviewer should understand the business from your prose alone, without opening the sources.\n"
         "- The INTERVIEW transcript is the functional story — draw the functional analysis and business "
         "narrative from it specifically (who does what, who bears which risk), told as narrative.\n"
-        "- Use Markdown structure: sub-headings where helpful, and Markdown TABLES wherever the content is "
-        "tabular (amounts by category and jurisdiction, entity/counterparty lists, comparables data) — "
-        "never flat prose for columnar numeric content.\n\n"
-        "Return the section by calling write_section with Markdown content (inline [n] markers) and the "
-        "citation for each marker."
+        "- STRUCTURED DATA, NOT MARKDOWN TABLES: put tabular content (amounts by category/jurisdiction, "
+        "entity/counterparty lists, comparables) in the `tables` array, and any chart of source figures in "
+        "the `charts` array (bar/column/line/pie). Drop a `[[table:ID]]` or `[[chart:ID]]` marker in the "
+        "prose where each belongs. NEVER write a Markdown table. A chart may only plot numbers that appear "
+        "in the sources (Law 2) — never invent data to draw a graph.\n"
+        "- Use Markdown sub-headings within the prose where helpful.\n\n"
+        "Return the section by calling write_section with the Markdown content (inline [n] markers), the "
+        "citation for each marker, and any tables/charts."
     )
 
 
@@ -73,6 +76,47 @@ SYSTEM_PROMPT = _system_prompt(web=True)        # Anthropic (native web search)
 SYSTEM_PROMPT_NO_WEB = _system_prompt(web=False)  # DeepSeek (no web search)
 
 WEB_SEARCH_TOOL = {"type": "web_search_20250305", "name": "web_search", "max_uses": 3}
+
+# Structured, renderable data — rendered natively on-screen and in the .docx. Referenced from the prose
+# by [[table:ID]] / [[chart:ID]] markers, so the model never has to hand-format a Markdown table.
+_TABLE_SCHEMA = {
+    "type": "array",
+    "description": "Tables of source data. Reference each from the prose with a [[table:ID]] marker. Use "
+                   "these instead of Markdown tables.",
+    "items": {
+        "type": "object",
+        "properties": {
+            "id": {"type": "string"},
+            "title": {"type": "string"},
+            "columns": {"type": "array", "items": {"type": "string"}},
+            "rows": {"type": "array", "items": {"type": "array", "items": {"type": "string"}}},
+        },
+        "required": ["id", "columns", "rows"],
+    },
+}
+_CHART_SCHEMA = {
+    "type": "array",
+    "description": "Charts of figures that ACTUALLY APPEAR in the sources (never invented). Reference each "
+                   "from the prose with a [[chart:ID]] marker.",
+    "items": {
+        "type": "object",
+        "properties": {
+            "id": {"type": "string"},
+            "type": {"type": "string", "enum": ["bar", "column", "line", "pie"]},
+            "title": {"type": "string"},
+            "categories": {"type": "array", "items": {"type": "string"}},
+            "series": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "properties": {"name": {"type": "string"}, "values": {"type": "array", "items": {"type": "number"}}},
+                    "required": ["name", "values"],
+                },
+            },
+        },
+        "required": ["id", "type", "title", "categories", "series"],
+    },
+}
 
 WRITE_SECTION_TOOL = {
     "name": "write_section",
@@ -104,6 +148,8 @@ WRITE_SECTION_TOOL = {
                     "required": ["marker", "kind", "source_label", "quote"],
                 },
             },
+            "tables": _TABLE_SCHEMA,
+            "charts": _CHART_SCHEMA,
         },
         "required": ["content", "citations"],
     },
@@ -149,6 +195,8 @@ class Citation:
 class DraftResult:
     content: str
     citations: list[Citation]
+    tables: list[dict] = field(default_factory=list)   # {id, title, columns[], rows[][]}
+    charts: list[dict] = field(default_factory=list)   # {id, type, title, categories[], series[{name, values[]}]}
 
 
 class Drafter(Protocol):
@@ -215,6 +263,37 @@ def _batch_prompt(
     )
 
 
+_CHART_TYPES = {"bar", "column", "line", "pie"}
+
+
+def _clean_tables(raw) -> list[dict]:
+    out = []
+    for t in raw or []:
+        if isinstance(t, dict) and t.get("id") and isinstance(t.get("columns"), list) and isinstance(t.get("rows"), list):
+            out.append({
+                "id": str(t["id"]), "title": str(t.get("title", "")),
+                "columns": [str(c) for c in t["columns"]],
+                "rows": [[str(v) for v in r] for r in t["rows"] if isinstance(r, list)],
+            })
+    return out
+
+
+def _clean_charts(raw) -> list[dict]:
+    out = []
+    for c in raw or []:
+        if not (isinstance(c, dict) and c.get("id") and c.get("type") in _CHART_TYPES and isinstance(c.get("series"), list)):
+            continue
+        series = [
+            {"name": str(s.get("name", "")), "values": [float(v) for v in s.get("values", []) if isinstance(v, (int, float))]}
+            for s in c["series"] if isinstance(s, dict)
+        ]
+        out.append({
+            "id": str(c["id"]), "type": c["type"], "title": str(c.get("title", "")),
+            "categories": [str(x) for x in c.get("categories", [])], "series": series,
+        })
+    return out
+
+
 def _draft_result_from(payload: dict) -> DraftResult:
     cites = [
         Citation(
@@ -226,7 +305,10 @@ def _draft_result_from(payload: dict) -> DraftResult:
         )
         for c in payload.get("citations", [])
     ]
-    return DraftResult(content=payload["content"], citations=cites)
+    return DraftResult(
+        content=payload["content"], citations=cites,
+        tables=_clean_tables(payload.get("tables")), charts=_clean_charts(payload.get("charts")),
+    )
 
 
 def _draft_results_from(payload: dict) -> dict[int, DraftResult]:
@@ -377,10 +459,17 @@ class FakeDrafter:
             d = documents[0]
             content = (
                 f"## {element.element_name}\n\n"
-                f"{element.description} This section is drafted from the material on file.[1]"
+                f"{element.description} This section is drafted from the material on file.[1] "
+                f"Figures are summarised in [[table:t1]] and the trend in [[chart:c1]]."
             )
             quote = (d.text.strip()[:160] or element.description)
-            return DraftResult(content, [Citation(1, "document", d.filename, quote)])
+            return DraftResult(
+                content, [Citation(1, "document", d.filename, quote)],
+                tables=[{"id": "t1", "title": "Illustrative figures", "columns": ["Year", "Value"],
+                         "rows": [["2024", "100"], ["2025", "110"]]}],
+                charts=[{"id": "c1", "type": "bar", "title": "Illustrative trend", "categories": ["2024", "2025"],
+                         "series": [{"name": "Value", "values": [100.0, 110.0]}]}],
+            )
         content = (
             f"## {element.element_name}\n\n"
             f"{element.description} No confidential source covers this element yet — supplement it in "

@@ -12,6 +12,11 @@ async def _engagement_with_doc(client, text: bytes) -> str:
     return eid
 
 
+def _ready_text(jurisdiction: str, text: bytes) -> bytes:
+    required = " ".join(f"{e.element_name} {e.description}" for e in resolve_requirements(jurisdiction))
+    return text + b" " + required.encode()
+
+
 async def test_start_coverage_creates_rows_and_assesses(client):
     eid = await _engagement_with_doc(client, b"management structure and reporting lines of the entity")
 
@@ -32,7 +37,7 @@ async def test_start_coverage_creates_rows_and_assesses(client):
 
 
 async def test_evidence_pointers_and_draft_link(client):
-    eid = await _engagement_with_doc(client, b"management structure and reporting lines of the entity")
+    eid = await _engagement_with_doc(client, _ready_text("Netherlands", b"management structure and reporting lines of the entity"))
     await client.post(f"/engagements/{eid}/coverage", params={"jurisdiction": "Netherlands"})
     got = (await client.get(f"/engagements/{eid}/coverage", params={"jurisdiction": "Netherlands"})).json()
     mgmt = next(r for r in got["requirements"] if r["element_order"] == 1)
@@ -77,6 +82,28 @@ async def test_start_coverage_is_idempotent(client):
     assert len(rows) == 6  # Canada s.247(4) — not doubled
 
 
+async def test_force_reassesses_completed_rows(client):
+    # A plain re-POST is a no-op; force=true re-runs matching against the current corpus
+    # (used by the requirements "refresh" button after planning inputs change).
+    eid = await _engagement_with_doc(client, b"management structure and reporting lines of the entity")
+    await client.post(f"/engagements/{eid}/coverage", params={"jurisdiction": "Netherlands"})
+    done = (await client.get(f"/engagements/{eid}/coverage", params={"jurisdiction": "Netherlands"})).json()
+    assert done["summary"]["pending"] == 0
+
+    # Idempotent re-POST leaves everything assessed (no reset to pending).
+    noop = (await client.post(f"/engagements/{eid}/coverage", params={"jurisdiction": "Netherlands"})).json()
+    assert noop["summary"]["pending"] == 0
+
+    # force=true resets required rows to pending in the immediate response (job hasn't run yet)…
+    forced = (await client.post(
+        f"/engagements/{eid}/coverage", params={"jurisdiction": "Netherlands", "force": "true"}
+    )).json()
+    assert forced["summary"]["pending"] > 0
+    # …then the background job re-assesses them back to a verdict.
+    again = (await client.get(f"/engagements/{eid}/coverage", params={"jurisdiction": "Netherlands"})).json()
+    assert again["summary"]["pending"] == 0
+
+
 async def test_multi_document_source_does_not_stall(client):
     # Two files under the SAME source kind → both map to one source_id. The provenance insert must
     # dedupe by source_id, else (coverage_id, source_id) PK violates and the whole batch stalls.
@@ -102,7 +129,7 @@ async def test_unknown_jurisdiction_404(client):
     assert r.status_code == 404
 
 
-async def test_text_supplement_reassesses_row(client):
+async def test_text_supplement_marks_row_present(client):
     # Sparse doc → "Management structure" comes back missing.
     eid = await _engagement_with_doc(client, b"placeholder text with nothing relevant")
     await client.post(f"/engagements/{eid}/coverage", params={"jurisdiction": "Netherlands"})
@@ -110,17 +137,33 @@ async def test_text_supplement_reassesses_row(client):
     mgmt = next(r for r in rows if r["element_order"] == 1)
     assert mgmt["status"] == "missing"
 
-    # Supplement the gap in place → that one row re-assesses to present.
+    # Supplementing the gap is a user assertion that the row is satisfied.
     r = await client.post(
         f"/coverage/{mgmt['id']}/supplements",
-        data={"kind": "text", "text": "The management structure and reporting lines are as follows."},
+        data={"kind": "text", "text": "Satisfied by the uploaded working-paper supplement."},
     )
     assert r.status_code == 201
     assert r.json()["status"] == "present"
+    assert r.json()["whats_missing"] is None
 
     # And it landed in the corpus as a supplement-kind source (flows into Draft).
     agg = (await client.get(f"/engagements/{eid}")).json()
     assert any(s["kind"] == "supplement" for s in agg["sources"])
+
+
+async def test_manual_satisfied_marks_row_present(client):
+    eid = await _engagement_with_doc(client, b"placeholder text with nothing relevant")
+    await client.post(f"/engagements/{eid}/coverage", params={"jurisdiction": "Netherlands"})
+    rows = (await client.get(f"/engagements/{eid}/coverage", params={"jurisdiction": "Netherlands"})).json()["requirements"]
+    mgmt = next(r for r in rows if r["element_order"] == 1)
+    assert mgmt["status"] == "missing"
+
+    r = await client.post(f"/coverage/{mgmt['id']}/satisfied")
+    assert r.status_code == 200
+    body = r.json()
+    assert body["status"] == "present"
+    assert body["whats_missing"] is None
+    assert body["evidence"][0]["source_label"] == "Manual"
 
 
 def test_system_prompt_refuses_correctness():

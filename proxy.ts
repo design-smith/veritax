@@ -24,9 +24,33 @@ export async function proxy(request: NextRequest) {
     },
   )
 
-  const { data: { user } } = await supabase.auth.getUser()
   const path = request.nextUrl.pathname
   const isAuthRoute = path.startsWith("/login")
+  let user = null
+  try {
+    const result = await supabase.auth.getUser()
+    user = result.data.user
+    if (result.error) {
+      console.warn("[veritax] supabase getUser returned error", {
+        name: result.error.name,
+        status: result.error.status,
+        code: result.error.code,
+        message: result.error.message,
+      })
+    }
+  } catch (error) {
+    console.warn("[veritax] supabase getUser fetch failed", {
+      name: error instanceof Error ? error.name : "UnknownError",
+      message: error instanceof Error ? error.message : String(error),
+    })
+    if (!isAuthRoute) {
+      const url = request.nextUrl.clone()
+      url.pathname = "/login"
+      url.searchParams.set("reason", "auth-unavailable")
+      return NextResponse.redirect(url)
+    }
+    return response
+  }
 
   if (!user && !isAuthRoute) {
     const url = request.nextUrl.clone()

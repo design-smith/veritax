@@ -17,7 +17,7 @@ from .config import settings
 from .corpus import DocContext
 
 SYSTEM_PROMPT = (
-    "You review a COMPLETED transfer-pricing Planning File and surface where it is EXPOSED. Unlike "
+    "You review a COMPLETED transfer-pricing Local File and surface where it is EXPOSED. Unlike "
     "earlier stages, you MUST judge substance here — is a position defensible? where is the exposure? — "
     "because the file now exists.\n\n"
     "Produce TWO distinct kinds of findings and keep them distinct:\n"

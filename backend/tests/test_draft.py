@@ -1,19 +1,31 @@
+import io
+import zipfile
+
 from app.drafting import SYSTEM_PROMPT
 from app.requirements import resolve_requirements
 
 
-async def _engagement_with_doc(client, text: bytes) -> str:
+def _ready_text(jurisdiction: str, text: bytes) -> bytes:
+    required = " ".join(f"{e.element_name} {e.description}" for e in resolve_requirements(jurisdiction))
+    return text + b" " + required.encode()
+
+
+async def _engagement_ready_for_draft(client, jurisdiction: str, text: bytes) -> str:
     eid = (await client.post("/engagements")).json()["id"]
     await client.post(
         f"/engagements/{eid}/documents",
         data={"kind": "interview"},
-        files={"files": ("notes.txt", text, "text/plain")},
+        files={"files": ("notes.txt", _ready_text(jurisdiction, text), "text/plain")},
     )
+    coverage = await client.post(f"/engagements/{eid}/coverage", params={"jurisdiction": jurisdiction})
+    assert coverage.status_code == 201
+    got = (await client.get(f"/engagements/{eid}/coverage", params={"jurisdiction": jurisdiction})).json()
+    assert got["summary"]["draft_ready"] is True
     return eid
 
 
 async def test_start_draft_creates_sections_and_drafts(client):
-    eid = await _engagement_with_doc(client, b"The entity is a limited-risk distributor. Royalty is five percent.")
+    eid = await _engagement_ready_for_draft(client, "Netherlands", b"The entity is a limited-risk distributor. Royalty is five percent.")
 
     started = await client.post(f"/engagements/{eid}/draft", params={"jurisdiction": "Netherlands"})
     assert started.status_code == 201
@@ -34,7 +46,7 @@ async def test_start_draft_creates_sections_and_drafts(client):
 async def test_start_draft_idempotent(client):
     import asyncio
 
-    eid = await _engagement_with_doc(client, b"placeholder")
+    eid = await _engagement_ready_for_draft(client, "Canada", b"placeholder")
     r1, r2 = await asyncio.gather(
         client.post(f"/engagements/{eid}/draft", params={"jurisdiction": "Canada"}),
         client.post(f"/engagements/{eid}/draft", params={"jurisdiction": "Canada"}),
@@ -45,7 +57,7 @@ async def test_start_draft_idempotent(client):
 
 
 async def test_regenerate_section(client):
-    eid = await _engagement_with_doc(client, b"management structure and reporting lines")
+    eid = await _engagement_ready_for_draft(client, "Netherlands", b"management structure and reporting lines")
     await client.post(f"/engagements/{eid}/draft", params={"jurisdiction": "Netherlands"})
     sections = (await client.get(f"/engagements/{eid}/draft", params={"jurisdiction": "Netherlands"})).json()["sections"]
     sid = sections[0]["id"]
@@ -54,6 +66,23 @@ async def test_regenerate_section(client):
     assert r.status_code == 200
     assert r.json()["status"] == "drafted"
     assert r.json()["content"]
+
+
+async def test_draft_docx_download_uses_clean_local_file_cover(client):
+    eid = await _engagement_ready_for_draft(client, "Netherlands", b"The entity is a limited-risk distributor.")
+    await client.patch(f"/engagements/{eid}", json={"entity_name": "Acme B.V.", "jurisdictions": ["Netherlands"]})
+    await client.post(f"/engagements/{eid}/draft", params={"jurisdiction": "Netherlands"})
+
+    r = await client.get(f"/engagements/{eid}/draft.docx", params={"jurisdiction": "Netherlands"})
+
+    assert r.status_code == 200
+    assert "Acme-B-V-Netherlands-Local-File.docx" in r.headers["content-disposition"]
+    z = zipfile.ZipFile(io.BytesIO(r.content))
+    doc = z.read("word/document.xml").decode("utf-8")
+    assert "Transfer Pricing Local File" in doc
+    assert "Draft prepared for review" in doc
+    assert "Prepared by Veritax" in doc
+    assert "Planning File" not in doc
 
 
 async def test_unknown_jurisdiction_404(client):
