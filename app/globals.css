@@ -561,6 +561,19 @@
   animation: vt-step-enter 160ms var(--cubic-enter) both;
 }
 
+.vt-skeleton {
+  border-radius: var(--radius-sm);
+  background:
+    linear-gradient(
+      100deg,
+      var(--color-background-primary-soft-alpha) 0%,
+      var(--color-background-primary-soft-alpha-hover) 45%,
+      var(--color-background-primary-soft-alpha) 90%
+    );
+  background-size: 260% 100%;
+  animation: oai-shimmer 1.35s var(--cubic-enter) infinite;
+}
+
 .vt-type-cursor {
   display: inline-block;
   width: 1px;
@@ -576,6 +589,9 @@
     animation: none;
   }
   .vt-type-cursor {
+    animation: none;
+  }
+  .vt-skeleton {
     animation: none;
   }
 }

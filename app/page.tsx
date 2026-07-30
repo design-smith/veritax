@@ -1,6 +1,6 @@
 "use client"
 
-import { useCallback, useEffect, useState } from "react"
+import { useCallback, useEffect, useState, type CSSProperties } from "react"
 import { useRouter } from "next/navigation"
 import dynamic from "next/dynamic"
 import { Activity, CalendarDays, ChevronDown, FileText, ShieldCheck } from "lucide-react"
@@ -10,6 +10,7 @@ import DraftStep from "@/components/steps/draft"
 import RisksStep from "@/components/steps/risks"
 import { api, type EngagementSummary } from "@/lib/api"
 import { createClient } from "@/lib/supabase/client"
+import { LoadingIndicator } from "@/components/ui/indicator"
 
 // FullCalendar is browser-only — load it client-side so it never runs during the build prerender.
 const CompliancePage = dynamic(() => import("@/components/compliance"), { ssr: false })
@@ -17,6 +18,7 @@ const MonitoringPage = dynamic(() => import("@/components/monitoring"), { ssr: f
 const DefensePage = dynamic(() => import("@/components/defense"), { ssr: false })
 
 type Step = 1 | 2 | 3 | 4
+type BootStatus = "loading" | "ready" | "offline"
 
 const NAV: { step: Step; label: string }[] = [
   { step: 1, label: "Planning" },
@@ -40,6 +42,121 @@ function logAppError(stage: string, error: unknown) {
   console.warn("[veritax] app startup/API failure", { stage, error: describeAppError(error) })
 }
 
+function SkeletonBlock({ style }: { style?: CSSProperties }) {
+  return <div className="vt-skeleton" style={style} />
+}
+
+function SidebarLibrarySkeleton() {
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 8, padding: "0 0.75rem" }} aria-hidden="true">
+      {[0, 1, 2].map(i => (
+        <div key={i} style={{ display: "flex", flexDirection: "column", gap: 5, padding: "0.35rem 0" }}>
+          <SkeletonBlock style={{ width: i === 1 ? "78%" : "88%", height: 13 }} />
+          <SkeletonBlock style={{ width: i === 2 ? "50%" : "62%", height: 10 }} />
+        </div>
+      ))}
+    </div>
+  )
+}
+
+function BootSkeleton({ offline = false, onRetry }: { offline?: boolean; onRetry?: () => void }) {
+  return (
+    <div style={{ display: "flex", height: "100vh", overflow: "hidden", background: "#fff", color: "#000" }}>
+      <aside style={{
+        width: 220, flexShrink: 0,
+        borderRight: "1px solid #e5e5e5",
+        background: "#fafafa",
+        padding: "1.5rem 0.75rem",
+        display: "flex", flexDirection: "column", gap: 2,
+      }}>
+        <div style={{ display: "flex", alignItems: "center", gap: "0.5rem", padding: "0 0.75rem", marginBottom: "1.5rem" }}>
+          <img src="/VeritaxLogo.png" alt="Veritax" style={{ width: 24, height: 24, objectFit: "contain" }} />
+          <span style={{ fontFamily: "var(--font-wordmark)", fontSize: "20px", fontWeight: 300, letterSpacing: 0, lineHeight: 1, color: "#000" }}>Veritax</span>
+        </div>
+        <div style={{ padding: "0.6rem 0.75rem", display: "flex", alignItems: "center", gap: "0.5rem" }}>
+          <SkeletonBlock style={{ width: 16, height: 16, borderRadius: 4 }} />
+          <SkeletonBlock style={{ width: 82, height: 14 }} />
+        </div>
+        <div style={{ padding: "0.5rem 0.75rem" }}><SkeletonBlock style={{ width: 70, height: 13 }} /></div>
+        <div style={{ marginTop: "0.5rem" }}><SidebarLibrarySkeleton /></div>
+        <div style={{ display: "flex", flexDirection: "column", gap: 12, marginTop: "1rem", padding: "0 0.75rem" }} aria-hidden="true">
+          <SkeletonBlock style={{ width: 106, height: 14 }} />
+          <SkeletonBlock style={{ width: 96, height: 14 }} />
+          <SkeletonBlock style={{ width: 84, height: 14 }} />
+        </div>
+        <SkeletonBlock style={{ width: "calc(100% - 1.5rem)", height: 31, margin: "auto 0.75rem 0" }} />
+      </aside>
+
+      <main style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column", overflow: "hidden" }}>
+        <nav style={{
+          borderBottom: "1px solid #e5e5e5",
+          background: "#fff",
+          padding: "0 2rem",
+          display: "flex",
+          alignItems: "center",
+          gap: "2rem",
+          height: 48,
+          flexShrink: 0,
+        }} aria-hidden="true">
+          {[92, 118, 74, 68].map(w => <SkeletonBlock key={w} style={{ width: w, height: 13 }} />)}
+        </nav>
+
+        <div style={{ flex: 1, padding: "2rem", overflow: "hidden" }}>
+          {offline ? (
+            <section style={{ maxWidth: 520, marginTop: "10vh" }}>
+              <p style={{ margin: 0, fontSize: "var(--font-text-xs-size)", color: "var(--color-text-tertiary)", textTransform: "uppercase", letterSpacing: "0.05em" }}>
+                Connection check failed
+              </p>
+              <h1 style={{ margin: "0.5rem 0", fontSize: "var(--font-heading-lg-size)", lineHeight: "var(--font-heading-lg-line-height)", fontWeight: 500 }}>
+                Veritax could not load your workspace.
+              </h1>
+              <p style={{ margin: "0 0 1rem", color: "var(--color-text-secondary)", fontSize: "var(--font-text-sm-size)", lineHeight: 1.6 }}>
+                Refresh, check your connection or browser blocker, and confirm the Render backend is reachable.
+              </p>
+              <button type="button" onClick={onRetry} style={{
+                height: 32,
+                padding: "0 0.875rem",
+                borderRadius: "var(--radius-md)",
+                border: "1px solid var(--color-border)",
+                background: "#fff",
+                color: "var(--color-text)",
+                cursor: "pointer",
+                fontSize: "var(--font-text-sm-size)",
+              }}>
+                Retry
+              </button>
+            </section>
+          ) : (
+            <section style={{ maxWidth: 980 }}>
+              <div style={{ display: "flex", alignItems: "center", gap: "0.5rem", marginBottom: "1.5rem", color: "var(--color-text-secondary)", fontSize: "var(--font-text-sm-size)" }}>
+                <LoadingIndicator size={14} />
+                <span>Opening workspace</span>
+              </div>
+              <SkeletonBlock style={{ width: 132, height: 11, marginBottom: 12 }} />
+              <SkeletonBlock style={{ width: 360, maxWidth: "70%", height: 28, marginBottom: 30 }} />
+              <div style={{ display: "grid", gridTemplateColumns: "minmax(240px, 0.8fr) minmax(260px, 1.2fr)", gap: "1.5rem" }}>
+                <div style={{ display: "flex", flexDirection: "column", gap: 18 }}>
+                  <SkeletonBlock style={{ width: "100%", height: 30 }} />
+                  <SkeletonBlock style={{ width: "82%", height: 30 }} />
+                  <SkeletonBlock style={{ width: "74%", height: 30 }} />
+                </div>
+                <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+                  {[0, 1, 2, 3].map(i => (
+                    <div key={i} style={{ border: "1px solid var(--color-border)", borderRadius: "var(--radius-md)", padding: "1rem" }}>
+                      <SkeletonBlock style={{ width: i === 1 ? "46%" : "58%", height: 14, marginBottom: 12 }} />
+                      <SkeletonBlock style={{ width: "100%", height: 46 }} />
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </section>
+          )}
+        </div>
+      </main>
+    </div>
+  )
+}
+
 export default function Page() {
   const router = useRouter()
   const [step, setStep]       = useState<Step>(1)
@@ -56,11 +173,24 @@ export default function Page() {
   const [page, setPage] = useState<"workflow" | "compliance" | "monitoring" | "defense">("workflow")
   const [apiOffline, setApiOffline] = useState(false)
   const [draftReady, setDraftReady] = useState(false)
+  const [bootStatus, setBootStatus] = useState<BootStatus>("loading")
+  const [libraryLoading, setLibraryLoading] = useState(true)
 
-  const refreshFiles = useCallback(() => {
-    api.listEngagements()
-      .then(list => { setFiles(list); setApiOffline(false) })
-      .catch(error => { logAppError("list engagements", error); setFiles([]); setApiOffline(true) })
+  const refreshFiles = useCallback(async (): Promise<boolean> => {
+    setLibraryLoading(true)
+    try {
+      const list = await api.listEngagements()
+      setFiles(list)
+      setApiOffline(false)
+      return true
+    } catch (error) {
+      logAppError("list engagements", error)
+      setFiles([])
+      setApiOffline(true)
+      return false
+    } finally {
+      setLibraryLoading(false)
+    }
   }, [])
 
   // Rehydrate a file's scope from the backend (entity, jurisdictions, which source rows are on).
@@ -83,12 +213,18 @@ export default function Page() {
   useEffect(() => {
     let cancelled = false
     ;(async () => {
+      setBootStatus("loading")
+      setLibraryLoading(true)
       try {
         await api.health()
         if (!cancelled) setApiOffline(false)
       } catch (error) {
         logAppError("health", error)
-        if (!cancelled) setApiOffline(true)
+        if (!cancelled) {
+          setApiOffline(true)
+          setBootStatus("offline")
+          setLibraryLoading(false)
+        }
         return
       }
       const stored = localStorage.getItem(LS_ID)
@@ -107,9 +243,18 @@ export default function Page() {
           if (cancelled) return
           setEngagementId(id)
           localStorage.setItem(LS_ID, id)
-        } catch (error) { logAppError("create engagement", error); setApiOffline(true) }
+        } catch (error) {
+          logAppError("create engagement", error)
+          if (!cancelled) {
+            setApiOffline(true)
+            setBootStatus("offline")
+            setLibraryLoading(false)
+          }
+          return
+        }
       }
-      refreshFiles()
+      const loadedFiles = await refreshFiles()
+      if (!cancelled) setBootStatus(loadedFiles ? "ready" : "offline")
     })()
     return () => { cancelled = true }
   }, [loadEngagement, refreshFiles])
@@ -188,6 +333,9 @@ export default function Page() {
 
   const newFileActive = page === "workflow" && engagementId !== null && files.every(f => f.id !== engagementId)
 
+  if (bootStatus === "loading") return <BootSkeleton />
+  if (bootStatus === "offline") return <BootSkeleton offline onRetry={() => window.location.reload()} />
+
   return (
     <div style={{ display: "flex", height: "100vh", overflow: "hidden", background: "#fff", color: "#000" }}>
 
@@ -239,7 +387,9 @@ export default function Page() {
 
             {/* File library — the user's engagements */}
             <div style={{ maxHeight: "42vh", overflowY: "auto", marginTop: "0.5rem", display: "flex", flexDirection: "column", gap: 2 }}>
-              {files.map(f => {
+              {libraryLoading && files.length === 0 ? (
+                <SidebarLibrarySkeleton />
+              ) : files.map(f => {
                 const active = f.id === engagementId
                 return (
                   <button key={f.id} type="button" onClick={() => openFile(f.id)} style={{
@@ -257,7 +407,7 @@ export default function Page() {
                   </button>
                 )
               })}
-              {files.length === 0 && (
+              {!libraryLoading && files.length === 0 && (
                 <p style={{ fontSize: "12px", color: "#aaa", padding: "0 0.75rem" }}>No files yet</p>
               )}
             </div>
