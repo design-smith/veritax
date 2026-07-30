@@ -29,6 +29,17 @@ const LS_ID = "veritax.engagementId"     // resume the file being worked on acro
 const LS_STEP = "veritax.step"
 const PLANNING_SOURCES = new Set<SourceId>(["financials", "agreements", "public", "interview"])
 
+function describeAppError(error: unknown) {
+  return {
+    name: error instanceof Error ? error.name : "UnknownError",
+    message: error instanceof Error ? error.message : String(error),
+  }
+}
+
+function logAppError(stage: string, error: unknown) {
+  console.warn("[veritax] app startup/API failure", { stage, error: describeAppError(error) })
+}
+
 export default function Page() {
   const router = useRouter()
   const [step, setStep]       = useState<Step>(1)
@@ -49,7 +60,7 @@ export default function Page() {
   const refreshFiles = useCallback(() => {
     api.listEngagements()
       .then(list => { setFiles(list); setApiOffline(false) })
-      .catch(() => { setFiles([]); setApiOffline(true) })
+      .catch(error => { logAppError("list engagements", error); setFiles([]); setApiOffline(true) })
   }, [])
 
   // Rehydrate a file's scope from the backend (entity, jurisdictions, which source rows are on).
@@ -62,7 +73,8 @@ export default function Page() {
       setEngagementId(id)
       localStorage.setItem(LS_ID, id)
       return true
-    } catch {
+    } catch (error) {
+      logAppError("load engagement", error)
       return false
     }
   }, [])
@@ -74,7 +86,8 @@ export default function Page() {
       try {
         await api.health()
         if (!cancelled) setApiOffline(false)
-      } catch {
+      } catch (error) {
+        logAppError("health", error)
         if (!cancelled) setApiOffline(true)
         return
       }
@@ -94,7 +107,7 @@ export default function Page() {
           if (cancelled) return
           setEngagementId(id)
           localStorage.setItem(LS_ID, id)
-        } catch { setApiOffline(true) }
+        } catch (error) { logAppError("create engagement", error); setApiOffline(true) }
       }
       refreshFiles()
     })()
@@ -105,7 +118,10 @@ export default function Page() {
   useEffect(() => { setMounted(m => (m.has(step) ? m : new Set([...m, step]))) }, [step])  // mount a step on first visit, keep it
   useEffect(() => {
     if (!engagementId) return
-    api.recoverPipeline(engagementId).catch(() => setApiOffline(true))
+    api.recoverPipeline(engagementId).catch(error => {
+      logAppError("pipeline recovery", error)
+      setApiOffline(true)
+    })
   }, [engagementId])
 
   function navigate(s: Step) {
@@ -164,7 +180,7 @@ export default function Page() {
     if (engagementId) {
       api.patchEngagement(engagementId, { entity_name: entity, jurisdictions })
         .then(refreshFiles)  // the newly-named file now shows in the library
-        .catch(() => setApiOffline(true))
+        .catch(error => { logAppError("save planning scope", error); setApiOffline(true) })
     }
     setDraftReady(false)
     navigate(2)
@@ -339,7 +355,7 @@ export default function Page() {
             color: "#555",
             fontSize: "12px",
           }}>
-            Backend or database is unavailable. Check your connection, keep the backend running with <code>pnpm dev</code> from the <code>backend</code> folder, then refresh.
+            Backend or database is unavailable. Refresh, check your connection or browser blocker, and confirm the Render backend is reachable.
           </div>
         )}
 

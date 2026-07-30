@@ -143,8 +143,7 @@ async def health() -> dict:
     return {"ok": True}
 
 
-@app.get("/health/db", tags=["health"])
-async def health_db():
+async def _db_health():
     try:
         async with SessionFactory() as session:
             await asyncio.wait_for(session.execute(text("SELECT 1")), timeout=3)
@@ -155,3 +154,13 @@ async def health_db():
             status_code=503,
             content={"ok": False, "db": False, "error": type(exc).__name__},
         )
+
+
+@app.get("/ready", tags=["health"])
+async def ready():
+    return await _db_health()
+
+
+@app.get("/health/db", tags=["health"])
+async def health_db():
+    return await _db_health()

@@ -5,6 +5,13 @@ import { createClient } from "@/lib/supabase/client"
 
 const BASE = process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:8000"
 
+export interface HealthResponse {
+  ok: boolean
+  db?: boolean
+  error?: string
+  source?: "ready" | "health/db" | "health"
+}
+
 // Every backend call carries the Supabase access token — the API verifies it and scopes data per user.
 let _sb: ReturnType<typeof createClient> | null = null
 async function afetch(url: string, init: RequestInit = {}): Promise<Response> {
@@ -215,9 +222,53 @@ async function parseVoid(res: Response): Promise<void> {
   }
 }
 
+function describeError(error: unknown) {
+  return {
+    name: error instanceof Error ? error.name : "UnknownError",
+    message: error instanceof Error ? error.message : String(error),
+  }
+}
+
+function isApiStatus(error: unknown, status?: number) {
+  if (!(error instanceof Error)) return false
+  return status === undefined
+    ? error.message.startsWith("API ")
+    : error.message.startsWith(`API ${status} `)
+}
+
+async function fetchHealth(path: "/ready" | "/health/db" | "/health"): Promise<HealthResponse> {
+  const res = await fetch(`${BASE}${path}`, { cache: "no-store" })
+  const body = await parse<HealthResponse>(res)
+  return { ...body, source: path.slice(1) as HealthResponse["source"] }
+}
+
 export const api = {
-  health: (): Promise<{ ok: boolean; db?: boolean; error?: string }> =>
-    fetch(`${BASE}/health/db`).then(r => parse<{ ok: boolean; db?: boolean; error?: string }>(r)),
+  health: async (): Promise<HealthResponse> => {
+    try {
+      return await fetchHealth("/ready")
+    } catch (error) {
+      if (isApiStatus(error) && !isApiStatus(error, 404)) throw error
+      console.warn("[veritax] readiness probe failed; trying /health/db", {
+        base: BASE,
+        probe: "/ready",
+        error: describeError(error),
+      })
+    }
+
+    try {
+      return await fetchHealth("/health/db")
+    } catch (error) {
+      if (isApiStatus(error)) throw error
+      console.warn("[veritax] db health probe was blocked or unreachable; trying /health", {
+        base: BASE,
+        probe: "/health/db",
+        error: describeError(error),
+      })
+    }
+
+    const basic = await fetchHealth("/health")
+    return { ...basic, db: undefined, source: "health" }
+  },
 
   createEngagement: (): Promise<{ id: string }> =>
     afetch(`${BASE}/engagements`, { method: "POST" }).then(r => parse<{ id: string }>(r)),
