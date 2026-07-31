@@ -28,11 +28,11 @@ from ..coverage_readiness import draft_readiness_for_rows
 from ..corpus import (
     ASSESS_K,
     document_filename_map,
-    element_query,
     retrieve_documents,
     retrieve_documents_batch,
     union_docs,
 )
+from ..evidence_quality import assessment_scope_instruction, scoped_query
 from ..deps import (
     assert_owner,
     get_assessor,
@@ -266,6 +266,7 @@ async def _restart_draft_if_needed(
 
 
 async def _find_assessed_twin(session: AsyncSession, engagement_id: uuid.UUID, element) -> RequirementCoverage | None:
+    return None
     """A completed assessment of the same element elsewhere in this engagement. Shared base templates
     give jurisdictions byte-identical (name, description) elements, so the verdict is the same over the
     same documents — reuse it instead of paying the LLM again (and keep the files consistent)."""
@@ -306,7 +307,7 @@ async def _copy_assessment(session: AsyncSession, target_id: uuid.UUID, twin: Re
 
 async def _assess_group(session_factory: async_sessionmaker, assessor: Assessor, elements: dict,
                         docs_by_key: dict, retrieval_error: str | None, fname_to_docid: dict[str, str],
-                        group: list[tuple[uuid.UUID, str]]) -> None:
+                        group: list[tuple[uuid.UUID, str]], entity_name: str | None, jurisdiction: str) -> None:
     """Assess one batch in a single LLM call over the UNION of its elements' chunks, then write + commit
     all rows together (the UI reveals the batch at once). One bad batch fails only its own rows."""
     els = [elements[rk] for _, rk in group]
@@ -317,7 +318,11 @@ async def _assess_group(session_factory: async_sessionmaker, assessor: Assessor,
     else:
         shared = union_docs([docs_by_key.get(rk, []) for _, rk in group])
         try:
-            results = await asyncio.to_thread(assessor.assess_batch, els, shared)
+            scope_notes = {
+                i: assessment_scope_instruction(el, entity_name=entity_name, jurisdiction=jurisdiction)
+                for i, el in enumerate(els, 1)
+            }
+            results = await asyncio.to_thread(assessor.assess_batch, els, shared, scope_notes)
         except Exception as exc:  # noqa: BLE001 - whole batch failed; mark its rows, keep the run going
             err = exc
             log.exception("assess_batch FAILED for %d element(s)", len(els))
@@ -406,6 +411,8 @@ async def run_assessment(session_factory: async_sessionmaker, assessor: Assessor
         # ── Pass 1: setup, cross-jurisdiction dedup, retrieval for the remainder ──
         async with session_factory() as session:
             fname_to_docid = await document_filename_map(session, engagement_id)
+            engagement = await session.get(Engagement, engagement_id)
+            entity_name = engagement.entity.name if engagement and engagement.entity else None
             pending = (
                 await session.execute(
                     select(RequirementCoverage.id, RequirementCoverage.requirement_key).where(
@@ -434,7 +441,10 @@ async def run_assessment(session_factory: async_sessionmaker, assessor: Assessor
                 else:
                     uncached.append((rid, rk))
             # One embed call for the remaining elements (the rate-limited step); search per element.
-            queries = {rk: element_query(elements[rk]) for _, rk in uncached}
+            queries = {
+                rk: scoped_query(elements[rk], entity_name=entity_name, jurisdiction=jurisdiction)
+                for _, rk in uncached
+            }
             docs_by_key: dict = {}
             retrieval_error: str | None = None
             try:
@@ -445,7 +455,7 @@ async def run_assessment(session_factory: async_sessionmaker, assessor: Assessor
                 retrieval_error = str(exc)[:500]
                 log.exception("run_assessment: query embedding FAILED — uncached rows will be marked failed")
 
-        batch_size = max(1, settings.assess_batch_size)
+        batch_size = 1
         log.info("run_assessment: %d reused from twin, %d to assess in batches of %d",
                  reused, len(uncached), batch_size)
 
@@ -453,7 +463,7 @@ async def run_assessment(session_factory: async_sessionmaker, assessor: Assessor
         for start in range(0, len(uncached), batch_size):
             group = uncached[start:start + batch_size]
             await _assess_group(session_factory, assessor, elements, docs_by_key,
-                                retrieval_error, fname_to_docid, group)
+                                retrieval_error, fname_to_docid, group, entity_name, jurisdiction)
         log.info("run_assessment DONE engagement=%s jurisdiction=%s in %.1fs",
                  engagement_id, jurisdiction, time.monotonic() - t0)
     except Exception:

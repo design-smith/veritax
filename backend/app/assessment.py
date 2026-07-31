@@ -15,6 +15,7 @@ from typing import Protocol
 
 from .config import settings
 from .corpus import DocContext
+from .evidence_quality import evidence_expectations
 from .requirements import ResolvedElement
 
 log = logging.getLogger("veritax")
@@ -28,6 +29,12 @@ SYSTEM_PROMPT = (
     "a specific piece is missing), or 'missing' (the sources do not cover it).\n\n"
     "CRITICAL SCOPE LIMITS:\n"
     "- Assess PRESENCE and COMPLETENESS of information only.\n"
+    "- 'Present' requires concrete source support for the specific local legal entity, jurisdiction, "
+    "fiscal year/local-file period, controlled transaction, and counterparty scope when those facts are "
+    "needed by the element.\n"
+    "- Group-level annual-report material is background only. By itself it is NOT enough for local "
+    "entity financials, controlled transactions, agreements, FAR, method selection, tested party, "
+    "comparables, benchmarking, or arm's-length conclusions.\n"
     "- You MUST NOT judge whether the tax treatment is correct, arm's-length, compliant, or "
     "well-reasoned. That is a later stage. If tempted to evaluate correctness, refuse and confine "
     "yourself to whether the information is present.\n"
@@ -116,9 +123,9 @@ class Assessment:
 
 
 class Assessor(Protocol):
-    def assess(self, element: ResolvedElement, documents: list[DocContext]) -> Assessment: ...
+    def assess(self, element: ResolvedElement, documents: list[DocContext], scope_note: str = "") -> Assessment: ...
     def assess_batch(
-        self, elements: list[ResolvedElement], documents: list[DocContext]
+        self, elements: list[ResolvedElement], documents: list[DocContext], scope_notes: dict[int, str] | None = None
     ) -> dict[int, Assessment]: ...
 
 
@@ -154,23 +161,29 @@ def _assessments_from(payload: dict) -> dict[int, Assessment]:
     return out
 
 
-def _element_prompt(element: ResolvedElement, documents: list[DocContext]) -> str:
+def _element_prompt(element: ResolvedElement, documents: list[DocContext], scope_note: str = "") -> str:
     subs = "\n".join(f"  - {s}" for s in element.sub_requirements) or "  (none)"
     docs = "\n\n".join(
         f"--- SOURCE: {d.filename} (type: {d.kind}) ---\n{d.text.strip() or '(no extractable text)'}"
         for d in documents
     ) or "(no documents uploaded)"
+    scope = scope_note or evidence_expectations(element.element_name)
     return (
         f"REQUIRED ELEMENT: {element.element_name}\n"
         f"DESCRIPTION: {element.description}\n"
         f"SUB-REQUIREMENTS:\n{subs}\n\n"
+        f"SCOPE / EVIDENCE STANDARD:\n{scope}\n\n"
         f"SOURCE MATERIALS:\n{docs}\n\n"
-        "Assess whether these sources contain enough information to write this element. "
+        "Assess whether these sources contain concrete, scoped evidence that satisfies this element. "
         "Call record_assessment with your result."
     )
 
 
-def _batch_prompt(elements: list[ResolvedElement], documents: list[DocContext]) -> str:
+def _batch_prompt(
+    elements: list[ResolvedElement],
+    documents: list[DocContext],
+    scope_notes: dict[int, str] | None = None,
+) -> str:
     docs = "\n\n".join(
         f"--- SOURCE: {d.filename} (type: {d.kind}) ---\n{d.text.strip() or '(no extractable text)'}"
         for d in documents
@@ -178,15 +191,18 @@ def _batch_prompt(elements: list[ResolvedElement], documents: list[DocContext]) 
     blocks = []
     for i, el in enumerate(elements, 1):
         subs = "\n".join(f"    - {s}" for s in el.sub_requirements) or "    (none)"
+        scope = (scope_notes or {}).get(i) or evidence_expectations(el.element_name)
         blocks.append(
             f"ELEMENT {i}: {el.element_name}\n"
             f"  DESCRIPTION: {el.description}\n"
-            f"  SUB-REQUIREMENTS:\n{subs}"
+            f"  SUB-REQUIREMENTS:\n{subs}\n"
+            f"  SCOPE / EVIDENCE STANDARD: {scope}"
         )
     return (
         f"Assess EACH of these {len(elements)} required elements against the SHARED source materials "
         "below. Judge each element independently on presence/completeness only; return exactly one "
-        "assessment per element, with element_number matching the numbers below.\n\n"
+        "assessment per element, with element_number matching the numbers below. Present requires concrete, "
+        "scoped evidence; narrative background alone is partial or missing.\n\n"
         f"{chr(10).join(blocks)}\n\n"
         f"SHARED SOURCE MATERIALS:\n{docs}\n\n"
         "Call record_assessments once, with one entry per element."
@@ -207,14 +223,14 @@ class AnthropicAssessor:
             self._client = anthropic.Anthropic(api_key=settings.anthropic_api_key)
         return self._client
 
-    def assess(self, element: ResolvedElement, documents: list[DocContext]) -> Assessment:
+    def assess(self, element: ResolvedElement, documents: list[DocContext], scope_note: str = "") -> Assessment:
         resp = self._get_client().messages.create(
             model=self._model,
             max_tokens=1024,
             system=SYSTEM_PROMPT,
             tools=[ASSESS_TOOL],
             tool_choice={"type": "tool", "name": "record_assessment"},
-            messages=[{"role": "user", "content": _element_prompt(element, documents)}],
+            messages=[{"role": "user", "content": _element_prompt(element, documents, scope_note)}],
         )
         for block in resp.content:
             if getattr(block, "type", None) == "tool_use" and block.name == "record_assessment":
@@ -222,14 +238,14 @@ class AnthropicAssessor:
                 return _assessment_from(d)
         raise RuntimeError("assessor returned no tool_use block")
 
-    def assess_batch(self, elements, documents):
+    def assess_batch(self, elements, documents, scope_notes=None):
         resp = self._get_client().messages.create(
             model=self._model,
             max_tokens=4096,
             system=SYSTEM_PROMPT,
             tools=[ASSESS_BATCH_TOOL],
             tool_choice={"type": "tool", "name": "record_assessments"},
-            messages=[{"role": "user", "content": _batch_prompt(elements, documents)}],
+            messages=[{"role": "user", "content": _batch_prompt(elements, documents, scope_notes)}],
         )
         for block in resp.content:
             if getattr(block, "type", None) == "tool_use" and block.name == "record_assessments":
@@ -253,7 +269,7 @@ class DeepSeekAssessor:
             )
         return self._client
 
-    def assess(self, element: ResolvedElement, documents: list[DocContext]) -> Assessment:
+    def assess(self, element: ResolvedElement, documents: list[DocContext], scope_note: str = "") -> Assessment:
         tool = {
             "type": "function",
             "function": {
@@ -262,7 +278,7 @@ class DeepSeekAssessor:
                 "parameters": ASSESS_TOOL["input_schema"],
             },
         }
-        prompt = _element_prompt(element, documents)
+        prompt = _element_prompt(element, documents, scope_note)
         log.info("assess[deepseek] START '%s' (prompt %d chars, %d docs)", element.element_name, len(prompt), len(documents))
         t0 = time.monotonic()
         try:
@@ -289,7 +305,7 @@ class DeepSeekAssessor:
         log.info("assess[deepseek] DONE '%s' -> %s in %.1fs", element.element_name, d.get("status"), time.monotonic() - t0)
         return _assessment_from(d)
 
-    def assess_batch(self, elements, documents):
+    def assess_batch(self, elements, documents, scope_notes=None):
         tool = {
             "type": "function",
             "function": {
@@ -298,7 +314,7 @@ class DeepSeekAssessor:
                 "parameters": ASSESS_BATCH_TOOL["input_schema"],
             },
         }
-        prompt = _batch_prompt(elements, documents)
+        prompt = _batch_prompt(elements, documents, scope_notes)
         log.info("assess_batch[deepseek] START %d element(s) (prompt %d chars, %d docs)",
                  len(elements), len(prompt), len(documents))
         t0 = time.monotonic()
@@ -330,7 +346,7 @@ class DeepSeekAssessor:
 class FakeAssessor:
     """Deterministic keyword-overlap heuristic for tests + dev fallback. No network."""
 
-    def assess(self, element: ResolvedElement, documents: list[DocContext]) -> Assessment:
+    def assess(self, element: ResolvedElement, documents: list[DocContext], scope_note: str = "") -> Assessment:
         words = {w.lower() for w in element.element_name.split() if len(w) > 4}
         if not words:
             words = {w.lower() for w in element.description.split() if len(w) > 5}
@@ -362,5 +378,5 @@ class FakeAssessor:
             "low",
         )
 
-    def assess_batch(self, elements, documents):
-        return {i: self.assess(el, documents) for i, el in enumerate(elements, 1)}
+    def assess_batch(self, elements, documents, scope_notes=None):
+        return {i: self.assess(el, documents, (scope_notes or {}).get(i, "")) for i, el in enumerate(elements, 1)}

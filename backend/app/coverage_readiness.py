@@ -3,10 +3,11 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Iterable
 
+from .evidence_quality import critical_quality_label
 from .models import CoverageStatus
 
 
-DRAFT_MIN_PRESENT_RATIO = 0.70
+DRAFT_MIN_PRESENT_RATIO = 1.00
 
 
 @dataclass(frozen=True)
@@ -25,6 +26,7 @@ def draft_readiness_from_counts(
     *,
     required_total: int,
     present: int,
+    partial: int,
     missing: int,
     pending: int,
     failed: int,
@@ -39,6 +41,9 @@ def draft_readiness_from_counts(
     if missing > 0:
         label = _plural(missing, "requirement is", "requirements are")
         return DraftReadiness(False, f"{missing} required {label} missing source support", present_ratio)
+    if partial > 0:
+        label = _plural(partial, "requirement is", "requirements are")
+        return DraftReadiness(False, f"{partial} required {label} only partially supported", present_ratio)
     if present_ratio < DRAFT_MIN_PRESENT_RATIO:
         pct = round(present_ratio * 100)
         threshold = round(DRAFT_MIN_PRESENT_RATIO * 100)
@@ -52,9 +57,35 @@ def draft_readiness_from_counts(
 
 def draft_readiness_for_rows(rows: Iterable[object]) -> DraftReadiness:
     required = [r for r in rows if not getattr(r, "is_conditional", False)]
+    for row in required:
+        label = critical_quality_label(str(getattr(row, "element_name", "")))
+        if label and getattr(row, "status", None) != CoverageStatus.present:
+            status = getattr(row, "status", None)
+            status_value = getattr(status, "value", status) or "unassessed"
+            return DraftReadiness(
+                False,
+                f"critical gate blocked: {label} is {status_value}; add verified source support before drafting",
+                sum(1 for r in required if getattr(r, "status", None) == CoverageStatus.present) / len(required)
+                if required else 0.0,
+            )
+        if label:
+            evidence = list(getattr(row, "evidence", []) or [])
+            has_source_evidence = any(
+                str(getattr(item, "source_label", "")).strip().lower() != "manual"
+                and getattr(item, "document_id", None) is not None
+                for item in evidence
+            )
+            if not has_source_evidence:
+                return DraftReadiness(
+                    False,
+                    f"critical gate blocked: {label} has no source evidence; add a supplement or upload",
+                    sum(1 for r in required if getattr(r, "status", None) == CoverageStatus.present) / len(required)
+                    if required else 0.0,
+                )
     return draft_readiness_from_counts(
         required_total=len(required),
         present=sum(1 for r in required if getattr(r, "status", None) == CoverageStatus.present),
+        partial=sum(1 for r in required if getattr(r, "status", None) == CoverageStatus.partial),
         missing=sum(1 for r in required if getattr(r, "status", None) == CoverageStatus.missing),
         pending=sum(1 for r in required if getattr(r, "status", None) == CoverageStatus.pending),
         failed=sum(1 for r in required if getattr(r, "status", None) == CoverageStatus.failed),

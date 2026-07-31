@@ -29,7 +29,7 @@ function withCoverageRow(data: CoverageResponse, updated: CoverageRow, opts: { u
   const required_total = requiredRows.length
   const present_ratio = required_total > 0 ? requiredRows.filter(row => row.status === "present").length / required_total : 0
   const minRatio = data.summary.draft_min_present_ratio
-  const draft_ready = opts.unlockDraft !== false && required_total > 0 && pending === 0 && failed === 0 && missing === 0 && present_ratio >= minRatio
+  const draft_ready = opts.unlockDraft !== false && required_total > 0 && pending === 0 && failed === 0 && missing === 0 && partial === 0 && present_ratio >= minRatio
   return {
     ...data,
     requirements,
@@ -234,7 +234,7 @@ export default function RequirementsStep({ engagementId, jurisdictions, onContin
   const readinessAction = coverageFailed
     ? "Retry failed requirements before drafting."
     : (s?.pending ?? 0) > 0
-    ? "Assessment is still running. Draft will unlock automatically if the file clears the evidence threshold."
+    ? "Assessment is still running. Draft will unlock automatically only if every required evidence gate clears."
     : "Add source material to the Missing and Partial requirements here, then re-assess."
 
   useEffect(() => {
@@ -445,7 +445,7 @@ export default function RequirementsStep({ engagementId, jurisdictions, onContin
                   <AlertTriangle size={14} style={{ color: "var(--color-text-caution-soft)", marginTop: 2 }} />
                   <div>
                     <p style={{ fontSize: "var(--font-text-sm-size)", fontWeight: "var(--font-weight-medium)", margin: "0 0 0.25rem", color: "var(--color-text)" }}>
-                      Draft is locked until the file has enough source support.
+                      Draft is locked until every required item has source support.
                     </p>
                     <p style={{ fontSize: "var(--font-text-xs-size)", color: "var(--color-text-secondary)", margin: 0, lineHeight: 1.5 }}>
                       {readinessMessage}. {readinessAction}

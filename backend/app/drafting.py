@@ -53,7 +53,12 @@ def _system_prompt(web: bool) -> str:
         "appears verbatim in a source you cite. Never invent, estimate, or compute a number. If a required "
         "figure is not in the sources, write prose noting the gap instead of inventing it.\n"
         + gap_line +
-        "4. SUFFICIENCY, NOT CORRECTNESS: draft the section from the sources; do not judge whether the tax "
+        "4. NO EVIDENCE, NO CONCLUSION: do not issue method, tested-party, benchmarking, financial, "
+        "or arm's-length conclusions unless the provided confidential sources contain the necessary "
+        "method, tested-party, comparable-set/range, tested results, and segmented financial support. "
+        "When support is missing, state that the section is blocked by missing evidence instead of "
+        "manufacturing analysis.\n"
+        "5. SUFFICIENCY, NOT CORRECTNESS: draft the section from the sources; do not judge whether the tax "
         "positions are correct, arm's-length, or compliant.\n\n"
         "STYLE:\n"
         "- TELL THE STORY, don't enumerate. Write connected narrative that EXPLAINS the business: why the "
@@ -67,15 +72,16 @@ def _system_prompt(web: bool) -> str:
         "prose where each belongs. NEVER write a Markdown table. A chart may only plot numbers that appear "
         "in the sources (Law 2) — never invent data to draw a graph.\n"
         "- Use Markdown sub-headings within the prose where helpful.\n\n"
+        "- Avoid repetitive sentence openings. Use the taxpayer's specific legal name when the sources "
+        "provide it; otherwise identify the missing legal-entity fact instead of repeating generic labels.\n\n"
         "Return the section by calling write_section with the Markdown content (inline [n] markers), the "
         "citation for each marker, and any tables/charts."
     )
 
 
-SYSTEM_PROMPT = _system_prompt(web=True)        # Anthropic (native web search)
+SYSTEM_PROMPT = _system_prompt(web=False)
 SYSTEM_PROMPT_NO_WEB = _system_prompt(web=False)  # DeepSeek (no web search)
 
-WEB_SEARCH_TOOL = {"type": "web_search_20250305", "name": "web_search", "max_uses": 3}
 
 # Structured, renderable data — rendered natively on-screen and in the .docx. Referenced from the prose
 # by [[table:ID]] / [[chart:ID]] markers, so the model never has to hand-format a Markdown table.
@@ -201,17 +207,24 @@ class DraftResult:
 
 class Drafter(Protocol):
     def draft(self, element: ResolvedElement, register: str, documents: list[DocContext],
-              coverage_note: str) -> DraftResult: ...
+              coverage_note: str, scope_note: str = "") -> DraftResult: ...
     def draft_batch(
         self,
         elements: list[ResolvedElement],
         register: str,
         documents: list[DocContext],
         coverage_notes: dict[int, str],
+        scope_notes: dict[int, str] | None = None,
     ) -> dict[int, DraftResult]: ...
 
 
-def _prompt(element: ResolvedElement, register: str, documents: list[DocContext], coverage_note: str) -> str:
+def _prompt(
+    element: ResolvedElement,
+    register: str,
+    documents: list[DocContext],
+    coverage_note: str,
+    scope_note: str = "",
+) -> str:
     subs = "\n".join(f"  - {s}" for s in element.sub_requirements) or "  (none)"
     docs = "\n\n".join(
         f"--- SOURCE: {d.filename} (type: {d.kind}) ---\n{d.text.strip() or '(no extractable text)'}"
@@ -219,13 +232,15 @@ def _prompt(element: ResolvedElement, register: str, documents: list[DocContext]
     ) or "(no confidential documents were provided)"
     voice = REGISTER_VOICE.get(register, REGISTER_VOICE["local"])
     note = f"\nCOVERAGE NOTE (from the Requirements assessment): {coverage_note}\n" if coverage_note else ""
+    scope = f"SCOPE / EVIDENCE STANDARD: {scope_note or '(use the system evidence standard)'}\n\n"
     return (
         f"{voice}\n\n"
         f"REQUIRED ELEMENT: {element.element_name}\n"
         f"WHAT THIS SECTION MUST CONTAIN: {element.description}\n"
         f"SUB-REQUIREMENTS:\n{subs}\n"
         f"{note}\n"
-        f"CONFIDENTIAL SOURCE MATERIALS (primary authority — cite these; use web_search only for gaps):\n"
+        f"{scope}"
+        f"CONFIDENTIAL SOURCE MATERIALS (only authority — cite these and do not use outside knowledge):\n"
         f"{docs}\n\n"
         "Draft this one section now and call write_section."
     )
@@ -236,6 +251,7 @@ def _batch_prompt(
     register: str,
     documents: list[DocContext],
     coverage_notes: dict[int, str],
+    scope_notes: dict[int, str] | None = None,
 ) -> str:
     docs = "\n\n".join(
         f"--- SOURCE: {d.filename} (type: {d.kind}) ---\n{d.text.strip() or '(no extractable text)'}"
@@ -250,7 +266,8 @@ def _batch_prompt(
             f"SECTION {i}: {element.element_name}\n"
             f"  WHAT THIS SECTION MUST CONTAIN: {element.description}\n"
             f"  SUB-REQUIREMENTS:\n{subs}\n"
-            f"  COVERAGE NOTE: {note or '(none)'}"
+            f"  COVERAGE NOTE: {note or '(none)'}\n"
+            f"  SCOPE / EVIDENCE STANDARD: {(scope_notes or {}).get(i) or '(use the system evidence standard)'}"
         )
     return (
         f"{voice}\n\n"
@@ -337,21 +354,22 @@ class AnthropicDrafter:
             self._client = anthropic.Anthropic(api_key=settings.anthropic_api_key)
         return self._client
 
-    def draft(self, element, register, documents, coverage_note):
+    def draft(self, element, register, documents, coverage_note, scope_note=""):
         resp = self._get_client().messages.create(
             model=self._model,
             max_tokens=2500,
             system=SYSTEM_PROMPT,
-            tools=[WEB_SEARCH_TOOL, WRITE_SECTION_TOOL],
-            messages=[{"role": "user", "content": _prompt(element, register, documents, coverage_note)}],
+            tools=[WRITE_SECTION_TOOL],
+            tool_choice={"type": "tool", "name": "write_section"},
+            messages=[{"role": "user", "content": _prompt(element, register, documents, coverage_note, scope_note)}],
         )
         for block in resp.content:
             if getattr(block, "type", None) == "tool_use" and block.name == "write_section":
                 return _draft_result_from(block.input)
         raise RuntimeError("drafter returned no write_section block")
 
-    def draft_batch(self, elements, register, documents, coverage_notes):
-        prompt = _batch_prompt(elements, register, documents, coverage_notes)
+    def draft_batch(self, elements, register, documents, coverage_notes, scope_notes=None):
+        prompt = _batch_prompt(elements, register, documents, coverage_notes, scope_notes)
         log.info("draft_batch[anthropic] START %d section(s) (prompt %d chars, %d docs)",
                  len(elements), len(prompt), len(documents))
         t0 = time.monotonic()
@@ -359,7 +377,8 @@ class AnthropicDrafter:
             model=self._model,
             max_tokens=8000,
             system=SYSTEM_PROMPT,
-            tools=[WEB_SEARCH_TOOL, WRITE_SECTIONS_TOOL],
+            tools=[WRITE_SECTIONS_TOOL],
+            tool_choice={"type": "tool", "name": "write_sections"},
             messages=[{"role": "user", "content": prompt}],
         )
         for block in resp.content:
@@ -387,7 +406,7 @@ class DeepSeekDrafter:
             )
         return self._client
 
-    def draft(self, element, register, documents, coverage_note):
+    def draft(self, element, register, documents, coverage_note, scope_note=""):
         tool = {
             "type": "function",
             "function": {
@@ -401,7 +420,7 @@ class DeepSeekDrafter:
             max_tokens=8192,  # headroom: v4 thinking mode spends tokens reasoning before the tool JSON
             messages=[
                 {"role": "system", "content": SYSTEM_PROMPT_NO_WEB},
-                {"role": "user", "content": _prompt(element, register, documents, coverage_note)},
+                {"role": "user", "content": _prompt(element, register, documents, coverage_note, scope_note)},
             ],
             tools=[tool],
             tool_choice={"type": "function", "function": {"name": "write_section"}},
@@ -413,7 +432,7 @@ class DeepSeekDrafter:
             raise RuntimeError(f"DeepSeek returned no tool call: {(msg.content or '')[:200]}")
         return _draft_result_from(json_repair.loads(msg.tool_calls[0].function.arguments))
 
-    def draft_batch(self, elements, register, documents, coverage_notes):
+    def draft_batch(self, elements, register, documents, coverage_notes, scope_notes=None):
         tool = {
             "type": "function",
             "function": {
@@ -422,7 +441,7 @@ class DeepSeekDrafter:
                 "parameters": WRITE_SECTIONS_TOOL["input_schema"],
             },
         }
-        prompt = _batch_prompt(elements, register, documents, coverage_notes)
+        prompt = _batch_prompt(elements, register, documents, coverage_notes, scope_notes)
         log.info("draft_batch[deepseek] START %d section(s) (prompt %d chars, %d docs)",
                  len(elements), len(prompt), len(documents))
         t0 = time.monotonic()
@@ -454,13 +473,13 @@ class DeepSeekDrafter:
 class FakeDrafter:
     """Deterministic stub for tests + dev fallback. No network, no web search."""
 
-    def draft(self, element, register, documents, coverage_note):
+    def draft(self, element, register, documents, coverage_note, scope_note=""):
         if documents:
             d = documents[0]
             content = (
                 f"## {element.element_name}\n\n"
                 f"{element.description} This section is drafted from the material on file.[1] "
-                f"Figures are summarised in [[table:t1]] and the trend in [[chart:c1]]."
+                f"Figures are summarised in [[table:t1]] and the trend in [[chart:c1]].[1]"
             )
             quote = (d.text.strip()[:160] or element.description)
             return DraftResult(
@@ -477,8 +496,8 @@ class FakeDrafter:
         )
         return DraftResult(content, [])
 
-    def draft_batch(self, elements, register, documents, coverage_notes):
+    def draft_batch(self, elements, register, documents, coverage_notes, scope_notes=None):
         return {
-            i: self.draft(element, register, documents, coverage_notes.get(i, ""))
+            i: self.draft(element, register, documents, coverage_notes.get(i, ""), (scope_notes or {}).get(i, ""))
             for i, element in enumerate(elements, 1)
         }

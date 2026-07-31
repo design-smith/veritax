@@ -63,6 +63,24 @@ def test_draft_validation_rejects_ungrounded_output():
         _validate_draft_result(result, DOCS, FNAME)
 
 
+def test_draft_validation_rejects_uncited_factual_sentence():
+    result = _draft_result_from({
+        "content": "Revenue was stable.[1] Margin improved without a citation.",
+        "citations": [{"marker": 1, "kind": "document", "source_label": "fin.pdf", "quote": "Revenue was 42.0 in 2024"}],
+    })
+    with pytest.raises(RuntimeError, match="lacks inline citation"):
+        _validate_draft_result(result, DOCS, FNAME)
+
+
+def test_draft_validation_rejects_number_not_in_cited_quote():
+    result = _draft_result_from({
+        "content": "Revenue was 99.0 in 2024.[1]",
+        "citations": [{"marker": 1, "kind": "document", "source_label": "fin.pdf", "quote": "Revenue was 42.0 in 2024"}],
+    })
+    with pytest.raises(RuntimeError, match="not present in the cited quote"):
+        _validate_draft_result(result, DOCS, FNAME)
+
+
 def test_draft_validation_rejects_missing_citation_marker_record():
     result = _draft_result_from({
         "content": "Revenue is 42.0.[1]",

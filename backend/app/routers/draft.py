@@ -17,7 +17,8 @@ from sqlalchemy.orm import selectinload
 from ..auth import AuthUser
 from ..config import settings
 from ..coverage_readiness import draft_readiness_for_rows
-from ..corpus import DocContext, document_filename_map, element_query, retrieve_documents, retrieve_documents_batch, union_docs
+from ..corpus import DocContext, document_filename_map, retrieve_documents, retrieve_documents_batch, union_docs
+from ..evidence_quality import assessment_scope_instruction, scoped_query
 from ..deps import (
     assert_owner,
     get_current_user,
@@ -48,6 +49,10 @@ REGISTER = "local"
 DRAFT_DOCUMENT_TITLE = "Transfer Pricing Local File"
 _INLINE_MARKER = re.compile(r"\[(\d+)\]")
 _OBJECT_MARKER = re.compile(r"\[\[(table|chart):([^\]]+)\]\]")
+_NUMERIC_TOKEN = re.compile(
+    r"(?<![\w\[])(?:[$€£]\s*)?\d[\d,]*(?:\.\d+)?\s*(?:%|percent|million|billion|bn|m|k)?",
+    re.IGNORECASE,
+)
 
 
 def _generated_on() -> str:
@@ -77,6 +82,25 @@ def _doc_by_label(documents: list[DocContext]) -> dict[str, DocContext]:
     return out
 
 
+def _substantive_sentences(content: str) -> list[str]:
+    sentences: list[str] = []
+    for raw_line in content.splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith("#"):
+            continue
+        split_line = re.sub(r"([.!?](?:\[\d+\])?)\s+", "\\1\n", line)
+        for part in split_line.splitlines():
+            text = part.strip()
+            visible = _OBJECT_MARKER.sub("", _INLINE_MARKER.sub("", text)).strip()
+            if len(re.sub(r"[^A-Za-z]", "", visible)) >= 12:
+                sentences.append(text)
+    return sentences
+
+
+def _number_key(value: str) -> str:
+    return re.sub(r"\D", "", value)
+
+
 def _validate_draft_result(result: DraftResult, documents: list[DocContext], fname_to_docid: dict[str, str]) -> None:
     content = result.content or ""
     if not content.strip():
@@ -94,6 +118,18 @@ def _validate_draft_result(result: DraftResult, documents: list[DocContext], fna
         raise RuntimeError(f"draft has uncaptured citation marker(s): {sorted(missing_records)}")
     if missing_inline:
         raise RuntimeError(f"draft returned citation(s) not used in content: {sorted(missing_inline)}")
+    citation_by_marker = {c.marker: c for c in result.citations}
+
+    for sentence in _substantive_sentences(content):
+        markers = {int(m.group(1)) for m in _INLINE_MARKER.finditer(sentence)}
+        if not markers:
+            raise RuntimeError(f"draft factual sentence lacks inline citation: {sentence[:160]}")
+        quote_text = " ".join(citation_by_marker[m].quote for m in markers if m in citation_by_marker)
+        scrubbed = _OBJECT_MARKER.sub("", _INLINE_MARKER.sub("", sentence))
+        for number in _NUMERIC_TOKEN.findall(scrubbed):
+            key = _number_key(number)
+            if key and key not in _number_key(quote_text):
+                raise RuntimeError(f"draft number '{number.strip()}' is not present in the cited quote")
 
     table_ids = {str(t.get("id")) for t in result.tables}
     chart_ids = {str(c.get("id")) for c in result.charts}
@@ -238,7 +274,8 @@ async def _write_result(session: AsyncSession, section: DraftSection, result: Dr
 
 
 async def _draft_one(session: AsyncSession, section: DraftSection, element, documents: list[DocContext],
-                     coverage_note: str, drafter: Drafter, fname_to_docid: dict[str, str]) -> None:
+                     coverage_note: str, scope_note: str, drafter: Drafter,
+                     fname_to_docid: dict[str, str]) -> None:
     section.status = DraftStatus.drafting
     section.error = None
     section.status_updated_at = datetime.now(timezone.utc)
@@ -248,7 +285,7 @@ async def _draft_one(session: AsyncSession, section: DraftSection, element, docu
     try:
         if not documents:
             raise RuntimeError("no retrieved source context for this section; add or re-index source material")
-        result = await asyncio.to_thread(drafter.draft, element, REGISTER, documents, coverage_note)
+        result = await asyncio.to_thread(drafter.draft, element, REGISTER, documents, coverage_note, scope_note)
         await _write_result(session, section, result, fname_to_docid, documents)
         log.info("draft_one DONE section=%s '%s' in %.1fs", section.id, element.element_name, time.monotonic() - t0)
     except Exception as exc:  # noqa: BLE001 - record failure per section, keep the loop going
@@ -260,7 +297,8 @@ async def _draft_one(session: AsyncSession, section: DraftSection, element, docu
 
 async def _draft_batch(session: AsyncSession, sections: list[DraftSection], elements: dict,
                        docs_by_key: dict[str, list[DocContext]], notes: dict[str, str],
-                       drafter: Drafter, fname_to_docid: dict[str, str]) -> None:
+                       scope_notes: dict[str, str], drafter: Drafter,
+                       fname_to_docid: dict[str, str]) -> None:
     for section in sections:
         section.status = DraftStatus.drafting
         section.error = None
@@ -277,11 +315,14 @@ async def _draft_batch(session: AsyncSession, sections: list[DraftSection], elem
         await session.commit()
         return
     coverage_notes = {i: notes.get(s.requirement_key, "") for i, s in enumerate(sections, 1)}
+    section_scope_notes = {i: scope_notes.get(s.requirement_key, "") for i, s in enumerate(sections, 1)}
     names = ", ".join(s.element_name for s in sections)
     log.info("draft_batch START %d section(s): %s", len(sections), names)
     t0 = time.monotonic()
     try:
-        results = await asyncio.to_thread(drafter.draft_batch, batch_elements, REGISTER, shared_docs, coverage_notes)
+        results = await asyncio.to_thread(
+            drafter.draft_batch, batch_elements, REGISTER, shared_docs, coverage_notes, section_scope_notes
+        )
     except Exception as exc:  # noqa: BLE001 - fail this batch, then keep later batches moving
         log.exception("draft_batch FAILED %d section(s) after %.1fs", len(sections), time.monotonic() - t0)
         for section in sections:
@@ -329,6 +370,7 @@ async def _mark_pending_failed(session_factory: async_sessionmaker, engagement_i
 
 
 async def _find_drafted_twin(session: AsyncSession, engagement_id: uuid.UUID, element) -> DraftSection | None:
+    return None
     """A completed section for the same element elsewhere in the engagement. Shared base templates give
     jurisdictions the same (name, order), and the prose is grounded in the same documents — so reuse it:
     no regeneration, and the shared narrative reads identically across the jurisdiction files.
@@ -371,6 +413,8 @@ async def _run_draft_serial_unused(session_factory: async_sessionmaker, drafter:
     async with session_factory() as session:
         elements = {e.requirement_key: e for e in resolve_requirements(jurisdiction)}
         fname_to_docid = await document_filename_map(session, engagement_id)
+        engagement = await session.get(Engagement, engagement_id)
+        entity_name = engagement.entity.name if engagement and engagement.entity else None
         notes = await _coverage_notes(session, engagement_id, jurisdiction)
         pending = (
             await session.execute(
@@ -398,13 +442,24 @@ async def _run_draft_serial_unused(session_factory: async_sessionmaker, drafter:
             else:
                 remaining.append(section)
         # Pass 2: draft the rest. One embedding call for their queries; per-section pgvector search is free.
-        queries = {s.requirement_key: element_query(elements[s.requirement_key]) for s in remaining}
+        queries = {
+            s.requirement_key: scoped_query(elements[s.requirement_key], entity_name=entity_name, jurisdiction=jurisdiction)
+            for s in remaining
+        }
+        scope_notes = {
+            s.requirement_key: assessment_scope_instruction(
+                elements[s.requirement_key], entity_name=entity_name, jurisdiction=jurisdiction
+            )
+            for s in remaining
+        }
         docs_by_key = await retrieve_documents_batch(session, engagement_id, embedder, queries)
         for section in remaining:
             element = elements[section.requirement_key]
             documents = docs_by_key.get(section.requirement_key, [])
             await _draft_one(session, section, element, documents,
-                             notes.get(section.requirement_key, ""), drafter, fname_to_docid)
+                             notes.get(section.requirement_key, ""),
+                             scope_notes.get(section.requirement_key, ""),
+                             drafter, fname_to_docid)
             await session.commit()
 
 
@@ -437,6 +492,8 @@ async def run_draft(session_factory: async_sessionmaker, drafter: Drafter, embed
 
             elements = {e.requirement_key: e for e in resolve_requirements(jurisdiction)}
             fname_to_docid = await document_filename_map(session, engagement_id)
+            engagement = await session.get(Engagement, engagement_id)
+            entity_name = engagement.entity.name if engagement and engagement.entity else None
             notes = await _coverage_notes(session, engagement_id, jurisdiction)
             pending = (
                 await session.execute(
@@ -467,7 +524,18 @@ async def run_draft(session_factory: async_sessionmaker, drafter: Drafter, embed
                 else:
                     remaining.append(section)
 
-            queries = {s.requirement_key: element_query(elements[s.requirement_key]) for s in remaining}
+            queries = {
+                s.requirement_key: scoped_query(
+                    elements[s.requirement_key], entity_name=entity_name, jurisdiction=jurisdiction
+                )
+                for s in remaining
+            }
+            scope_notes = {
+                s.requirement_key: assessment_scope_instruction(
+                    elements[s.requirement_key], entity_name=entity_name, jurisdiction=jurisdiction
+                )
+                for s in remaining
+            }
             docs_by_key = await retrieve_documents_batch(session, engagement_id, embedder, queries)
 
             draftable: list[DraftSection] = []
@@ -482,7 +550,7 @@ async def run_draft(session_factory: async_sessionmaker, drafter: Drafter, embed
                 await session.commit()
             remaining = draftable
 
-            batch_size = max(1, settings.draft_batch_size)
+            batch_size = 1
             log.info("run_draft: %d reused from twin, %d to draft in batches of %d",
                      reused, len(remaining), batch_size)
             for start in range(0, len(remaining), batch_size):
@@ -491,10 +559,12 @@ async def run_draft(session_factory: async_sessionmaker, drafter: Drafter, embed
                     section = group[0]
                     element = elements[section.requirement_key]
                     await _draft_one(session, section, element, docs_by_key.get(section.requirement_key, []),
-                                     notes.get(section.requirement_key, ""), drafter, fname_to_docid)
+                                     notes.get(section.requirement_key, ""),
+                                     scope_notes.get(section.requirement_key, ""),
+                                     drafter, fname_to_docid)
                     await session.commit()
                 else:
-                    await _draft_batch(session, group, elements, docs_by_key, notes, drafter, fname_to_docid)
+                    await _draft_batch(session, group, elements, docs_by_key, notes, scope_notes, drafter, fname_to_docid)
 
         log.info("run_draft DONE engagement=%s jurisdiction=%s in %.1fs",
                  engagement_id, jurisdiction, time.monotonic() - t0)
@@ -568,10 +638,17 @@ async def download_draft_docx(
     owner: Engagement = Depends(require_engagement_owner),
 ) -> Response:
     """The finished jurisdiction as a native Word file — cover, headings, native tables + editable charts."""
+    blocked = await _draft_blocked_by_coverage(session, engagement_id, jurisdiction)
+    if blocked:
+        raise HTTPException(status_code=409, detail=blocked)
     sections = await _load_sections(session, engagement_id, jurisdiction)
+    expected = len(resolve_requirements(jurisdiction))
     drafted = [s for s in sections if s.status == DraftStatus.drafted and s.content]
-    if not drafted:
+    if expected == 0 or len(sections) != expected or len(drafted) != expected:
         raise HTTPException(status_code=409, detail=f"draft not complete for '{jurisdiction}'")
+    uncited = [s.element_name for s in drafted if not s.citations]
+    if uncited:
+        raise HTTPException(status_code=409, detail=f"draft has uncited section(s): {', '.join(uncited[:3])}")
     entity = owner.entity.name if owner.entity else "Entity"
     cover = {
         "documentTitle": DRAFT_DOCUMENT_TITLE,
@@ -651,10 +728,19 @@ async def regenerate_section(
         raise HTTPException(status_code=409, detail=blocked)
 
     fname_to_docid = await document_filename_map(session, section.engagement_id)
-    documents = await retrieve_documents(session, section.engagement_id, embedder, element_query(element))
+    engagement = await session.get(Engagement, section.engagement_id)
+    entity_name = engagement.entity.name if engagement and engagement.entity else None
+    documents = await retrieve_documents(
+        session,
+        section.engagement_id,
+        embedder,
+        scoped_query(element, entity_name=entity_name, jurisdiction=section.jurisdiction),
+    )
     notes = await _coverage_notes(session, section.engagement_id, section.jurisdiction)
     await _draft_one(session, section, element, documents,
-                     notes.get(section.requirement_key, ""), drafter, fname_to_docid)
+                     notes.get(section.requirement_key, ""),
+                     assessment_scope_instruction(element, entity_name=entity_name, jurisdiction=section.jurisdiction),
+                     drafter, fname_to_docid)
     await session.commit()
     await session.refresh(section)
     return _to_read(section)

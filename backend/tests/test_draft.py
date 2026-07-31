@@ -116,5 +116,6 @@ def test_system_prompt_encodes_the_laws():
     assert "planning file" not in p
     assert "citation" in p                      # L1: cite every claim
     assert "never" in p and "number" in p       # L3: numbers never generated
-    assert "web_search only" in p or "gaps" in p  # confidential-first / web gap-filler
+    assert "web_search only" not in p            # local file drafting is confidential-source only
+    assert "outside knowledge" in p or "gaps" in p
     assert "not judge" in p or "correct" in p   # sufficiency not correctness
