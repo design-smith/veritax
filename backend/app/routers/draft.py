@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import gc
 import logging
 import re
 import time
@@ -17,7 +18,8 @@ from sqlalchemy.orm import selectinload
 from ..auth import AuthUser
 from ..config import settings
 from ..coverage_readiness import draft_readiness_for_rows
-from ..corpus import DocContext, document_filename_map, retrieve_documents, retrieve_documents_batch, union_docs
+from ..corpus import DocContext, context_chars, document_filename_map, retrieve_documents, union_docs
+from ..diagnostics import rss_mb
 from ..evidence_quality import assessment_scope_instruction, scoped_query
 from ..deps import (
     assert_owner,
@@ -441,26 +443,24 @@ async def _run_draft_serial_unused(session_factory: async_sessionmaker, drafter:
                 await session.commit()
             else:
                 remaining.append(section)
-        # Pass 2: draft the rest. One embedding call for their queries; per-section pgvector search is free.
-        queries = {
-            s.requirement_key: scoped_query(elements[s.requirement_key], entity_name=entity_name, jurisdiction=jurisdiction)
-            for s in remaining
-        }
-        scope_notes = {
-            s.requirement_key: assessment_scope_instruction(
-                elements[s.requirement_key], entity_name=entity_name, jurisdiction=jurisdiction
-            )
-            for s in remaining
-        }
-        docs_by_key = await retrieve_documents_batch(session, engagement_id, embedder, queries)
+        # Pass 2: draft the rest with one section's context in memory at a time.
         for section in remaining:
             element = elements[section.requirement_key]
-            documents = docs_by_key.get(section.requirement_key, [])
+            documents = await retrieve_documents(
+                session,
+                engagement_id,
+                embedder,
+                scoped_query(element, entity_name=entity_name, jurisdiction=jurisdiction),
+            )
             await _draft_one(session, section, element, documents,
                              notes.get(section.requirement_key, ""),
-                             scope_notes.get(section.requirement_key, ""),
+                             assessment_scope_instruction(
+                                 element, entity_name=entity_name, jurisdiction=jurisdiction
+                             ),
                              drafter, fname_to_docid)
             await session.commit()
+            documents.clear()
+            gc.collect()
 
 
 async def run_draft(session_factory: async_sessionmaker, drafter: Drafter, embedder: Embedder,
@@ -524,32 +524,6 @@ async def run_draft(session_factory: async_sessionmaker, drafter: Drafter, embed
                 else:
                     remaining.append(section)
 
-            queries = {
-                s.requirement_key: scoped_query(
-                    elements[s.requirement_key], entity_name=entity_name, jurisdiction=jurisdiction
-                )
-                for s in remaining
-            }
-            scope_notes = {
-                s.requirement_key: assessment_scope_instruction(
-                    elements[s.requirement_key], entity_name=entity_name, jurisdiction=jurisdiction
-                )
-                for s in remaining
-            }
-            docs_by_key = await retrieve_documents_batch(session, engagement_id, embedder, queries)
-
-            draftable: list[DraftSection] = []
-            for section in remaining:
-                if docs_by_key.get(section.requirement_key):
-                    draftable.append(section)
-                else:
-                    section.status = DraftStatus.failed
-                    section.status_updated_at = datetime.now(timezone.utc)
-                    section.error = "no retrieved source context for this section; add or re-index source material"
-            if len(draftable) != len(remaining):
-                await session.commit()
-            remaining = draftable
-
             batch_size = 1
             log.info("run_draft: %d reused from twin, %d to draft in batches of %d",
                      reused, len(remaining), batch_size)
@@ -558,13 +532,66 @@ async def run_draft(session_factory: async_sessionmaker, drafter: Drafter, embed
                 if batch_size == 1:
                     section = group[0]
                     element = elements[section.requirement_key]
-                    await _draft_one(session, section, element, docs_by_key.get(section.requirement_key, []),
+                    documents: list[DocContext] = []
+                    try:
+                        documents = await retrieve_documents(
+                            session,
+                            engagement_id,
+                            embedder,
+                            scoped_query(element, entity_name=entity_name, jurisdiction=jurisdiction),
+                        )
+                        log.info(
+                            "run_draft: section context ready order=%d key=%s docs=%d context_chars=%d rss=%s",
+                            section.element_order,
+                            section.requirement_key,
+                            len(documents),
+                            context_chars(documents),
+                            rss_mb(),
+                        )
+                    except Exception as exc:  # noqa: BLE001 - provider/search failure affects one section
+                        log.exception(
+                            "run_draft: context retrieval FAILED order=%d key=%s",
+                            section.element_order,
+                            section.requirement_key,
+                        )
+                        section.status = DraftStatus.failed
+                        section.status_updated_at = datetime.now(timezone.utc)
+                        section.error = str(exc)[:1000]
+                        await session.commit()
+                        continue
+                    if not documents:
+                        section.status = DraftStatus.failed
+                        section.status_updated_at = datetime.now(timezone.utc)
+                        section.error = "no retrieved source context for this section; add or re-index source material"
+                        await session.commit()
+                        continue
+                    await _draft_one(session, section, element, documents,
                                      notes.get(section.requirement_key, ""),
-                                     scope_notes.get(section.requirement_key, ""),
+                                     assessment_scope_instruction(
+                                         element, entity_name=entity_name, jurisdiction=jurisdiction
+                                     ),
                                      drafter, fname_to_docid)
                     await session.commit()
+                    documents.clear()
+                    gc.collect()
                 else:
-                    await _draft_batch(session, group, elements, docs_by_key, notes, scope_notes, drafter, fname_to_docid)
+                    for section in group:
+                        element = elements[section.requirement_key]
+                        documents = await retrieve_documents(
+                            session,
+                            engagement_id,
+                            embedder,
+                            scoped_query(element, entity_name=entity_name, jurisdiction=jurisdiction),
+                        )
+                        await _draft_one(session, section, element, documents,
+                                         notes.get(section.requirement_key, ""),
+                                         assessment_scope_instruction(
+                                             element, entity_name=entity_name, jurisdiction=jurisdiction
+                                         ),
+                                         drafter, fname_to_docid)
+                        await session.commit()
+                        documents.clear()
+                        gc.collect()
 
         log.info("run_draft DONE engagement=%s jurisdiction=%s in %.1fs",
                  engagement_id, jurisdiction, time.monotonic() - t0)

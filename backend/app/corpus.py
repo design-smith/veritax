@@ -18,6 +18,7 @@ from collections.abc import Iterable
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from .diagnostics import rss_mb
 from .embeddings import Embedder
 from .models import Document, DocumentChunk, DocumentStatus, Source
 
@@ -40,6 +41,10 @@ class DocContext:
 
 
 _CHUNK_SEP = "\n…\n"  # how _search_chunks joins a document's matched passages
+
+
+def context_chars(documents: Iterable[DocContext]) -> int:
+    return sum(len(doc.text) for doc in documents)
 
 
 def union_docs(doc_lists: list[list[DocContext]]) -> list[DocContext]:
@@ -155,8 +160,19 @@ async def retrieve_documents(
     passages) regardless of how large the underlying files are. Reads pre-embedded chunk text, so no
     PDF re-extraction. Empty until documents have been embedded.
     """
+    t0 = time.monotonic()
     qvec = (await asyncio.to_thread(embedder.embed_queries, [query]))[0]
-    return await _search_chunks(session, engagement_id, qvec, k)
+    docs = await _search_chunks(session, engagement_id, qvec, k)
+    log.info(
+        "retrieve_documents: query_chars=%d k=%d docs=%d context_chars=%d elapsed=%.1fs rss=%s",
+        len(query),
+        k,
+        len(docs),
+        context_chars(docs),
+        time.monotonic() - t0,
+        rss_mb(),
+    )
+    return docs
 
 
 async def retrieve_documents_batch(
@@ -181,8 +197,15 @@ async def retrieve_documents_batch(
     out: dict[str, list[DocContext]] = {}
     for key, vec in zip(keys, vecs):
         out[key] = await _search_chunks(session, engagement_id, vec, k)
-    log.info("retrieve_documents_batch: %d quer(y/ies) embedded + searched in %.1fs",
-             len(keys), time.monotonic() - t0)
+    log.info(
+        "retrieve_documents_batch: queries=%d k=%d docs=%d context_chars=%d elapsed=%.1fs rss=%s",
+        len(keys),
+        k,
+        sum(len(docs) for docs in out.values()),
+        sum(context_chars(docs) for docs in out.values()),
+        time.monotonic() - t0,
+        rss_mb(),
+    )
     return out
 
 

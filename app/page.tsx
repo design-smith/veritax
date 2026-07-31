@@ -56,12 +56,21 @@ function readWorkspaceUrl() {
   }
 }
 
+function canonicalizePlanningUrl() {
+  if (typeof window === "undefined") return
+  const url = new URL(window.location.href)
+  if (parseStepParam(url.searchParams.get("step")) !== 1) return
+  url.searchParams.delete("step")
+  window.history.replaceState(null, "", `${url.pathname}${url.search}${url.hash}`)
+}
+
 function replaceWorkspaceUrl(projectId: string | null, step: Step) {
   if (typeof window === "undefined") return
   const url = new URL(window.location.href)
   if (projectId) url.searchParams.set("project", projectId)
   else url.searchParams.delete("project")
-  url.searchParams.set("step", STEP_URL[step])
+  if (step === 1) url.searchParams.delete("step")
+  else url.searchParams.set("step", STEP_URL[step])
   window.history.replaceState(null, "", `${url.pathname}${url.search}${url.hash}`)
 }
 
@@ -250,6 +259,7 @@ export default function Page() {
   useEffect(() => {
     let cancelled = false
     ;(async () => {
+      canonicalizePlanningUrl()
       setBootStatus("loading")
       setLibraryLoading(true)
       try {

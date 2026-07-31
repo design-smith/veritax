@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import gc
 import logging
 import time
 import uuid
@@ -27,11 +28,12 @@ from ..config import settings
 from ..coverage_readiness import draft_readiness_for_rows
 from ..corpus import (
     ASSESS_K,
+    context_chars,
     document_filename_map,
     retrieve_documents,
-    retrieve_documents_batch,
     union_docs,
 )
+from ..diagnostics import rss_mb
 from ..evidence_quality import assessment_scope_instruction, scoped_query
 from ..deps import (
     assert_owner,
@@ -440,20 +442,7 @@ async def run_assessment(session_factory: async_sessionmaker, assessor: Assessor
                     reused += 1
                 else:
                     uncached.append((rid, rk))
-            # One embed call for the remaining elements (the rate-limited step); search per element.
-            queries = {
-                rk: scoped_query(elements[rk], entity_name=entity_name, jurisdiction=jurisdiction)
-                for _, rk in uncached
-            }
-            docs_by_key: dict = {}
-            retrieval_error: str | None = None
-            try:
-                docs_by_key = await retrieve_documents_batch(
-                    session, engagement_id, embedder, queries, k=ASSESS_K
-                )
-            except Exception as exc:  # noqa: BLE001 - embedding provider down/rate-limited: fail rows cleanly
-                retrieval_error = str(exc)[:500]
-                log.exception("run_assessment: query embedding FAILED — uncached rows will be marked failed")
+            # Context is retrieved per batch below so Render does not hold every section's source text.
 
         batch_size = 1
         log.info("run_assessment: %d reused from twin, %d to assess in batches of %d",
@@ -462,8 +451,33 @@ async def run_assessment(session_factory: async_sessionmaker, assessor: Assessor
         # ── Pass 2: batched assessment of the uncached rows (committed per batch = progressive reveal) ──
         for start in range(0, len(uncached), batch_size):
             group = uncached[start:start + batch_size]
+            docs_by_key: dict = {}
+            retrieval_error: str | None = None
+            try:
+                async with session_factory() as retrieval_session:
+                    for _rid, rk in group:
+                        docs = await retrieve_documents(
+                            retrieval_session,
+                            engagement_id,
+                            embedder,
+                            scoped_query(elements[rk], entity_name=entity_name, jurisdiction=jurisdiction),
+                            k=ASSESS_K,
+                        )
+                        docs_by_key[rk] = docs
+                    log.info(
+                        "run_assessment: context ready rows=%d docs=%d context_chars=%d rss=%s",
+                        len(group),
+                        sum(len(docs) for docs in docs_by_key.values()),
+                        sum(context_chars(docs) for docs in docs_by_key.values()),
+                        rss_mb(),
+                    )
+            except Exception as exc:  # noqa: BLE001 - embedding provider down/rate-limited: fail rows cleanly
+                retrieval_error = str(exc)[:500]
+                log.exception("run_assessment: context retrieval FAILED for %d row(s)", len(group))
             await _assess_group(session_factory, assessor, elements, docs_by_key,
                                 retrieval_error, fname_to_docid, group, entity_name, jurisdiction)
+            docs_by_key.clear()
+            gc.collect()
         log.info("run_assessment DONE engagement=%s jurisdiction=%s in %.1fs",
                  engagement_id, jurisdiction, time.monotonic() - t0)
     except Exception:
