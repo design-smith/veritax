@@ -30,6 +30,40 @@ const NAV: { step: Step; label: string }[] = [
 const LS_ID = "veritax.engagementId"     // resume the file being worked on across refreshes
 const LS_STEP = "veritax.step"
 const PLANNING_SOURCES = new Set<SourceId>(["financials", "agreements", "public", "interview"])
+const STEP_URL: Record<Step, string> = {
+  1: "planning",
+  2: "requirements",
+  3: "draft",
+  4: "risks",
+}
+
+function parseStepParam(value: string | null): Step | null {
+  if (!value) return null
+  const normalized = value.toLowerCase()
+  if (normalized === "planning" || normalized === "1") return 1
+  if (normalized === "requirements" || normalized === "2") return 2
+  if (normalized === "draft" || normalized === "3") return 3
+  if (normalized === "risks" || normalized === "4") return 4
+  return null
+}
+
+function readWorkspaceUrl() {
+  if (typeof window === "undefined") return { projectId: null as string | null, step: null as Step | null }
+  const params = new URLSearchParams(window.location.search)
+  return {
+    projectId: params.get("project") || params.get("engagement") || params.get("file"),
+    step: parseStepParam(params.get("step")),
+  }
+}
+
+function replaceWorkspaceUrl(projectId: string | null, step: Step) {
+  if (typeof window === "undefined") return
+  const url = new URL(window.location.href)
+  if (projectId) url.searchParams.set("project", projectId)
+  else url.searchParams.delete("project")
+  url.searchParams.set("step", STEP_URL[step])
+  window.history.replaceState(null, "", `${url.pathname}${url.search}${url.hash}`)
+}
 
 function describeAppError(error: unknown) {
   return {
@@ -227,15 +261,21 @@ export default function Page() {
         }
         return
       }
+      const fromUrl = readWorkspaceUrl()
       const stored = localStorage.getItem(LS_ID)
-      const resumed = stored ? await loadEngagement(stored) : false
+      const requestedId = fromUrl.projectId || stored
+      let resumed = requestedId ? await loadEngagement(requestedId) : false
+      if (!resumed && fromUrl.projectId && stored && stored !== fromUrl.projectId) {
+        resumed = await loadEngagement(stored)
+      }
       if (cancelled) return
       if (resumed) {
-        const s = Number(localStorage.getItem(LS_STEP))
-        if (s >= 2 && s <= 4) {
-          const resumedStep = (s >= 3 ? 2 : s) as Step
+        const resumedStep = fromUrl.step ?? parseStepParam(localStorage.getItem(LS_STEP))
+        if (resumedStep) {
           setStep(resumedStep)
           setVisited(new Set([1, resumedStep]))
+          setMounted(new Set([1, resumedStep]))
+          if (resumedStep >= 3) setDraftReady(true)
         }
       } else {
         try {
@@ -260,6 +300,10 @@ export default function Page() {
   }, [loadEngagement, refreshFiles])
 
   useEffect(() => { localStorage.setItem(LS_STEP, String(step)) }, [step])
+  useEffect(() => {
+    if (bootStatus !== "ready" || page !== "workflow") return
+    replaceWorkspaceUrl(engagementId, step)
+  }, [bootStatus, engagementId, page, step])
   useEffect(() => { setMounted(m => (m.has(step) ? m : new Set([...m, step]))) }, [step])  // mount a step on first visit, keep it
   useEffect(() => {
     if (!engagementId) return

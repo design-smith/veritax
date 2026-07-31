@@ -595,16 +595,6 @@
   break-after: page;
 }
 
-.vt-a4-page-label {
-  position: absolute;
-  top: 10mm;
-  right: 12mm;
-  font-size: var(--font-text-2xs-size);
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-  color: var(--color-text-tertiary);
-}
-
 .vt-draft-editor {
   width: 100%;
   min-height: 220mm;
@@ -675,9 +665,6 @@
     box-shadow: none;
     border-radius: 0;
     break-after: page;
-  }
-  .vt-a4-page-label {
-    display: none;
   }
 }
 

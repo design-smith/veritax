@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useState, type CSSProperties, type ReactNode } from "react"
+import { useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react"
 import ReactMarkdown from "react-markdown"
 import remarkGfm from "remark-gfm"
 import {
@@ -153,6 +153,73 @@ function renderSection(s: DraftSection): ReactNode[] {
   return parts
 }
 
+export function DraftSectionSidebar({ sections, activeSectionId, onSelect, onSelectCover, includeCover = true, isSectionAvailable }: {
+  sections: DraftSection[]
+  activeSectionId: string | null
+  onSelect: (section: DraftSection) => void
+  onSelectCover?: () => void
+  includeCover?: boolean
+  isSectionAvailable?: (section: DraftSection) => boolean
+}) {
+  const ordered = [...sections].sort((a, b) => a.element_order - b.element_order)
+  return (
+    <nav style={{ width: 224, flexShrink: 0, borderRight: "1px solid var(--color-border)", background: "var(--color-surface)", overflowY: "auto", padding: "1rem 0.5rem" }}>
+      <p style={{ fontSize: "var(--font-text-xs-size)", color: "var(--color-text-tertiary)", textTransform: "uppercase", letterSpacing: "0.04em", fontWeight: "var(--font-weight-medium)", padding: "0 0.5rem", marginBottom: "0.375rem" }}>Sections</p>
+      {includeCover && (
+        <button
+          type="button"
+          onClick={onSelectCover}
+          style={{
+            display: "flex", alignItems: "center", gap: "0.5rem", padding: "0.45rem 0.5rem", width: "100%", border: "none",
+            background: activeSectionId === "cover" ? "var(--color-background-primary-soft)" : "transparent",
+            cursor: onSelectCover ? "pointer" : "default", borderRadius: "var(--radius-md)", textAlign: "left", transition: "background var(--transition-duration-basic)",
+          }}
+        >
+          <span style={{ fontSize: "10px", color: "var(--color-text-tertiary)", flexShrink: 0 }}>00</span>
+          <span style={{ fontSize: "var(--font-text-xs-size)", color: activeSectionId === "cover" ? "var(--color-text)" : "var(--color-text-secondary)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>Cover</span>
+        </button>
+      )}
+      {ordered.map(s => {
+        const active = activeSectionId === s.id
+        const available = isSectionAvailable ? isSectionAvailable(s) : !!s.content
+        const clickable = s.status === "drafted" && available
+        const failed = s.status === "failed"
+        const pending = s.status === "pending"
+        const drafting = s.status === "drafting"
+        return (
+          <button
+            key={s.id}
+            type="button"
+            onClick={() => clickable && onSelect(s)}
+            disabled={!clickable}
+            aria-label={`${s.element_name} ${s.status}`}
+            style={{
+              display: "flex", alignItems: "center", gap: "0.5rem", padding: "0.45rem 0.5rem", width: "100%", border: "none",
+              background: active ? "var(--color-background-primary-soft)" : "transparent",
+              cursor: clickable ? "pointer" : "default", borderRadius: "var(--radius-md)", textAlign: "left",
+              opacity: pending ? 0.48 : s.status === "drafted" && !available ? 0.68 : 1,
+              transition: "background var(--transition-duration-basic), opacity var(--transition-duration-basic)",
+            }}
+          >
+            <span style={{ fontSize: "10px", color: failed ? "var(--color-text-danger-soft)" : "var(--color-text-tertiary)", flexShrink: 0 }}>
+              {String(s.element_order).padStart(2, "0")}
+            </span>
+            <span style={{
+              flex: 1, minWidth: 0, fontSize: "var(--font-text-xs-size)",
+              color: failed ? "var(--color-text-danger-soft)" : active ? "var(--color-text)" : drafting ? "var(--color-text-secondary)" : "var(--color-text-secondary)",
+              overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
+            }}>
+              {s.element_name}
+            </span>
+            {drafting && <Loader2 size={12} className="animate-spin" style={{ color: "var(--color-text-tertiary)", flexShrink: 0 }} />}
+            {failed && <span style={{ width: 6, height: 6, borderRadius: 999, background: "var(--color-text-danger-soft)", flexShrink: 0 }} />}
+          </button>
+        )
+      })}
+    </nav>
+  )
+}
+
 export default function DraftDocument({ engagementId, jurisdiction, entity, sections, onSectionsChange }: {
   engagementId: string
   jurisdiction: string
@@ -166,7 +233,10 @@ export default function DraftDocument({ engagementId, jurisdiction, entity, sect
   const [draftText, setDraftText] = useState<Record<string, string>>({})
   const [saving, setSaving] = useState<Record<string, boolean>>({})
   const [saveError, setSaveError] = useState<Record<string, string>>({})
-  const ordered = [...docSections].sort((a, b) => a.element_order - b.element_order)
+  const [activeSectionId, setActiveSectionId] = useState<string>("cover")
+  const scrollRef = useRef<HTMLDivElement>(null)
+  const ordered = useMemo(() => [...docSections].sort((a, b) => a.element_order - b.element_order), [docSections])
+  const orderedIds = useMemo(() => ordered.map(s => s.id).join("|"), [ordered])
 
   useEffect(() => {
     setDocSections(sections)
@@ -222,13 +292,39 @@ export default function DraftDocument({ engagementId, jurisdiction, entity, sect
     setSaveError(prev => ({ ...prev, [section.id]: "" }))
   }
 
+  function scrollToElement(id: string) {
+    const target = scrollRef.current?.querySelector<HTMLElement>(`#${id}`)
+    target?.scrollIntoView({ behavior: "smooth", block: "start" })
+  }
+
+  useEffect(() => {
+    const root = scrollRef.current
+    if (!root) return
+    const nodes = Array.from(root.querySelectorAll<HTMLElement>("[data-draft-section-id]"))
+    if (nodes.length === 0) return
+    const observer = new IntersectionObserver((entries) => {
+      const visible = entries
+        .filter(entry => entry.isIntersecting)
+        .sort((a, b) => a.boundingClientRect.top - b.boundingClientRect.top)[0]
+      const id = visible?.target.getAttribute("data-draft-section-id")
+      if (id) setActiveSectionId(id)
+    }, { root, threshold: 0.18, rootMargin: "-12% 0px -58% 0px" })
+    nodes.forEach(node => observer.observe(node))
+    return () => observer.disconnect()
+  }, [orderedIds, editing])
+
   return (
     <div style={{ flex: 1, display: "flex", overflow: "hidden", minWidth: 0 }}>
+      {ordered.length > 0 && (
+        <DraftSectionSidebar
+          sections={ordered}
+          activeSectionId={activeSectionId}
+          onSelect={section => scrollToElement(`draft-section-${section.id}`)}
+          onSelectCover={() => scrollToElement("draft-cover-page")}
+        />
+      )}
       <main style={{ flex: 1, display: "flex", flexDirection: "column", minWidth: 0 }}>
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: "0.75rem", padding: "0.5rem 1rem", borderBottom: "1px solid var(--color-border)", background: "var(--color-surface)" }}>
-          <p style={{ margin: 0, fontSize: "var(--font-text-xs-size)", color: "var(--color-text-tertiary)" }}>
-            A4 page preview
-          </p>
+        <div style={{ display: "flex", justifyContent: "flex-end", alignItems: "center", gap: "0.75rem", padding: "0.5rem 1rem", borderBottom: "1px solid var(--color-border)", background: "var(--color-surface)" }}>
           <div style={{ display: "flex", justifyContent: "flex-end", gap: "0.5rem" }}>
             <button type="button" onClick={() => setEditing(v => !v)} style={{
               display: "inline-flex", alignItems: "center", gap: "0.375rem", height: "var(--control-size-sm)", padding: "0 var(--control-gutter-md)",
@@ -245,18 +341,16 @@ export default function DraftDocument({ engagementId, jurisdiction, entity, sect
           </div>
         </div>
 
-        <div className="vt-a4-scroll">
-          <article id="draft-cover-page" className="vt-a4-page">
-            <span className="vt-a4-page-label">Page 1</span>
+        <div ref={scrollRef} className="vt-a4-scroll">
+          <article id="draft-cover-page" className="vt-a4-page" data-draft-section-id="cover">
             <DraftCover entity={entity} jurisdiction={jurisdiction} />
           </article>
-          {ordered.map((s, idx) => {
+          {ordered.map(s => {
             const value = draftText[s.id] ?? ""
             const original = stripLeadingSectionHeading(s.content ?? "").trim()
             const dirty = value.trim() !== original
             return (
-              <article key={s.id} id={`sec-${s.element_order}`} className="vt-a4-page">
-                <span className="vt-a4-page-label">Page {idx + 2}</span>
+              <article key={s.id} id={`draft-section-${s.id}`} className="vt-a4-page" data-draft-section-id={s.id}>
                 <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: "1rem", margin: "0 0 0.5rem" }}>
                   <h2 style={{ fontSize: "18px", fontWeight: "var(--font-weight-semibold)", color: "var(--color-text)", margin: 0 }}>
                     {s.element_order}. {s.element_name}
@@ -309,24 +403,6 @@ export default function DraftDocument({ engagementId, jurisdiction, entity, sect
           })}
         </div>
       </main>
-
-      {ordered.length > 0 && (
-        <nav style={{ width: 210, flexShrink: 0, borderLeft: "1px solid var(--color-border)", background: "var(--color-surface)", overflowY: "auto", padding: "1rem 0.5rem" }}>
-          <p style={{ fontSize: "var(--font-text-xs-size)", color: "var(--color-text-tertiary)", textTransform: "uppercase", letterSpacing: "0.04em", fontWeight: "var(--font-weight-medium)", padding: "0 0.5rem", marginBottom: "0.375rem" }}>Sections</p>
-          <button type="button" onClick={() => document.getElementById("draft-cover-page")?.scrollIntoView({ behavior: "smooth", block: "start" })}
-            style={{ display: "flex", gap: "0.5rem", padding: "0.4rem 0.5rem", width: "100%", border: "none", background: "transparent", cursor: "pointer", borderRadius: "var(--radius-md)", textAlign: "left" }}>
-            <span style={{ fontSize: "10px", color: "var(--color-text-tertiary)", flexShrink: 0 }}>01</span>
-            <span style={{ fontSize: "var(--font-text-xs-size)", color: "var(--color-text-secondary)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>Cover</span>
-          </button>
-          {ordered.map(s => (
-            <button key={s.id} type="button" onClick={() => document.getElementById(`sec-${s.element_order}`)?.scrollIntoView({ behavior: "smooth", block: "start" })}
-              style={{ display: "flex", gap: "0.5rem", padding: "0.4rem 0.5rem", width: "100%", border: "none", background: "transparent", cursor: "pointer", borderRadius: "var(--radius-md)", textAlign: "left" }}>
-              <span style={{ fontSize: "10px", color: "var(--color-text-tertiary)", flexShrink: 0 }}>{String(s.element_order + 1).padStart(2, "0")}</span>
-              <span style={{ fontSize: "var(--font-text-xs-size)", color: "var(--color-text-secondary)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{s.element_name}</span>
-            </button>
-          ))}
-        </nav>
-      )}
     </div>
   )
 }
