@@ -579,6 +579,30 @@
   overflow-y: auto;
   background: var(--color-surface-secondary);
   padding: 1.5rem;
+  scrollbar-gutter: stable;
+  scrollbar-width: thin;
+  scrollbar-color: var(--alpha-25) transparent;
+}
+
+.vt-a4-scroll::-webkit-scrollbar {
+  display: block;
+  width: 8px;
+}
+
+.vt-a4-scroll::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.vt-a4-scroll::-webkit-scrollbar-thumb {
+  background: var(--alpha-25);
+  border: 2px solid transparent;
+  border-radius: var(--radius-full);
+  background-clip: content-box;
+}
+
+.vt-a4-scroll:hover::-webkit-scrollbar-thumb {
+  background: var(--alpha-40);
+  background-clip: content-box;
 }
 
 .vt-a4-page {

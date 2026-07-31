@@ -1,7 +1,7 @@
 "use client"
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
-import { Loader2 } from "lucide-react"
+import { ArrowRight, Download, Edit3, Loader2 } from "lucide-react"
 import { api, type DraftResponse, type DraftSection } from "@/lib/api"
 import { Animate } from "@/components/ui/transition"
 import DraftDocument, { DraftCover, DraftSectionSidebar } from "./DraftDocument"
@@ -196,6 +196,9 @@ export default function DraftStep({ engagementId, jurisdictions, entity, onConti
   const [activeJurisdiction, setActive] = useState(jurisdictions[0] ?? "")
   const [error, setError] = useState<string | null>(null)
   const [retrying, setRetrying] = useState(false)
+  const [editing, setEditing] = useState(false)
+  const [downloading, setDownloading] = useState(false)
+  const [downloadHover, setDownloadHover] = useState(false)
   const [typedDoneByJuris, setTypedDoneByJuris] = useState<Record<string, boolean>>({})
 
   const draftRef = useRef(draftByJuris); draftRef.current = draftByJuris
@@ -263,6 +266,24 @@ export default function DraftStep({ engagementId, jurisdictions, entity, onConti
     startJurisdiction(j)
   }
 
+  async function downloadDraft() {
+    if (!engagementId || !complete) return
+    setDownloading(true)
+    try {
+      const blob = await api.downloadDraftDocx(engagementId, activeJurisdiction)
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement("a")
+      a.href = url
+      a.download = `${(entity || "Entity")} ${activeJurisdiction} Local File`.replace(/[^\w]+/g, "-").replace(/^-|-$/g, "") + ".docx"
+      a.click()
+      URL.revokeObjectURL(url)
+    } catch (e) {
+      console.error("[veritax] docx download failed:", e)
+    } finally {
+      setDownloading(false)
+    }
+  }
+
   async function retryDraft() {
     if (!engagementId) return
     setRetrying(true)
@@ -293,6 +314,7 @@ export default function DraftStep({ engagementId, jurisdictions, entity, onConti
   const failed = failedSections.length > 0
   const complete = !!draft && draft.summary.total > 0 && draft.summary.pending === 0 && !failed
   const typedDone = typedDoneByJuris[activeJurisdiction] === true
+  const showDraftActions = complete && typedDone && !!draft
 
   useEffect(() => {
     if (!draft) return
@@ -311,6 +333,15 @@ export default function DraftStep({ engagementId, jurisdictions, entity, onConti
     setTypedDoneByJuris(prev => ({ ...prev, [activeJurisdiction]: false }))
     if (key) localStorage.removeItem(key)
   }, [activeJurisdiction, complete, draft, markTypedDone, typedDoneStorageKey])
+
+  useEffect(() => {
+    setEditing(false)
+    setDownloadHover(false)
+  }, [activeJurisdiction, engagementId])
+
+  useEffect(() => {
+    if (!showDraftActions) setEditing(false)
+  }, [showDraftActions])
 
   if (!engagementId) return <main style={{ flex: 1, padding: "3rem 3.5rem", color: "var(--color-text-tertiary)" }}>Preparing session…</main>
   if (jurisdictions.length === 0) return <main style={{ flex: 1, padding: "3rem 3.5rem", color: "var(--color-text-tertiary)" }}>Select a jurisdiction in Planning first.</main>
@@ -341,13 +372,50 @@ export default function DraftStep({ engagementId, jurisdictions, entity, onConti
             )
           })}
         </div>
-        <button type="button" disabled={!complete} onClick={onContinue} style={{
-          height: "var(--control-size-md)", padding: "0 var(--control-gutter-lg)",
-          borderRadius: "var(--control-radius-md)", border: "none", flexShrink: 0,
-          background: complete ? "var(--color-background-primary-solid)" : "var(--alpha-08)",
-          color: complete ? "var(--color-text-inverse)" : "var(--color-text-tertiary)",
-          fontSize: "var(--control-font-size-md)", fontWeight: "var(--font-weight-medium)", cursor: complete ? "pointer" : "not-allowed",
-        }}>Continue to Risks</button>
+        <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: "0.375rem", flexShrink: 0 }}>
+          {showDraftActions && (
+            <>
+              <button type="button" onClick={() => setEditing(v => !v)} aria-label={editing ? "Preview draft" : "Edit draft"} title={editing ? "Preview" : "Edit draft"} style={{
+                display: "inline-flex", alignItems: "center", justifyContent: "center", height: "var(--control-size-md)", width: "var(--control-size-md)",
+                padding: 0, borderRadius: "var(--control-radius-md)", border: "none",
+                background: editing ? "var(--color-background-primary-soft)" : "transparent",
+                color: editing ? "var(--color-text)" : "var(--color-text-secondary)",
+                cursor: "pointer", transition: "background var(--transition-duration-basic), color var(--transition-duration-basic)",
+              }}>
+                <Edit3 size={15} />
+              </button>
+              <div style={{ position: "relative", display: "inline-flex" }}>
+                <button type="button" onClick={downloadDraft} disabled={downloading} aria-label="Download Word" title="Download Word" onMouseEnter={() => setDownloadHover(true)} onMouseLeave={() => setDownloadHover(false)} onFocus={() => setDownloadHover(true)} onBlur={() => setDownloadHover(false)} style={{
+                  display: "inline-flex", alignItems: "center", justifyContent: "center", height: "var(--control-size-md)", width: "var(--control-size-md)",
+                  padding: 0, borderRadius: "var(--control-radius-md)", border: "none",
+                  background: "transparent", color: "var(--color-text-secondary)",
+                  cursor: downloading ? "not-allowed" : "pointer", transition: "background var(--transition-duration-basic), color var(--transition-duration-basic)",
+                }}>
+                  {downloading ? <Loader2 size={15} className="animate-spin" /> : <Download size={15} />}
+                </button>
+                {downloadHover && !downloading && (
+                  <span style={{
+                    position: "absolute", top: "calc(100% + 0.375rem)", right: 0, zIndex: 20,
+                    padding: "0.25rem 0.5rem", borderRadius: "var(--radius-sm)", background: "var(--color-background-primary-solid)",
+                    color: "var(--color-text-inverse)", fontSize: "var(--font-text-xs-size)", lineHeight: 1.2, whiteSpace: "nowrap",
+                    boxShadow: "var(--shadow-100)", pointerEvents: "none",
+                  }}>
+                    Download Word
+                  </span>
+                )}
+              </div>
+            </>
+          )}
+          <button type="button" disabled={!complete} onClick={onContinue} style={{
+            display: "inline-flex", alignItems: "center", gap: "0.25rem", height: "var(--control-size-md)", padding: "0 0.25rem",
+            borderRadius: "var(--control-radius-md)", border: "none", flexShrink: 0,
+            background: "transparent",
+            color: complete ? "var(--color-text)" : "var(--color-text-tertiary)",
+            fontSize: "var(--control-font-size-md)", fontWeight: "var(--font-weight-medium)", cursor: complete ? "pointer" : "not-allowed",
+          }}>
+            Risks <ArrowRight size={14} />
+          </button>
+        </div>
       </div>
 
       {/* Body — the document editor once drafting is complete, otherwise progress */}
@@ -377,10 +445,10 @@ export default function DraftStep({ engagementId, jurisdictions, entity, onConti
         {!error && complete && typedDone && draft && (
           <Animate enter="fade" duration={160} style={{ flex: 1, minHeight: 0, display: "flex", flexDirection: "column" }}>
             <DraftDocument
-              engagementId={engagementId}
               jurisdiction={activeJurisdiction}
               entity={entity}
               sections={draft.sections}
+              editing={editing}
               onSectionsChange={sections => setDraft(activeJurisdiction, { ...draft, sections })}
             />
           </Animate>
