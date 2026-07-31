@@ -1,6 +1,6 @@
 "use client"
 
-import { useCallback, useEffect, useState, type CSSProperties } from "react"
+import { useCallback, useEffect, useRef, useState, type CSSProperties } from "react"
 import { useRouter } from "next/navigation"
 import dynamic from "next/dynamic"
 import { Activity, CalendarDays, ChevronDown, FileText, ShieldCheck } from "lucide-react"
@@ -209,6 +209,7 @@ export default function Page() {
   const [draftReady, setDraftReady] = useState(false)
   const [bootStatus, setBootStatus] = useState<BootStatus>("loading")
   const [libraryLoading, setLibraryLoading] = useState(true)
+  const engagementLoadSeq = useRef(0)
 
   const refreshFiles = useCallback(async (): Promise<boolean> => {
     setLibraryLoading(true)
@@ -228,9 +229,10 @@ export default function Page() {
   }, [])
 
   // Rehydrate a file's scope from the backend (entity, jurisdictions, which source rows are on).
-  const loadEngagement = useCallback(async (id: string): Promise<boolean> => {
+  const loadEngagement = useCallback(async (id: string, seq?: number): Promise<boolean> => {
     try {
       const eng = await api.getEngagement(id)
+      if (seq !== undefined && seq !== engagementLoadSeq.current) return false
       setEntity(eng.entity_name ?? "")
       setJ(eng.jurisdictions)
       setSources(new Set(eng.sources.map(s => s.kind).filter((k): k is SourceId => PLANNING_SOURCES.has(k as SourceId))))
@@ -332,19 +334,30 @@ export default function Page() {
     setVisited(new Set([1])); setStep(1); setMounted(new Set([1]))
     setPage("workflow")
     setEngagementId(null)
+    engagementLoadSeq.current += 1
     api.createEngagement()
       .then(({ id }) => { setApiOffline(false); setEngagementId(id); localStorage.setItem(LS_ID, id); refreshFiles() })
       .catch(() => setApiOffline(true))
   }
 
-  async function openFile(id: string) {
-    if (id !== engagementId) await loadEngagement(id)
+  function openFile(file: EngagementSummary) {
+    const id = file.id
+    const seq = engagementLoadSeq.current + 1
+    engagementLoadSeq.current = seq
+    setEntity(file.entity_name ?? "")
+    setJ(file.jurisdictions)
+    setSources(new Set())
+    setEngagementId(id)
+    localStorage.setItem(LS_ID, id)
     setDraftReady(false)
     setVisited(new Set([1, 2]))
     setMounted(new Set([2]))           // fresh mount for the opened file
     setStep(2)                          // land on Requirements so progress is visible
     setDraftJump(null)
     setPage("workflow")
+    if (id !== engagementId) {
+      void loadEngagement(id, seq)
+    }
   }
 
   async function signOut() {
@@ -436,7 +449,7 @@ export default function Page() {
               ) : files.map(f => {
                 const active = f.id === engagementId
                 return (
-                  <button key={f.id} type="button" onClick={() => openFile(f.id)} style={{
+                  <button key={f.id} type="button" onClick={() => openFile(f)} style={{
                     display: "flex", flexDirection: "column", gap: 1,
                     padding: "0.4rem 0.75rem", border: "none", borderRadius: "6px",
                     background: active ? "#ececec" : "transparent",
@@ -599,6 +612,7 @@ export default function Page() {
           {mounted.has(1) && (
             <div className={step === 1 ? "vt-step-panel vt-step-panel-active" : "vt-step-panel"} style={{ flex: 1, minWidth: 0, display: step === 1 ? "flex" : "none" }}>
               <PlanningStep
+                key={`planning-${engagementId ?? "pending"}`}
                 engagementId={engagementId}
                 jurisdictions={jurisdictions} onJurisdictionsChange={setJ}
                 entity={entity}              onEntityChange={setEntity}
@@ -610,6 +624,7 @@ export default function Page() {
           {mounted.has(2) && (
             <div className={step === 2 ? "vt-step-panel vt-step-panel-active" : "vt-step-panel"} style={{ flex: 1, minWidth: 0, display: step === 2 ? "flex" : "none" }}>
               <RequirementsStep
+                key={`requirements-${engagementId ?? "pending"}`}
                 engagementId={engagementId} jurisdictions={jurisdictions}
                 onContinue={continueToDraft}
                 onOpenDraftSection={(jurisdiction, sectionId) => { setDraftJump({ jurisdiction, sectionId }); continueToDraft() }}
@@ -620,6 +635,7 @@ export default function Page() {
           {mounted.has(3) && (
             <div className={step === 3 ? "vt-step-panel vt-step-panel-active" : "vt-step-panel"} style={{ flex: 1, minWidth: 0, display: step === 3 ? "flex" : "none" }}>
               <DraftStep
+                key={`draft-${engagementId ?? "pending"}`}
                 engagementId={engagementId} jurisdictions={jurisdictions} entity={entity}
                 onContinue={() => navigate(4)}
                 jumpTo={draftJump} onJumped={() => setDraftJump(null)}
@@ -628,7 +644,7 @@ export default function Page() {
           )}
           {mounted.has(4) && (
             <div className={step === 4 ? "vt-step-panel vt-step-panel-active" : "vt-step-panel"} style={{ flex: 1, minWidth: 0, display: step === 4 ? "flex" : "none" }}>
-              <RisksStep engagementId={engagementId} jurisdictions={jurisdictions} entity={entity} />
+              <RisksStep key={`risks-${engagementId ?? "pending"}`} engagementId={engagementId} jurisdictions={jurisdictions} entity={entity} />
             </div>
           )}
         </div>
