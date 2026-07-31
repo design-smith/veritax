@@ -13,10 +13,9 @@ const PlanningCtx = createContext<{ engagementId: string | null }>({ engagementI
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
-// Must match the jurisdictions defined in jurisdiction_requirements.json (backend/app/data).
-// ponytail: hardcoded to the 8 with requirement lists; if that set grows, fetch it from the
-// backend instead of editing here.
-const JURISDICTIONS = [
+// Fetched from GET /jurisdictions (single source of truth: jurisdiction_requirements.json).
+// This static list is only a fallback if the backend is unreachable.
+const JURISDICTIONS_FALLBACK = [
   "Australia", "Canada", "France", "Germany",
   "Ireland", "Netherlands", "United Kingdom", "United States",
 ]
@@ -448,6 +447,13 @@ export default function PlanningStep({
   onSourcesChange: (v: Set<SourceId>) => void
   onContinue: () => void
 }) {
+  const [jurisdictionOptions, setJurisdictionOptions] = useState<string[]>(JURISDICTIONS_FALLBACK)
+  useEffect(() => {
+    api.getJurisdictions()
+      .then(js => { if (js.length) setJurisdictionOptions(js) })
+      .catch(e => console.error("[veritax] failed to load jurisdictions; using fallback:", e))
+  }, [])
+
   const toggle = (id: SourceId) => {
     const next = new Set(sources)
     next.has(id) ? next.delete(id) : next.add(id)
@@ -461,7 +467,7 @@ export default function PlanningStep({
       <div style={{ display: "flex", alignItems: "flex-end", gap: "0.75rem", marginBottom: "2.5rem" }}>
         <div style={{ flex: "0 0 240px" }}>
           <label style={FIELD_LABEL}>Jurisdiction</label>
-          <MultiSelect options={JURISDICTIONS} value={jurisdictions} onChange={onJurisdictionsChange} placeholder="Select jurisdiction" />
+          <MultiSelect options={jurisdictionOptions} value={jurisdictions} onChange={onJurisdictionsChange} placeholder="Select jurisdiction" />
         </div>
         <div style={{ flex: 1 }}>
           <label style={FIELD_LABEL}>Entity</label>

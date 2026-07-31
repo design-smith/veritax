@@ -41,17 +41,23 @@ def resolve_requirements(country: str) -> tuple[ResolvedElement, ...]:
     if juris is None:
         return ()
 
-    base = data["base_templates"][juris["base_template"]]
-    # order -> raw element dict; base first, then local elements appended.
     by_order: dict[int, dict] = {}
-    for el in base["elements"]:
-        by_order[el["order"]] = el
-    for el in juris.get("local_specific_elements", []):
-        by_order[el["order"]] = el
-    # element_overrides merged by order (shallow field merge). Empty for all seeded jurisdictions today.
-    for order_str, override in juris.get("element_overrides", {}).items():
-        order = int(order_str)
-        by_order[order] = {**by_order.get(order, {"order": order}), **override}
+    self_contained = juris.get("local_file_elements")
+    if self_contained is not None:
+        # Jurisdiction carries its own curated element list (no shared base template).
+        for el in self_contained:
+            by_order[el["order"]] = el
+    else:
+        base = data["base_templates"][juris["base_template"]]
+        # order -> raw element dict; base first, then local elements appended.
+        for el in base["elements"]:
+            by_order[el["order"]] = el
+        for el in juris.get("local_specific_elements", []):
+            by_order[el["order"]] = el
+        # element_overrides merged by order (shallow field merge).
+        for order_str, override in juris.get("element_overrides", {}).items():
+            order = int(order_str)
+            by_order[order] = {**by_order.get(order, {"order": order}), **override}
 
     resolved = [
         ResolvedElement(

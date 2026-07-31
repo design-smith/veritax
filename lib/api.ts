@@ -384,6 +384,9 @@ export const api = {
   getConnectors: (): Promise<Connector[]> =>
     afetch(`${BASE}/connectors`).then(r => parse<Connector[]>(r)),
 
+  getJurisdictions: (): Promise<string[]> =>
+    afetch(`${BASE}/jurisdictions`).then(r => parse<string[]>(r)),
+
   startCoverage: (engagementId: string, jurisdiction: string, force = false): Promise<CoverageResponse> =>
     afetch(`${BASE}/engagements/${engagementId}/coverage?jurisdiction=${encodeURIComponent(jurisdiction)}${force ? "&force=true" : ""}`, {
       method: "POST",

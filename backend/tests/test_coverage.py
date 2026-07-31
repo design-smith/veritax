@@ -123,6 +123,13 @@ async def test_multi_document_source_does_not_stall(client):
         assert row["sources_used"].count("interview") <= 1  # provenance de-duped
 
 
+async def test_jurisdictions_endpoint_lists_countries(client):
+    # Single source of truth for the Planning picker — includes the newly seeded countries.
+    js = (await client.get("/jurisdictions")).json()
+    assert {"United States", "Canada", "Japan", "Singapore", "United Arab Emirates"} <= set(js)
+    assert len(js) >= 13
+
+
 async def test_unknown_jurisdiction_404(client):
     eid = (await client.post("/engagements")).json()["id"]
     r = await client.post(f"/engagements/{eid}/coverage", params={"jurisdiction": "Narnia"})

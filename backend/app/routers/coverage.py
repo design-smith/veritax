@@ -62,7 +62,7 @@ from ..models import (
     SourceKind,
     SupplementKind,
 )
-from ..requirements import resolve_requirements
+from ..requirements import available_jurisdictions, resolve_requirements
 from ..schemas import CoverageEvidenceRead, CoverageRead, CoverageResponse, CoverageSummary
 from ..storage import Storage
 
@@ -530,6 +530,12 @@ async def start_coverage(
     if inserted > 0 or force:
         background.add_task(run_assessment, factory, assessor, embedder, engagement_id, jurisdiction)
     return await _response(session, engagement_id, jurisdiction)
+
+
+@router.get("/jurisdictions")
+async def list_jurisdictions() -> list[str]:
+    """Countries with a defined requirement list — the single source for the Planning picker."""
+    return available_jurisdictions()
 
 
 @router.get("/engagements/{engagement_id}/coverage", response_model=CoverageResponse)
