@@ -17,12 +17,44 @@ const HEALTH_RETRY_DELAYS_MS = [0, 1_000, 2_000, 4_000, 8_000]
 
 // Every backend call carries the Supabase access token — the API verifies it and scopes data per user.
 let _sb: ReturnType<typeof createClient> | null = null
-async function afetch(url: string, init: RequestInit = {}): Promise<Response> {
+type TraceableRequestInit = RequestInit & { trace?: string }
+
+function apiPath(url: string) {
+  try {
+    const parsed = new URL(url)
+    return `${parsed.pathname}${parsed.search}`
+  } catch {
+    return url
+  }
+}
+
+function elapsedMs(start: number) {
+  return Math.round(performance.now() - start)
+}
+
+async function afetch(url: string, init: TraceableRequestInit = {}): Promise<Response> {
+  const { trace, ...fetchInit } = init
+  const startedAt = performance.now()
   _sb ??= createClient()
-  const headers = new Headers(init.headers)
+  const headers = new Headers(fetchInit.headers)
+  const authStartedAt = performance.now()
   const { data } = await _sb.auth.getSession()
+  const authMs = elapsedMs(authStartedAt)
   if (data.session?.access_token) headers.set("Authorization", `Bearer ${data.session.access_token}`)
-  return fetch(url, { ...init, headers })
+  const fetchStartedAt = performance.now()
+  const res = await fetch(url, { ...fetchInit, headers })
+  if (trace) {
+    console.info("[veritax:api] request", {
+      trace,
+      method: fetchInit.method ?? "GET",
+      path: apiPath(url),
+      status: res.status,
+      authMs,
+      fetchMs: elapsedMs(fetchStartedAt),
+      totalMs: elapsedMs(startedAt),
+    })
+  }
+  return res
 }
 
 export type SourceKind = "financials" | "agreements" | "public" | "interview" | "supplement"
@@ -406,13 +438,15 @@ export const api = {
   startRisks: async (engagementId: string, jurisdiction: string): Promise<RiskResponse> => {
     const res = await afetch(
       `${BASE}/engagements/${engagementId}/risks?jurisdiction=${encodeURIComponent(jurisdiction)}`,
-      { method: "POST" },
+      { method: "POST", trace: "risks.start" },
     )
     if (res.status === 409) throw new DraftNotCompleteError("draft not complete")
     return parse<RiskResponse>(res)
   },
 
   getRisks: (engagementId: string, jurisdiction: string): Promise<RiskResponse> =>
-    afetch(`${BASE}/engagements/${engagementId}/risks?jurisdiction=${encodeURIComponent(jurisdiction)}`)
+    afetch(`${BASE}/engagements/${engagementId}/risks?jurisdiction=${encodeURIComponent(jurisdiction)}`, {
+      trace: "risks.get",
+    })
       .then(r => parse<RiskResponse>(r)),
 }

@@ -64,6 +64,23 @@ const PILL = (active: boolean): React.CSSProperties => ({
   fontSize: 12, fontWeight: 500,
 })
 
+const RISK_LOG_PREFIX = "[veritax:risks]"
+const riskElapsedMs = (startedAt: number) => Math.round(performance.now() - startedAt)
+const shortEngagement = (id: string | null) => id ? `${id.slice(0, 8)}...` : null
+const riskSnapshot = (risk?: RiskResponse) => risk ? {
+  status: risk.status,
+  stale: risk.stale,
+  findings: risk.findings.length,
+  total: risk.summary.total,
+} : { status: "none" }
+const riskError = (error: unknown) => ({
+  name: error instanceof Error ? error.name : "UnknownError",
+  message: error instanceof Error ? error.message : String(error),
+})
+const logRisk = (event: string, details: Record<string, unknown>) => {
+  console.info(RISK_LOG_PREFIX, event, details)
+}
+
 export default function RisksStep({ engagementId, jurisdictions, entity }: {
   engagementId: string | null
   jurisdictions: string[]
@@ -92,32 +109,88 @@ export default function RisksStep({ engagementId, jurisdictions, entity }: {
   const analyzing = (d?: RiskResponse) => d?.status === "pending" || d?.status === "analyzing"
 
   const poll = useCallback(async () => {
+    const startedAt = performance.now()
     pollRef.current = null
     if (!engagementId) return
     const js = [...startedRef.current].filter(j => !notReady.has(j))
+    logRisk("poll:start", {
+      engagementId: shortEngagement(engagementId),
+      jurisdictions: js,
+      notReady: [...notReady],
+    })
     const results = await Promise.all(js.map(async j => {
-      try { return [j, await api.getRisks(engagementId, j)] as const }
-      catch (e) { console.error("[veritax] risks poll failed:", e); return [j, riskRef.current[j]] as const }
+      const getStartedAt = performance.now()
+      try {
+        const d = await api.getRisks(engagementId, j)
+        logRisk("poll:get:ok", {
+          engagementId: shortEngagement(engagementId),
+          jurisdiction: j,
+          durationMs: riskElapsedMs(getStartedAt),
+          ...riskSnapshot(d),
+        })
+        return [j, d] as const
+      }
+      catch (e) {
+        console.error("[veritax:risks] poll:get:failed", {
+          engagementId: shortEngagement(engagementId),
+          jurisdiction: j,
+          durationMs: riskElapsedMs(getStartedAt),
+          error: riskError(e),
+        })
+        return [j, riskRef.current[j]] as const
+      }
     }))
     const merged: Record<string, RiskResponse> = {}
     for (const [j, d] of results) if (d) merged[j] = d
     setRiskByJuris(prev => ({ ...prev, ...merged }))
-    if (Object.values(merged).some(analyzing)) pollRef.current = setTimeout(poll, 1800)
+    const shouldContinue = Object.values(merged).some(analyzing)
+    logRisk("poll:complete", {
+      engagementId: shortEngagement(engagementId),
+      durationMs: riskElapsedMs(startedAt),
+      statuses: Object.fromEntries(Object.entries(merged).map(([j, d]) => [j, d.status])),
+      continuing: shouldContinue,
+    })
+    if (shouldContinue) pollRef.current = setTimeout(poll, 1800)
   }, [engagementId, notReady])
 
   const startJurisdiction = useCallback(async (j: string) => {
-    if (!engagementId || !j || startedRef.current.has(j)) return
+    if (!engagementId || !j) {
+      logRisk("start:skipped", { reason: "missing engagement or jurisdiction", engagementId: shortEngagement(engagementId), jurisdiction: j })
+      return
+    }
+    if (startedRef.current.has(j)) {
+      logRisk("start:skipped", { reason: "already started", engagementId: shortEngagement(engagementId), jurisdiction: j, ...riskSnapshot(riskRef.current[j]) })
+      return
+    }
+    const startedAt = performance.now()
+    logRisk("start:begin", { engagementId: shortEngagement(engagementId), jurisdiction: j })
     setStarted(prev => new Set(prev).add(j))
     startedRef.current = new Set(startedRef.current).add(j)
     try {
       const d = await api.startRisks(engagementId, j)
+      logRisk("start:ok", {
+        engagementId: shortEngagement(engagementId),
+        jurisdiction: j,
+        durationMs: riskElapsedMs(startedAt),
+        ...riskSnapshot(d),
+      })
       setRisk(j, d)
       if (analyzing(d) && !pollRef.current) pollRef.current = setTimeout(poll, 1200)
     } catch (e) {
       if (e instanceof DraftNotCompleteError) {
+        logRisk("start:not-ready", {
+          engagementId: shortEngagement(engagementId),
+          jurisdiction: j,
+          durationMs: riskElapsedMs(startedAt),
+        })
         setNotReady(prev => new Set(prev).add(j))
       } else {
-        console.error("[veritax] failed to start risks:", e)
+        console.error("[veritax:risks] start:failed", {
+          engagementId: shortEngagement(engagementId),
+          jurisdiction: j,
+          durationMs: riskElapsedMs(startedAt),
+          error: riskError(e),
+        })
         setError(String(e))
       }
     }
@@ -131,6 +204,12 @@ export default function RisksStep({ engagementId, jurisdictions, entity }: {
   }, [engagementId, jurisdictions, startJurisdiction])
 
   function selectJurisdiction(j: string) {
+    logRisk("jurisdiction:selected", {
+      engagementId: shortEngagement(engagementId),
+      jurisdiction: j,
+      cached: Boolean(riskRef.current[j]),
+      started: startedRef.current.has(j),
+    })
     setActive(j)
     setOpenFinding(null)
     setSourcePreview(null)
@@ -139,6 +218,7 @@ export default function RisksStep({ engagementId, jurisdictions, entity }: {
   }
 
   function retry(j: string) {
+    logRisk("retry:begin", { engagementId: shortEngagement(engagementId), jurisdiction: j })
     setNotReady(prev => { const n = new Set(prev); n.delete(j); return n })
     setStarted(prev => { const n = new Set(prev); n.delete(j); return n })
     startedRef.current = new Set([...startedRef.current].filter(x => x !== j))
@@ -187,17 +267,34 @@ export default function RisksStep({ engagementId, jurisdictions, entity }: {
     setSourceError(null)
     setCopiedEvidence(false)
     if (!evidence.document_id) {
+      logRisk("source:copy-only", { reference: evidence.reference, kind: evidence.kind })
       await navigator.clipboard?.writeText(evidence.detail).catch(() => undefined)
       setCopiedEvidence(true)
       setTimeout(() => setCopiedEvidence(false), 1200)
       return
     }
+    const startedAt = performance.now()
+    logRisk("source:open:begin", {
+      documentId: `${evidence.document_id.slice(0, 8)}...`,
+      reference: evidence.reference,
+      kind: evidence.kind,
+    })
     setSourceLoading(evidence.document_id)
     try {
       const doc = await api.getDocumentText(evidence.document_id)
+      logRisk("source:open:ok", {
+        documentId: `${evidence.document_id.slice(0, 8)}...`,
+        durationMs: riskElapsedMs(startedAt),
+        status: doc.status,
+        textChars: doc.text.length,
+      })
       setSourcePreview({ doc, evidence })
     } catch (e) {
-      console.error("[veritax] failed to open risk source:", e)
+      console.error("[veritax:risks] source:open:failed", {
+        documentId: `${evidence.document_id.slice(0, 8)}...`,
+        durationMs: riskElapsedMs(startedAt),
+        error: riskError(e),
+      })
       setSourceError("Source text is not available yet. The document may still be indexing.")
     } finally {
       setSourceLoading(null)
