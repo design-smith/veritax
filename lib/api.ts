@@ -370,6 +370,13 @@ export const api = {
       parse<DraftSection>(r),
     ),
 
+  updateDraftSection: (sectionId: string, body: { content: string }): Promise<DraftSection> =>
+    afetch(`${BASE}/draft-sections/${sectionId}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    }).then(r => parse<DraftSection>(r)),
+
   startRisks: async (engagementId: string, jurisdiction: string): Promise<RiskResponse> => {
     const res = await afetch(
       `${BASE}/engagements/${engagementId}/risks?jurisdiction=${encodeURIComponent(jurisdiction)}`,

@@ -39,7 +39,7 @@ from ..models import (
     RequirementCoverage,
 )
 from ..requirements import resolve_requirements
-from ..schemas import DraftCitationRead, DraftResponse, DraftSectionRead, DraftSummary
+from ..schemas import DraftCitationRead, DraftResponse, DraftSectionPatch, DraftSectionRead, DraftSummary
 
 router = APIRouter(tags=["draft"])
 log = logging.getLogger("veritax")
@@ -597,6 +597,35 @@ async def download_draft_docx(
         media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
         headers={"Content-Disposition": f'attachment; filename="{name}.docx"'},
     )
+
+
+@router.patch("/draft-sections/{section_id}", response_model=DraftSectionRead)
+async def update_draft_section(
+    section_id: uuid.UUID,
+    body: DraftSectionPatch,
+    session: AsyncSession = Depends(get_session),
+    user: AuthUser = Depends(get_current_user),
+) -> DraftSectionRead:
+    section = await session.get(DraftSection, section_id)
+    if section is None:
+        raise HTTPException(status_code=404, detail="draft section not found")
+    await assert_owner(session, section.engagement_id, user)
+    content = body.content.strip()
+    if not content:
+        raise HTTPException(status_code=422, detail="draft section content cannot be empty")
+    section.content = content
+    section.status = DraftStatus.drafted
+    section.error = None
+    section.status_updated_at = datetime.now(timezone.utc)
+    await session.commit()
+    updated = (
+        await session.execute(
+            select(DraftSection)
+            .options(selectinload(DraftSection.citations))
+            .where(DraftSection.id == section_id)
+        )
+    ).scalar_one()
+    return _to_read(updated)
 
 
 @router.post("/draft-sections/{section_id}/regenerate", response_model=DraftSectionRead)

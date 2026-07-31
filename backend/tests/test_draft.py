@@ -68,6 +68,25 @@ async def test_regenerate_section(client):
     assert r.json()["content"]
 
 
+async def test_update_draft_section_persists_to_docx(client):
+    eid = await _engagement_ready_for_draft(client, "Netherlands", b"The entity is a limited-risk distributor.")
+    await client.patch(f"/engagements/{eid}", json={"entity_name": "Acme B.V.", "jurisdictions": ["Netherlands"]})
+    await client.post(f"/engagements/{eid}/draft", params={"jurisdiction": "Netherlands"})
+    sections = (await client.get(f"/engagements/{eid}/draft", params={"jurisdiction": "Netherlands"})).json()["sections"]
+    sid = sections[0]["id"]
+    edited = "Reviewer edited wording with source marker [1]."
+
+    r = await client.patch(f"/draft-sections/{sid}", json={"content": edited})
+
+    assert r.status_code == 200
+    assert r.json()["content"] == edited
+    z = zipfile.ZipFile(io.BytesIO((await client.get(
+        f"/engagements/{eid}/draft.docx", params={"jurisdiction": "Netherlands"}
+    )).content))
+    doc = z.read("word/document.xml").decode("utf-8")
+    assert "Reviewer edited wording" in doc
+
+
 async def test_draft_docx_download_uses_clean_local_file_cover(client):
     eid = await _engagement_ready_for_draft(client, "Netherlands", b"The entity is a limited-risk distributor.")
     await client.patch(f"/engagements/{eid}", json={"entity_name": "Acme B.V.", "jurisdictions": ["Netherlands"]})

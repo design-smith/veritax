@@ -127,9 +127,13 @@ function DraftGenerationPreview({ draft, entity, jurisdiction, complete, onTyped
         {!complete && <Loader2 size={12} className="animate-spin" />}
         <span>{complete ? "Finishing the file" : phrases[phraseIndex]}</span>
       </div>
-      <div style={{ flex: 1, minHeight: 0, overflowY: "auto" }}>
-        <article style={{ maxWidth: 820, margin: "0 auto 1.5rem", background: "var(--color-surface)", border: "1px solid var(--color-border)", borderRadius: "var(--radius-lg)", padding: "3rem 3.5rem", minHeight: "72vh" }}>
+      <div className="vt-a4-scroll">
+        <article className="vt-a4-page">
+          <span className="vt-a4-page-label">Page 1</span>
           <DraftCover entity={entity} jurisdiction={jurisdiction} />
+        </article>
+        <article className="vt-a4-page">
+          <span className="vt-a4-page-label">Drafting</span>
           <TypedDraftText text={typedText} />
         </article>
       </div>
@@ -313,7 +317,13 @@ export default function DraftStep({ engagementId, jurisdictions, entity, onConti
         )}
         {!error && complete && typedDone && draft && (
           <Animate enter="fade" duration={160} style={{ flex: 1, minHeight: 0, display: "flex", flexDirection: "column" }}>
-            <DraftDocument engagementId={engagementId} jurisdiction={activeJurisdiction} entity={entity} sections={draft.sections} />
+            <DraftDocument
+              engagementId={engagementId}
+              jurisdiction={activeJurisdiction}
+              entity={entity}
+              sections={draft.sections}
+              onSectionsChange={sections => setDraft(activeJurisdiction, { ...draft, sections })}
+            />
           </Animate>
         )}
       </div>

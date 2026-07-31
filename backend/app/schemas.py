@@ -168,6 +168,10 @@ class DraftSectionRead(BaseModel):
     citations: list[DraftCitationRead]
 
 
+class DraftSectionPatch(BaseModel):
+    content: str
+
+
 class DraftSummary(BaseModel):
     total: int
     drafted: int
