@@ -19,7 +19,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from .embeddings import Embedder
-from .models import Document, DocumentChunk, Source
+from .models import Document, DocumentChunk, DocumentStatus, Source
 
 log = logging.getLogger("veritax")
 
@@ -116,7 +116,10 @@ async def document_contexts_by_id(
             )
             .join(Document, Document.id == DocumentChunk.document_id)
             .join(Source, Source.id == Document.source_id)
-            .where(Document.id.in_(ids))
+            .where(
+                Document.id.in_(ids),
+                Document.status == DocumentStatus.embedded,
+            )
             .order_by(DocumentChunk.document_id, DocumentChunk.chunk_index)
         )
     ).all()
@@ -199,7 +202,10 @@ async def _search_chunks(
             )
             .join(Document, Document.id == DocumentChunk.document_id)
             .join(Source, Source.id == Document.source_id)
-            .where(Source.engagement_id == engagement_id)
+            .where(
+                Source.engagement_id == engagement_id,
+                Document.status == DocumentStatus.embedded,
+            )
             .order_by(DocumentChunk.embedding.cosine_distance(qvec))
             .limit(k)
         )

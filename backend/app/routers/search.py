@@ -9,7 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from ..auth import AuthUser
 from ..deps import assert_owner, get_current_user, get_embedder, get_session
 from ..embeddings import Embedder
-from ..models import Document, DocumentChunk, Engagement, Source
+from ..models import Document, DocumentChunk, DocumentStatus, Engagement, Source
 from ..schemas import SearchHit
 
 router = APIRouter(tags=["search"])
@@ -40,6 +40,7 @@ async def search(
         .join(Document, Document.id == DocumentChunk.document_id)
         .join(Source, Source.id == Document.source_id)
         .join(Engagement, Engagement.id == Source.engagement_id)
+        .where(Document.status == DocumentStatus.embedded)
     )
     # Always scope to the caller's own data — never search across users.
     if engagement_id is not None:

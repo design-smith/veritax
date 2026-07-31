@@ -6,8 +6,10 @@ from datetime import datetime, timedelta, timezone
 from app import corpus
 from app.drafting import FakeDrafter
 from app.embeddings import FakeEmbedder
+from app.ingest import INDEX_CHUNK_BATCH
 from app.main import app
 from app.models import Document, DocumentChunk, DocumentStatus, RequirementCoverage, CoverageStatus
+from app.processing import iter_chunks
 from app.requirements import resolve_requirements
 from sqlalchemy import select
 
@@ -69,6 +71,23 @@ async def test_duplicate_upload_reuses_existing_chunks(client):
 
     got = (await client.get(f"/documents/{second.json()[0]['id']}")).json()
     assert got["status"] == "embedded"
+
+
+async def test_large_upload_embeds_in_bounded_batches(client):
+    app.state.embedder = CountingEmbedder()
+    eid = await _engagement(client)
+    text = " ".join(f"word{i}" for i in range(600 + 520 * 25))
+    expected_batches = (len(list(iter_chunks(text))) + INDEX_CHUNK_BATCH - 1) // INDEX_CHUNK_BATCH
+
+    response = await client.post(
+        f"/engagements/{eid}/documents",
+        data={"kind": "interview"},
+        files={"files": ("large.txt", text.encode(), "text/plain")},
+    )
+
+    assert response.status_code == 201
+    assert expected_batches > 1
+    assert app.state.embedder.document_batches == expected_batches
 
 
 async def test_zero_text_document_fails_visibly(client):

@@ -3,6 +3,7 @@ from __future__ import annotations
 import csv
 import io
 import re
+from collections.abc import Iterator
 
 # ── Text extraction by file type ─────────────────────────────────────────────
 _VTT_SRT_TS = re.compile(r"^\d{1,2}:\d{2}:\d{2}[.,]\d{3}\s*-->.*$")
@@ -81,16 +82,22 @@ def _cues(data: bytes) -> str:
 # ── Chunking ─────────────────────────────────────────────────────────────────
 # ponytail: naive fixed-size word window with overlap. Good enough for findability search now;
 # swap for structural/semantic chunking when retrieval quality matters.
+def iter_chunks(text: str, words_per_chunk: int = 600, overlap: int = 80) -> Iterator[str]:
+    if words_per_chunk <= 0:
+        return
+    overlap = max(0, min(overlap, words_per_chunk - 1))
+    window: list[str] = []
+    new_since_yield = 0
+    for match in re.finditer(r"\S+", text):
+        window.append(match.group(0))
+        new_since_yield += 1
+        if len(window) >= words_per_chunk:
+            yield " ".join(window)
+            window = window[-overlap:] if overlap else []
+            new_since_yield = 0
+    if window and new_since_yield > 0:
+        yield " ".join(window)
+
+
 def chunk(text: str, words_per_chunk: int = 600, overlap: int = 80) -> list[str]:
-    words = text.split()
-    if not words:
-        return []
-    step = max(1, words_per_chunk - overlap)
-    out: list[str] = []
-    for start in range(0, len(words), step):
-        piece = words[start : start + words_per_chunk]
-        if piece:
-            out.append(" ".join(piece))
-        if start + words_per_chunk >= len(words):
-            break
-    return out
+    return list(iter_chunks(text, words_per_chunk, overlap))

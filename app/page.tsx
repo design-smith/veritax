@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useRef, useState, type CSSProperties } from "react"
 import { useRouter } from "next/navigation"
 import dynamic from "next/dynamic"
-import { Activity, CalendarDays, ChevronDown, FileText, ShieldCheck } from "lucide-react"
+import { Activity, CalendarDays, ChevronDown, FileText, PanelLeftClose, PanelLeftOpen, ShieldCheck } from "lucide-react"
 import PlanningStep, { type SourceId } from "@/components/steps/planning"
 import RequirementsStep from "@/components/steps/requirements"
 import DraftStep from "@/components/steps/draft"
@@ -103,8 +103,7 @@ function BootSkeleton({ offline = false, onRetry }: { offline?: boolean; onRetry
         padding: "1.5rem 0.75rem",
         display: "flex", flexDirection: "column", gap: 2,
       }}>
-        <div style={{ display: "flex", alignItems: "center", gap: "0.5rem", padding: "0 0.75rem", marginBottom: "1.5rem" }}>
-          <img src="/VeritaxLogo.png" alt="Veritax" style={{ width: 24, height: 24, objectFit: "contain" }} />
+        <div style={{ display: "flex", alignItems: "center", padding: "0 0.75rem", marginBottom: "1.5rem", minHeight: 24 }}>
           <span style={{ fontFamily: "var(--font-wordmark)", fontSize: "20px", fontWeight: 300, letterSpacing: 0, lineHeight: 1, color: "#000" }}>Veritax</span>
         </div>
         <div style={{ padding: "0.6rem 0.75rem", display: "flex", alignItems: "center", gap: "0.5rem" }}>
@@ -203,6 +202,8 @@ export default function Page() {
   const [draftJump, setDraftJump] = useState<{ jurisdiction: string; sectionId: string } | null>(null)
   const [files, setFiles] = useState<EngagementSummary[]>([])
   const [localOpen, setLocalOpen] = useState(true)
+  const [collapsed, setCollapsed] = useState(false)   // left panel: collapsed shows the logo only
+  const [logoHover, setLogoHover] = useState(false)
   const [mounted, setMounted] = useState<Set<Step>>(new Set([1]))  // steps stay mounted once visited
   const [page, setPage] = useState<"workflow" | "compliance" | "monitoring" | "defense">("workflow")
   const [apiOffline, setApiOffline] = useState(false)
@@ -396,20 +397,61 @@ export default function Page() {
   return (
     <div style={{ display: "flex", height: "100vh", overflow: "hidden", background: "#fff", color: "#000" }}>
 
-      {/* App-level left panel — pages */}
+      {/* App-level left panel — pages. Collapses to a logo-only rail. */}
       <aside style={{
-        width: 220, flexShrink: 0,
+        width: collapsed ? 60 : 220, flexShrink: 0,
         borderRight: "1px solid #e5e5e5",
         background: "#fafafa",
-        padding: "1.5rem 0.75rem",
+        padding: collapsed ? "1.5rem 0" : "1.5rem 0.75rem",
         display: "flex", flexDirection: "column", gap: 2,
+        alignItems: collapsed ? "center" : "stretch",
+        transition: "width 160ms ease",
       }}>
-        {/* Logo */}
-        <div style={{ display: "flex", alignItems: "center", gap: "0.5rem", padding: "0 0.75rem", marginBottom: "1.5rem" }}>
-          <img src="/VeritaxLogo.png" alt="Veritax" style={{ width: 24, height: 24, objectFit: "contain" }} />
-          <span style={{ fontFamily: "var(--font-wordmark)", fontSize: "20px", fontWeight: 300, letterSpacing: 0, lineHeight: 1, color: "#000" }}>Veritax</span>
-        </div>
+        {/* Header — expanded: wordmark only; collapsed: logo only (hover to reveal the expand icon) */}
+        {collapsed ? (
+          <button
+            type="button"
+            onClick={() => setCollapsed(false)}
+            onMouseEnter={() => setLogoHover(true)}
+            onMouseLeave={() => setLogoHover(false)}
+            aria-label="Expand sidebar"
+            title="Expand"
+            style={{
+              display: "flex", alignItems: "center", justifyContent: "center",
+              width: 36, height: 36, marginBottom: "1.5rem", padding: 0,
+              border: "none", background: "transparent", cursor: "pointer", borderRadius: "6px",
+            }}
+          >
+            {logoHover
+              ? <PanelLeftOpen size={20} strokeWidth={1.5} style={{ color: "#000" }} />
+              : <img src="/VeritaxLogo.png" alt="Veritax" style={{ width: 24, height: 24, objectFit: "contain" }} />}
+          </button>
+        ) : (
+          <div
+            onMouseEnter={() => setLogoHover(true)}
+            onMouseLeave={() => setLogoHover(false)}
+            style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "0.5rem", padding: "0 0.75rem", marginBottom: "1.5rem", minHeight: 24 }}
+          >
+            <span style={{ fontFamily: "var(--font-wordmark)", fontSize: "20px", fontWeight: 300, letterSpacing: 0, lineHeight: 1, color: "#000" }}>Veritax</span>
+            <button
+              type="button"
+              onClick={() => setCollapsed(true)}
+              aria-label="Collapse sidebar"
+              title="Collapse"
+              style={{
+                display: "flex", alignItems: "center", justifyContent: "center",
+                width: 24, height: 24, padding: 0, border: "none", background: "transparent",
+                cursor: "pointer", borderRadius: "4px", flexShrink: 0,
+                opacity: logoHover ? 1 : 0, transition: "opacity 120ms ease",
+              }}
+            >
+              <PanelLeftClose size={18} strokeWidth={1.5} style={{ color: "#888" }} />
+            </button>
+          </div>
+        )}
 
+        {!collapsed && (
+        <>
         {/* Local file — a prominent page entry that collapses New file + the library */}
         <button
           type="button"
@@ -537,6 +579,8 @@ export default function Page() {
         >
           Sign out
         </button>
+        </>
+        )}
       </aside>
 
       {/* Page body */}
