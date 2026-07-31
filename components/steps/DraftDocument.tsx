@@ -234,6 +234,7 @@ export default function DraftDocument({ engagementId, jurisdiction, entity, sect
   const [saving, setSaving] = useState<Record<string, boolean>>({})
   const [saveError, setSaveError] = useState<Record<string, string>>({})
   const [activeSectionId, setActiveSectionId] = useState<string>("cover")
+  const [downloadHover, setDownloadHover] = useState(false)
   const scrollRef = useRef<HTMLDivElement>(null)
   const ordered = useMemo(() => [...docSections].sort((a, b) => a.element_order - b.element_order), [docSections])
   const orderedIds = useMemo(() => ordered.map(s => s.id).join("|"), [ordered])
@@ -326,18 +327,30 @@ export default function DraftDocument({ engagementId, jurisdiction, entity, sect
       <main style={{ flex: 1, display: "flex", flexDirection: "column", minWidth: 0 }}>
         <div style={{ display: "flex", justifyContent: "flex-end", alignItems: "center", gap: "0.75rem", padding: "0.5rem 1rem", borderBottom: "1px solid var(--color-border)", background: "var(--color-surface)" }}>
           <div style={{ display: "flex", justifyContent: "flex-end", gap: "0.5rem" }}>
-            <button type="button" onClick={() => setEditing(v => !v)} style={{
-              display: "inline-flex", alignItems: "center", gap: "0.375rem", height: "var(--control-size-sm)", padding: "0 var(--control-gutter-md)",
+            <button type="button" onClick={() => setEditing(v => !v)} aria-label={editing ? "Preview draft" : "Edit draft"} title={editing ? "Preview" : "Edit draft"} style={{
+              display: "inline-flex", alignItems: "center", justifyContent: "center", height: "var(--control-size-sm)", width: "var(--control-size-sm)", padding: 0,
               borderRadius: "var(--control-radius-md)", border: "1px solid var(--color-border)", background: editing ? "var(--color-background-primary-solid)" : "transparent",
               color: editing ? "var(--color-text-inverse)" : "var(--color-text-secondary)", fontSize: "var(--control-font-size-md)", fontWeight: "var(--font-weight-medium)", cursor: "pointer" }}>
-              <Edit3 size={14} /> {editing ? "Preview" : "Edit draft"}
+              <Edit3 size={14} />
             </button>
-            <button type="button" onClick={download} disabled={downloading} style={{
-              display: "inline-flex", alignItems: "center", gap: "0.375rem", height: "var(--control-size-sm)", padding: "0 var(--control-gutter-md)",
-              borderRadius: "var(--control-radius-md)", border: "1px solid var(--color-border)", background: "transparent",
-              color: "var(--color-text-secondary)", fontSize: "var(--control-font-size-md)", fontWeight: "var(--font-weight-medium)", cursor: "pointer" }}>
-              {downloading ? <Loader2 size={14} className="animate-spin" /> : <Download size={14} />} {downloading ? "Preparing..." : "Download Word"}
-            </button>
+            <div style={{ position: "relative", display: "inline-flex" }}>
+              <button type="button" onClick={download} disabled={downloading} aria-label="Download Word" title="Download Word" onMouseEnter={() => setDownloadHover(true)} onMouseLeave={() => setDownloadHover(false)} onFocus={() => setDownloadHover(true)} onBlur={() => setDownloadHover(false)} style={{
+                display: "inline-flex", alignItems: "center", justifyContent: "center", height: "var(--control-size-sm)", width: "var(--control-size-sm)", padding: 0,
+                borderRadius: "var(--control-radius-md)", border: "1px solid var(--color-border)", background: "transparent",
+                color: "var(--color-text-secondary)", fontSize: "var(--control-font-size-md)", fontWeight: "var(--font-weight-medium)", cursor: downloading ? "not-allowed" : "pointer" }}>
+                {downloading ? <Loader2 size={14} className="animate-spin" /> : <Download size={14} />}
+              </button>
+              {downloadHover && !downloading && (
+                <span style={{
+                  position: "absolute", top: "calc(100% + 0.375rem)", right: 0, zIndex: 20,
+                  padding: "0.25rem 0.5rem", borderRadius: "var(--radius-sm)", background: "var(--color-background-primary-solid)",
+                  color: "var(--color-text-inverse)", fontSize: "var(--font-text-xs-size)", lineHeight: 1.2, whiteSpace: "nowrap",
+                  boxShadow: "var(--shadow-100)", pointerEvents: "none",
+                }}>
+                  Download Word
+                </span>
+              )}
+            </div>
           </div>
         </div>
 

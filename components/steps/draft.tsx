@@ -24,6 +24,10 @@ function sectionText(section: DraftSection) {
   return `## ${section.element_order}. ${section.element_name}\n\n${body}\n\n`
 }
 
+function isDraftComplete(draft: DraftResponse | null): draft is DraftResponse {
+  return !!draft && draft.summary.total > 0 && draft.summary.pending === 0 && draft.summary.failed === 0
+}
+
 function TypedDraftText({ text }: { text: string }) {
   const blocks = text.split(/\n{2,}/)
   return (
@@ -196,6 +200,7 @@ export default function DraftStep({ engagementId, jurisdictions, entity, onConti
 
   const draftRef = useRef(draftByJuris); draftRef.current = draftByJuris
   const startedRef = useRef(started); startedRef.current = started
+  const observedGeneratingRef = useRef<Set<string>>(new Set())
   const pollRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   const setDraft = (j: string, data: DraftResponse) => setDraftByJuris(prev => ({ ...prev, [j]: data }))
@@ -219,10 +224,15 @@ export default function DraftStep({ engagementId, jurisdictions, entity, onConti
       catch (e) { console.error("[veritax] draft poll failed:", e); return [j, draftRef.current[j]] as const }
     }))
     const merged: Record<string, DraftResponse> = {}
-    for (const [j, d] of results) if (d) merged[j] = d
+    for (const [j, d] of results) {
+      if (!d) continue
+      if (d.summary.pending > 0) observedGeneratingRef.current.add(j)
+      if (isDraftComplete(d) && !observedGeneratingRef.current.has(j)) markTypedDone(j)
+      merged[j] = d
+    }
     setDraftByJuris(prev => ({ ...prev, ...merged }))
     if (Object.values(merged).some(d => d.summary.pending > 0)) pollRef.current = setTimeout(poll, 1800)
-  }, [engagementId])
+  }, [engagementId, markTypedDone])
 
   const startJurisdiction = useCallback(async (j: string) => {
     if (!engagementId || !j || startedRef.current.has(j)) return
@@ -230,17 +240,15 @@ export default function DraftStep({ engagementId, jurisdictions, entity, onConti
     startedRef.current = new Set(startedRef.current).add(j)
     try {
       const d = await api.startDraft(engagementId, j)
-      const completeAlready = d.summary.total > 0 && d.summary.pending === 0 && d.summary.failed === 0
-      if (completeAlready && localStorage.getItem(typedDoneStorageKey(j)) === "1") {
-        setTypedDoneByJuris(prev => ({ ...prev, [j]: true }))
-      }
+      if (d.summary.pending > 0) observedGeneratingRef.current.add(j)
+      if (isDraftComplete(d) && !observedGeneratingRef.current.has(j)) markTypedDone(j)
       setDraft(j, d)
       if (d.summary.pending > 0 && !pollRef.current) pollRef.current = setTimeout(poll, 1200)
     } catch (e) {
       console.error("[veritax] failed to start draft:", e)
       setError(String(e))
     }
-  }, [engagementId, poll, typedDoneStorageKey])
+  }, [engagementId, markTypedDone, poll])
 
   // Process only the FIRST jurisdiction on entry; the rest start when selected.
   useEffect(() => {
@@ -287,15 +295,22 @@ export default function DraftStep({ engagementId, jurisdictions, entity, onConti
   const typedDone = typedDoneByJuris[activeJurisdiction] === true
 
   useEffect(() => {
+    if (!draft) return
     const key = typedDoneStorageKey(activeJurisdiction)
-    if (complete && key && localStorage.getItem(key) === "1") {
-      setTypedDoneByJuris(prev => ({ ...prev, [activeJurisdiction]: true }))
+    if (draft.summary.pending > 0) {
+      observedGeneratingRef.current.add(activeJurisdiction)
     }
-    if (!complete) {
-      setTypedDoneByJuris(prev => ({ ...prev, [activeJurisdiction]: false }))
-      if (key) localStorage.removeItem(key)
+    if (complete) {
+      if (key && localStorage.getItem(key) === "1") {
+        setTypedDoneByJuris(prev => ({ ...prev, [activeJurisdiction]: true }))
+      } else if (!observedGeneratingRef.current.has(activeJurisdiction)) {
+        markTypedDone(activeJurisdiction)
+      }
+      return
     }
-  }, [activeJurisdiction, complete, typedDoneStorageKey])
+    setTypedDoneByJuris(prev => ({ ...prev, [activeJurisdiction]: false }))
+    if (key) localStorage.removeItem(key)
+  }, [activeJurisdiction, complete, draft, markTypedDone, typedDoneStorageKey])
 
   if (!engagementId) return <main style={{ flex: 1, padding: "3rem 3.5rem", color: "var(--color-text-tertiary)" }}>Preparing session…</main>
   if (jurisdictions.length === 0) return <main style={{ flex: 1, padding: "3rem 3.5rem", color: "var(--color-text-tertiary)" }}>Select a jurisdiction in Planning first.</main>
