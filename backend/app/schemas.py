@@ -191,6 +191,7 @@ class PipelineRecoveryResponse(BaseModel):
     documents_restarted: int
     coverage_jurisdictions_restarted: list[str]
     draft_jurisdictions_restarted: list[str]
+    risk_jurisdictions_restarted: list[str]
 
 
 class RiskEvidenceRead(BaseModel):

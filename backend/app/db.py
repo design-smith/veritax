@@ -77,6 +77,10 @@ async def init_db(eng=engine) -> None:
                 "ALTER TABLE draft_sections ADD COLUMN IF NOT EXISTS charts jsonb NOT NULL DEFAULT '[]'::jsonb"
             ))
             await conn.execute(text(
+                "ALTER TABLE risk_runs ADD COLUMN IF NOT EXISTS status_updated_at "
+                "timestamp with time zone DEFAULT now()"
+            ))
+            await conn.execute(text(
                 "ALTER TABLE risk_evidence ADD COLUMN IF NOT EXISTS source_label text"
             ))
             await conn.execute(text(

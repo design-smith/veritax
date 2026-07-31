@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import uuid
+import logging
 from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, BackgroundTasks, Depends, Query
@@ -12,6 +13,7 @@ from ..deps import (
     get_assessor,
     get_drafter,
     get_embedder,
+    get_risk_analyzer,
     get_session,
     get_session_factory,
     get_storage,
@@ -30,14 +32,20 @@ from ..models import (
     DraftStatus,
     Engagement,
     RequirementCoverage,
+    RiskFinding,
+    RiskRun,
+    RiskRunStatus,
     Source,
 )
+from ..risks import RiskAnalyzer
 from ..schemas import PipelineRecoveryResponse
 from ..storage import Storage
 from .coverage import run_assessment
 from .draft import _draft_blocked_by_coverage, run_draft
+from .risks import RISK_STALE_AFTER, draft_complete, run_analysis
 
 router = APIRouter(tags=["pipeline"])
+log = logging.getLogger("veritax")
 
 DOCUMENT_STALE_AFTER = timedelta(minutes=10)
 COVERAGE_STALE_AFTER = timedelta(minutes=8)
@@ -55,6 +63,7 @@ async def recover_pipeline(
     embedder: Embedder = Depends(get_embedder),
     assessor: Assessor = Depends(get_assessor),
     drafter: Drafter = Depends(get_drafter),
+    risk_analyzer: RiskAnalyzer = Depends(get_risk_analyzer),
     _owner: Engagement = Depends(require_engagement_owner),
 ) -> PipelineRecoveryResponse:
     now = datetime.now(timezone.utc)
@@ -143,6 +152,39 @@ async def recover_pipeline(
     if draft_ids_to_clear:
         await session.execute(delete(DraftCitation).where(DraftCitation.section_id.in_(draft_ids_to_clear)))
 
+    risk_rows = (
+        await session.execute(
+            select(RiskRun).where(
+                RiskRun.engagement_id == engagement_id,
+                or_(
+                    RiskRun.status.in_([RiskRunStatus.pending, RiskRunStatus.analyzing])
+                    & or_(
+                        RiskRun.status_updated_at.is_(None),
+                        RiskRun.status_updated_at < now - RISK_STALE_AFTER,
+                        RiskRun.created_at < now - RISK_STALE_AFTER,
+                    ),
+                    (RiskRun.status == RiskRunStatus.failed) if retry_failed else false(),
+                ),
+            )
+        )
+    ).scalars().all()
+    risk_run_ids_to_clear: list[uuid.UUID] = []
+    risk_jurisdictions: set[str] = set()
+    for row in risk_rows:
+        if not await draft_complete(session, engagement_id, row.jurisdiction):
+            row.status = RiskRunStatus.failed
+            row.status_updated_at = now
+            row.error = f"draft not complete for '{row.jurisdiction}'"
+            continue
+        risk_run_ids_to_clear.append(row.id)
+        risk_jurisdictions.add(row.jurisdiction)
+        row.status = RiskRunStatus.pending
+        row.status_updated_at = now
+        row.error = None
+        row.completed_at = None
+    if risk_run_ids_to_clear:
+        await session.execute(delete(RiskFinding).where(RiskFinding.run_id.in_(risk_run_ids_to_clear)))
+
     await session.commit()
 
     for doc in stale_documents:
@@ -151,10 +193,23 @@ async def recover_pipeline(
         background.add_task(run_assessment, factory, assessor, embedder, engagement_id, jurisdiction)
     for jurisdiction in sorted(draft_jurisdictions):
         background.add_task(run_draft, factory, drafter, embedder, engagement_id, jurisdiction)
+    for jurisdiction in sorted(risk_jurisdictions):
+        background.add_task(run_analysis, factory, risk_analyzer, embedder, engagement_id, jurisdiction)
+
+    log.info(
+        "pipeline.recover engagement_id=%s documents=%d coverage=%s draft=%s risks=%s retry_failed=%s",
+        str(engagement_id)[:8] + "...",
+        len(stale_documents),
+        coverage_jurisdictions,
+        sorted(draft_jurisdictions),
+        sorted(risk_jurisdictions),
+        retry_failed,
+    )
 
     return PipelineRecoveryResponse(
         retried_failed=retry_failed,
         documents_restarted=len(stale_documents),
         coverage_jurisdictions_restarted=coverage_jurisdictions,
         draft_jurisdictions_restarted=sorted(draft_jurisdictions),
+        risk_jurisdictions_restarted=sorted(risk_jurisdictions),
     )

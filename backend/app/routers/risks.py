@@ -4,7 +4,7 @@ import asyncio
 import logging
 import time
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
 from sqlalchemy import delete, func, select
@@ -36,6 +36,8 @@ router = APIRouter(tags=["risks"])
 log = logging.getLogger("veritax")
 
 SEV_RANK = {RiskSeverity.critical: 0, RiskSeverity.high: 1, RiskSeverity.medium: 2, RiskSeverity.low: 3}
+RISK_STALE_AFTER = timedelta(minutes=5)
+RISK_ANALYSIS_TIMEOUT_SECONDS = 180
 
 
 def _elapsed_ms(started_at: float) -> int:
@@ -92,6 +94,16 @@ def _run_is_fresh(run: RiskRun, latest_draft_update: datetime | None) -> bool:
     if run.status != RiskRunStatus.done or run.completed_at is None:
         return False
     return latest_draft_update is None or latest_draft_update <= run.completed_at
+
+
+def _running_run_is_stale(run: RiskRun, now: datetime) -> bool:
+    if run.status not in (RiskRunStatus.pending, RiskRunStatus.analyzing):
+        return False
+    if run.status_updated_at is None:
+        return True
+    # Existing production rows get status_updated_at added by migration. created_at catches older
+    # stranded jobs that would otherwise look fresh immediately after that column appears.
+    return run.status_updated_at < now - RISK_STALE_AFTER or run.created_at < now - RISK_STALE_AFTER
 
 
 # ── Draft-complete gate (Risks runs only on the finished file) ────────────────
@@ -210,6 +222,7 @@ async def run_analysis(session_factory: async_sessionmaker, analyzer: RiskAnalyz
             )
             return
         run_id = run.id  # capture now — after a rollback the instance is expired and can't lazy-load
+        now = datetime.now(timezone.utc)
         log.info(
             "risks.job.start engagement_id=%s jurisdiction=%s run_id=%s provider=%s analyzer=%s",
             _short_id(engagement_id),
@@ -219,6 +232,7 @@ async def run_analysis(session_factory: async_sessionmaker, analyzer: RiskAnalyz
             analyzer.__class__.__name__,
         )
         run.status = RiskRunStatus.analyzing
+        run.status_updated_at = now
         await session.commit()
 
         try:
@@ -291,7 +305,21 @@ async def run_analysis(session_factory: async_sessionmaker, analyzer: RiskAnalyz
             )
 
             analysis_started_at = time.perf_counter()
-            findings = await asyncio.to_thread(analyzer.analyze, entity_name, jurisdiction, draft_text, documents)
+            log.info(
+                "risks.job.analysis_begin engagement_id=%s jurisdiction=%s timeout_seconds=%d",
+                _short_id(engagement_id),
+                jurisdiction,
+                RISK_ANALYSIS_TIMEOUT_SECONDS,
+            )
+            try:
+                findings = await asyncio.wait_for(
+                    asyncio.to_thread(analyzer.analyze, entity_name, jurisdiction, draft_text, documents),
+                    timeout=RISK_ANALYSIS_TIMEOUT_SECONDS,
+                )
+            except TimeoutError as exc:
+                raise RuntimeError(
+                    f"risk analysis timed out after {RISK_ANALYSIS_TIMEOUT_SECONDS}s"
+                ) from exc
             log.info(
                 "risks.job.analysis_complete engagement_id=%s jurisdiction=%s findings=%d duration_ms=%d",
                 _short_id(engagement_id),
@@ -338,6 +366,7 @@ async def run_analysis(session_factory: async_sessionmaker, analyzer: RiskAnalyz
             run.status = RiskRunStatus.done
             run.error = None
             run.completed_at = datetime.now(timezone.utc)
+            run.status_updated_at = run.completed_at
             await session.commit()
             log.info(
                 "risks.job.persisted engagement_id=%s jurisdiction=%s findings=%d evidence=%d recommendations=%d "
@@ -356,6 +385,7 @@ async def run_analysis(session_factory: async_sessionmaker, analyzer: RiskAnalyz
             if run is not None:
                 run.status = RiskRunStatus.failed
                 run.error = str(exc)[:1000]
+                run.status_updated_at = datetime.now(timezone.utc)
                 await session.commit()
             log.exception(
                 "risks.job.failed engagement_id=%s jurisdiction=%s run_id=%s total_ms=%d",
@@ -379,6 +409,7 @@ async def start_risks(
     _owner: Engagement = Depends(require_engagement_owner),
 ) -> RiskResponse:
     request_started_at = time.perf_counter()
+    now = datetime.now(timezone.utc)
     log.info(
         "risks.start.begin engagement_id=%s jurisdiction=%s",
         _short_id(engagement_id),
@@ -401,14 +432,35 @@ async def start_risks(
         _elapsed_ms(existing_started_at),
     )
     if existing is not None and existing.status in (RiskRunStatus.pending, RiskRunStatus.analyzing):
+        stale_running = _running_run_is_stale(existing, now)
         log.info(
-            "risks.start.return_running engagement_id=%s jurisdiction=%s status=%s total_ms=%d",
+            "risks.start.running_checked engagement_id=%s jurisdiction=%s status=%s stale=%s "
+            "created_at=%s status_updated_at=%s stale_after_seconds=%d",
             _short_id(engagement_id),
             jurisdiction,
             existing.status.value,
-            _elapsed_ms(request_started_at),
+            stale_running,
+            existing.created_at.isoformat() if existing.created_at else None,
+            existing.status_updated_at.isoformat() if existing.status_updated_at else None,
+            int(RISK_STALE_AFTER.total_seconds()),
         )
-        return await _response(session, engagement_id, jurisdiction)
+        if stale_running:
+            log.warning(
+                "risks.start.recover_stale_running engagement_id=%s jurisdiction=%s status=%s total_ms=%d",
+                _short_id(engagement_id),
+                jurisdiction,
+                existing.status.value,
+                _elapsed_ms(request_started_at),
+            )
+        else:
+            log.info(
+                "risks.start.return_running engagement_id=%s jurisdiction=%s status=%s total_ms=%d",
+                _short_id(engagement_id),
+                jurisdiction,
+                existing.status.value,
+                _elapsed_ms(request_started_at),
+            )
+            return await _response(session, engagement_id, jurisdiction)
 
     latest_draft_update = None
     if existing is not None:
@@ -460,10 +512,15 @@ async def start_risks(
     stmt = (
         pg_insert(RiskRun)
         .values(id=uuid.uuid4(), engagement_id=engagement_id, jurisdiction=jurisdiction,
-                status=RiskRunStatus.pending)
+                status=RiskRunStatus.pending, status_updated_at=now)
         .on_conflict_do_update(
             index_elements=["engagement_id", "jurisdiction"],
-            set_={"status": RiskRunStatus.pending, "error": None, "completed_at": None},
+            set_={
+                "status": RiskRunStatus.pending,
+                "error": None,
+                "completed_at": None,
+                "status_updated_at": now,
+            },
         )
         .returning(RiskRun.id)
     )

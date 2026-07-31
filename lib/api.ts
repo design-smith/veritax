@@ -200,6 +200,7 @@ export interface PipelineRecoveryResponse {
   documents_restarted: number
   coverage_jurisdictions_restarted: string[]
   draft_jurisdictions_restarted: string[]
+  risk_jurisdictions_restarted: string[]
 }
 
 export type RiskKind = "discrepancy" | "exposure"
