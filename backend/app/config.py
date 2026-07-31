@@ -53,6 +53,11 @@ class Settings(BaseSettings):
     supabase_jwt_aud: str = "authenticated"
 
     cors_origins: str = "http://localhost:3000"
+    cors_origin_regex: str = (
+        r"^https://([a-z0-9-]+\.)?veritaxai\.com$"
+        r"|^https://.*\.vercel\.app$"
+        r"|^http://(localhost|127\.0\.0\.1):\d+$"
+    )
 
     @property
     def cors_origin_list(self) -> list[str]:

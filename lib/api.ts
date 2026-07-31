@@ -12,6 +12,9 @@ export interface HealthResponse {
   source?: "ready" | "health/db" | "health"
 }
 
+const HEALTH_TIMEOUT_MS = 8_000
+const HEALTH_RETRY_DELAYS_MS = [0, 1_000, 2_000, 4_000, 8_000]
+
 // Every backend call carries the Supabase access token — the API verifies it and scopes data per user.
 let _sb: ReturnType<typeof createClient> | null = null
 async function afetch(url: string, init: RequestInit = {}): Promise<Response> {
@@ -236,38 +239,61 @@ function isApiStatus(error: unknown, status?: number) {
     : error.message.startsWith(`API ${status} `)
 }
 
+function sleep(ms: number) {
+  return new Promise(resolve => setTimeout(resolve, ms))
+}
+
 async function fetchHealth(path: "/ready" | "/health/db" | "/health"): Promise<HealthResponse> {
-  const res = await fetch(`${BASE}${path}`, { cache: "no-store" })
-  const body = await parse<HealthResponse>(res)
-  return { ...body, source: path.slice(1) as HealthResponse["source"] }
+  const controller = new AbortController()
+  const timer = setTimeout(() => controller.abort(), HEALTH_TIMEOUT_MS)
+  try {
+    const res = await fetch(`${BASE}${path}`, { cache: "no-store", signal: controller.signal })
+    const body = await parse<HealthResponse>(res)
+    return { ...body, source: path.slice(1) as HealthResponse["source"] }
+  } finally {
+    clearTimeout(timer)
+  }
+}
+
+async function fetchCurrentHealth(): Promise<HealthResponse> {
+  try {
+    return await fetchHealth("/ready")
+  } catch (error) {
+    if (!isApiStatus(error, 404)) throw error
+  }
+
+  try {
+    return await fetchHealth("/health/db")
+  } catch (error) {
+    if (!isApiStatus(error, 404)) throw error
+  }
+
+  const basic = await fetchHealth("/health")
+  return { ...basic, db: undefined, source: "health" }
 }
 
 export const api = {
   health: async (): Promise<HealthResponse> => {
-    try {
-      return await fetchHealth("/ready")
-    } catch (error) {
-      if (isApiStatus(error) && !isApiStatus(error, 404)) throw error
-      console.warn("[veritax] readiness probe failed; trying /health/db", {
-        base: BASE,
-        probe: "/ready",
-        error: describeError(error),
-      })
+    let lastError: unknown = null
+    for (let attempt = 0; attempt < HEALTH_RETRY_DELAYS_MS.length; attempt += 1) {
+      const delay = HEALTH_RETRY_DELAYS_MS[attempt]
+      if (delay > 0) await sleep(delay)
+      try {
+        return await fetchCurrentHealth()
+      } catch (error) {
+        lastError = error
+        console.warn("[veritax] health probe failed", {
+          base: BASE,
+          attempt: attempt + 1,
+          attempts: HEALTH_RETRY_DELAYS_MS.length,
+          retrying: attempt < HEALTH_RETRY_DELAYS_MS.length - 1,
+          error: describeError(error),
+        })
+      }
     }
-
-    try {
-      return await fetchHealth("/health/db")
-    } catch (error) {
-      if (isApiStatus(error)) throw error
-      console.warn("[veritax] db health probe was blocked or unreachable; trying /health", {
-        base: BASE,
-        probe: "/health/db",
-        error: describeError(error),
-      })
-    }
-
-    const basic = await fetchHealth("/health")
-    return { ...basic, db: undefined, source: "health" }
+    throw lastError instanceof Error
+      ? lastError
+      : new Error("Backend health probe failed")
   },
 
   createEngagement: (): Promise<{ id: string }> =>
