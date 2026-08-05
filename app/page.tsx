@@ -4,13 +4,15 @@ import { useCallback, useEffect, useRef, useState, type CSSProperties } from "re
 import { useRouter } from "next/navigation"
 import dynamic from "next/dynamic"
 import { Activity, CalendarDays, ChevronDown, FileText, PanelLeftClose, PanelLeftOpen, ShieldCheck } from "lucide-react"
-import PlanningStep, { type SourceId } from "@/components/steps/planning"
+import PlanningStep, { type PlanningDocumentMap, type SourceId } from "@/components/steps/planning"
 import RequirementsStep from "@/components/steps/requirements"
 import DraftStep from "@/components/steps/draft"
 import RisksStep from "@/components/steps/risks"
-import { api, type EngagementSummary } from "@/lib/api"
+import { api, type DocumentRead, type Engagement, type EngagementSummary } from "@/lib/api"
 import { createClient } from "@/lib/supabase/client"
 import { LoadingIndicator } from "@/components/ui/indicator"
+import { ActionModal } from "@/components/ui/action-modal"
+import { diagnoseApiFailure, withActions, type ActionableIssue, type ActionableIssueBase, type ActionableErrorAction } from "@/lib/actionable-errors"
 
 // FullCalendar is browser-only — load it client-side so it never runs during the build prerender.
 const CompliancePage = dynamic(() => import("@/components/compliance"), { ssr: false })
@@ -30,6 +32,7 @@ const NAV: { step: Step; label: string }[] = [
 const LS_ID = "veritax.engagementId"     // resume the file being worked on across refreshes
 const LS_STEP = "veritax.step"
 const PLANNING_SOURCES = new Set<SourceId>(["financials", "agreements", "public", "interview"])
+const EMPTY_PLANNING_DOCUMENTS: PlanningDocumentMap = {}
 const STEP_URL: Record<Step, string> = {
   1: "planning",
   2: "requirements",
@@ -54,6 +57,16 @@ function readWorkspaceUrl() {
     projectId: params.get("project") || params.get("engagement") || params.get("file"),
     step: parseStepParam(params.get("step")),
   }
+}
+
+function planningDocumentsFromEngagement(engagement: Engagement): PlanningDocumentMap {
+  const documents: PlanningDocumentMap = {}
+  for (const source of engagement.sources) {
+    if (!PLANNING_SOURCES.has(source.kind as SourceId)) continue
+    const kind = source.kind as SourceId
+    documents[kind] = [...(documents[kind] ?? []), ...source.documents]
+  }
+  return documents
 }
 
 function canonicalizePlanningUrl() {
@@ -206,6 +219,7 @@ export default function Page() {
   const [jurisdictions, setJ] = useState<string[]>([])
   const [entity, setEntity]   = useState("")
   const [sources, setSources] = useState<Set<SourceId>>(new Set())
+  const [planningDocuments, setPlanningDocuments] = useState<PlanningDocumentMap>(EMPTY_PLANNING_DOCUMENTS)
   const [engagementId, setEngagementId] = useState<string | null>(null)
   // Deep-link from a Requirements row to the draft section that fulfils it.
   const [draftJump, setDraftJump] = useState<{ jurisdiction: string; sectionId: string } | null>(null)
@@ -219,7 +233,26 @@ export default function Page() {
   const [draftReady, setDraftReady] = useState(false)
   const [bootStatus, setBootStatus] = useState<BootStatus>("loading")
   const [libraryLoading, setLibraryLoading] = useState(true)
+  const [actionIssue, setActionIssue] = useState<ActionableIssue | null>(null)
   const engagementLoadSeq = useRef(0)
+
+  const openIssue = useCallback((
+    base: ActionableIssueBase,
+    primaryAction: ActionableErrorAction = { label: "Retry", onClick: () => window.location.reload() },
+    secondaryAction?: ActionableErrorAction,
+  ) => {
+    setActionIssue(withActions(base, primaryAction, secondaryAction))
+  }, [])
+
+  const diagnoseAndOpen = useCallback(async (
+    error: unknown,
+    operation: string,
+    primaryAction: ActionableErrorAction = { label: "Retry", onClick: () => window.location.reload() },
+    secondaryAction?: ActionableErrorAction,
+  ) => {
+    const base = await diagnoseApiFailure(error, { operation, engagementId })
+    openIssue(base, primaryAction, secondaryAction)
+  }, [engagementId, openIssue])
 
   const refreshFiles = useCallback(async (): Promise<boolean> => {
     setLibraryLoading(true)
@@ -232,6 +265,7 @@ export default function Page() {
       logAppError("list engagements", error)
       setFiles([])
       setApiOffline(true)
+      void diagnoseAndOpen(error, "load file library", { label: "Refresh", onClick: () => window.location.reload() })
       return false
     } finally {
       setLibraryLoading(false)
@@ -246,6 +280,7 @@ export default function Page() {
       setEntity(eng.entity_name ?? "")
       setJ(eng.jurisdictions)
       setSources(new Set(eng.sources.map(s => s.kind).filter((k): k is SourceId => PLANNING_SOURCES.has(k as SourceId))))
+      setPlanningDocuments(planningDocumentsFromEngagement(eng))
       setEngagementId(id)
       localStorage.setItem(LS_ID, id)
       return true
@@ -253,6 +288,16 @@ export default function Page() {
       logAppError("load engagement", error)
       return false
     }
+  }, [])
+
+  const updatePlanningDocuments = useCallback((
+    kind: SourceId,
+    updater: (docs: DocumentRead[]) => DocumentRead[],
+  ) => {
+    setPlanningDocuments(prev => ({
+      ...prev,
+      [kind]: updater(prev[kind] ?? []),
+    }))
   }, [])
 
   // Resume the file being worked on (or start a fresh one), then load the library.
@@ -271,6 +316,12 @@ export default function Page() {
           setApiOffline(true)
           setBootStatus("offline")
           setLibraryLoading(false)
+          void diagnoseAndOpen(
+            error,
+            "check backend health",
+            { label: "Retry", onClick: () => window.location.reload() },
+            { label: "Sign in again", onClick: () => router.replace("/login"), variant: "ghost" },
+          )
         }
         return
       }
@@ -294,6 +345,7 @@ export default function Page() {
         try {
           const { id } = await api.createEngagement()  // uploads need an id to attach to
           if (cancelled) return
+          setPlanningDocuments(EMPTY_PLANNING_DOCUMENTS)
           setEngagementId(id)
           localStorage.setItem(LS_ID, id)
         } catch (error) {
@@ -302,6 +354,12 @@ export default function Page() {
             setApiOffline(true)
             setBootStatus("offline")
             setLibraryLoading(false)
+            void diagnoseAndOpen(
+              error,
+              "create project",
+              { label: "Retry", onClick: () => window.location.reload() },
+              { label: "Sign in again", onClick: () => router.replace("/login"), variant: "ghost" },
+            )
           }
           return
         }
@@ -323,8 +381,9 @@ export default function Page() {
     api.recoverPipeline(engagementId).catch(error => {
       logAppError("pipeline recovery", error)
       setApiOffline(true)
+      void diagnoseAndOpen(error, "recover pipeline", { label: "Retry recovery", onClick: () => void api.recoverPipeline(engagementId, true) })
     })
-  }, [engagementId])
+  }, [diagnoseAndOpen, engagementId])
 
   function navigate(s: Step) {
     if (s >= 3 && !draftReady) return
@@ -342,13 +401,17 @@ export default function Page() {
     // Start a fresh Local File pipeline: jump into Planning immediately, then create the engagement
     // in the background so the pipeline shows instantly even if the create call is slow.
     setEntity(""); setJ([]); setSources(new Set()); setDraftJump(null); setDraftReady(false)
+    setPlanningDocuments(EMPTY_PLANNING_DOCUMENTS)
     setVisited(new Set([1])); setStep(1); setMounted(new Set([1]))
     setPage("workflow")
     setEngagementId(null)
     engagementLoadSeq.current += 1
     api.createEngagement()
       .then(({ id }) => { setApiOffline(false); setEngagementId(id); localStorage.setItem(LS_ID, id); refreshFiles() })
-      .catch(() => setApiOffline(true))
+      .catch(error => {
+        setApiOffline(true)
+        void diagnoseAndOpen(error, "create new project", { label: "Try again", onClick: newFile })
+      })
   }
 
   function openFile(file: EngagementSummary) {
@@ -358,6 +421,7 @@ export default function Page() {
     setEntity(file.entity_name ?? "")
     setJ(file.jurisdictions)
     setSources(new Set())
+    setPlanningDocuments(EMPTY_PLANNING_DOCUMENTS)
     setEngagementId(id)
     localStorage.setItem(LS_ID, id)
     setDraftReady(false)
@@ -393,7 +457,11 @@ export default function Page() {
     if (engagementId) {
       api.patchEngagement(engagementId, { entity_name: entity, jurisdictions })
         .then(refreshFiles)  // the newly-named file now shows in the library
-        .catch(error => { logAppError("save planning scope", error); setApiOffline(true) })
+        .catch(error => {
+          logAppError("save planning scope", error)
+          setApiOffline(true)
+          void diagnoseAndOpen(error, "save planning scope", { label: "Retry save", onClick: continueFromPlanning })
+        })
     }
     setDraftReady(false)
     navigate(2)
@@ -401,8 +469,18 @@ export default function Page() {
 
   const newFileActive = page === "workflow" && engagementId !== null && files.every(f => f.id !== engagementId)
 
-  if (bootStatus === "loading") return <BootSkeleton />
-  if (bootStatus === "offline") return <BootSkeleton offline onRetry={() => window.location.reload()} />
+  if (bootStatus === "loading") return (
+    <>
+      <BootSkeleton />
+      <ActionModal issue={actionIssue} onClose={() => setActionIssue(null)} />
+    </>
+  )
+  if (bootStatus === "offline") return (
+    <>
+      <BootSkeleton offline onRetry={() => window.location.reload()} />
+      <ActionModal issue={actionIssue} onClose={() => setActionIssue(null)} />
+    </>
+  )
 
   return (
     <div style={{ display: "flex", height: "100vh", overflow: "hidden", background: "#fff", color: "#000" }}>
@@ -607,19 +685,6 @@ export default function Page() {
         ) : (
           <>
 
-        {apiOffline && (
-          <div style={{
-            flexShrink: 0,
-            padding: "0.625rem 2rem",
-            borderBottom: "1px solid #e5e5e5",
-            background: "#fafafa",
-            color: "#555",
-            fontSize: "12px",
-          }}>
-            Backend or database is unavailable. Refresh, check your connection or browser blocker, and confirm the Render backend is reachable.
-          </div>
-        )}
-
         {/* Horizontal section tabs */}
         <nav style={{
           borderBottom: "1px solid #e5e5e5",
@@ -670,6 +735,8 @@ export default function Page() {
                 engagementId={engagementId}
                 jurisdictions={jurisdictions} onJurisdictionsChange={setJ}
                 entity={entity}              onEntityChange={setEntity}
+                documentsByKind={planningDocuments}
+                updateDocuments={updatePlanningDocuments}
                 sources={sources}            onSourcesChange={setSources}
                 onContinue={continueFromPlanning}
               />
@@ -683,6 +750,7 @@ export default function Page() {
                 onContinue={continueToDraft}
                 onOpenDraftSection={(jurisdiction, sectionId) => { setDraftJump({ jurisdiction, sectionId }); continueToDraft() }}
                 onDraftReadinessChange={setDraftReady}
+                onOpenPlanning={() => navigate(1)}
               />
             </div>
           )}
@@ -692,13 +760,21 @@ export default function Page() {
                 key={`draft-${engagementId ?? "pending"}`}
                 engagementId={engagementId} jurisdictions={jurisdictions} entity={entity}
                 onContinue={() => navigate(4)}
+                onOpenRequirements={() => navigate(2)}
                 jumpTo={draftJump} onJumped={() => setDraftJump(null)}
               />
             </div>
           )}
           {mounted.has(4) && (
             <div className={step === 4 ? "vt-step-panel vt-step-panel-active" : "vt-step-panel"} style={{ flex: 1, minWidth: 0, display: step === 4 ? "flex" : "none" }}>
-              <RisksStep key={`risks-${engagementId ?? "pending"}`} engagementId={engagementId} jurisdictions={jurisdictions} entity={entity} />
+              <RisksStep
+                key={`risks-${engagementId ?? "pending"}`}
+                engagementId={engagementId}
+                jurisdictions={jurisdictions}
+                entity={entity}
+                onOpenDraft={() => navigate(3)}
+                onOpenPlanning={() => navigate(1)}
+              />
             </div>
           )}
         </div>
@@ -706,6 +782,7 @@ export default function Page() {
         )}
       </div>
 
+      <ActionModal issue={actionIssue} onClose={() => setActionIssue(null)} />
     </div>
   )
 }

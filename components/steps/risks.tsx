@@ -11,6 +11,15 @@ import {
   type RiskFinding,
   type RiskSeverityValue,
 } from "@/lib/api"
+import { ActionModal } from "@/components/ui/action-modal"
+import {
+  diagnoseApiFailure,
+  parseApiError,
+  runWithRetry,
+  withActions,
+  type ActionableIssue,
+  type ActionableIssueBase,
+} from "@/lib/actionable-errors"
 
 // ── Original "Findings" appearance (grayscale), now driven by the real pipeline ──────────────
 type Severity = RiskSeverityValue
@@ -81,32 +90,53 @@ const logRisk = (event: string, details: Record<string, unknown>) => {
   console.info(RISK_LOG_PREFIX, event, details)
 }
 
-export default function RisksStep({ engagementId, jurisdictions, entity }: {
+export default function RisksStep({ engagementId, jurisdictions, entity, onOpenDraft, onOpenPlanning }: {
   engagementId: string | null
   jurisdictions: string[]
   entity: string
+  onOpenDraft?: () => void
+  onOpenPlanning?: () => void
 }) {
   // ── real pipeline wiring (unchanged) ──
   const [riskByJuris, setRiskByJuris] = useState<Record<string, RiskResponse>>({})
   const [started, setStarted] = useState<Set<string>>(new Set())
   const [notReady, setNotReady] = useState<Set<string>>(new Set())
   const [activeJurisdiction, setActive] = useState(jurisdictions[0] ?? "")
-  const [error, setError] = useState<string | null>(null)
+  const [issue, setIssue] = useState<ActionableIssue | null>(null)
   // ── view state (search + kind toggle + slide-in detail, from the original) ──
   const [search, setSearch] = useState("")
   const [view, setView] = useState<KindFilter>("all")
   const [openFinding, setOpenFinding] = useState<RiskFinding | null>(null)
   const [sourcePreview, setSourcePreview] = useState<{ doc: DocumentTextRead; evidence: RiskEvidence } | null>(null)
   const [sourceLoading, setSourceLoading] = useState<string | null>(null)
-  const [sourceError, setSourceError] = useState<string | null>(null)
   const [copiedEvidence, setCopiedEvidence] = useState(false)
 
   const riskRef = useRef(riskByJuris); riskRef.current = riskByJuris
   const startedRef = useRef(started); startedRef.current = started
+  const failureIssueKeyRef = useRef("")
+  const notReadyIssueRef = useRef<Set<string>>(new Set())
   const pollRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   const setRisk = (j: string, d: RiskResponse) => setRiskByJuris(prev => ({ ...prev, [j]: d }))
   const analyzing = (d?: RiskResponse) => d?.status === "pending" || d?.status === "analyzing"
+
+  function openIssue(
+    base: ActionableIssueBase,
+    primaryAction: ActionableIssue["primaryAction"],
+    secondaryAction?: ActionableIssue["secondaryAction"],
+  ) {
+    setIssue(withActions(base, primaryAction, secondaryAction))
+  }
+
+  async function openIssueFromError(
+    error: unknown,
+    operation: string,
+    primaryAction: ActionableIssue["primaryAction"],
+    secondaryAction?: ActionableIssue["secondaryAction"],
+  ) {
+    const base = await diagnoseApiFailure(error, { operation, engagementId, jurisdiction: activeJurisdiction })
+    openIssue(base, primaryAction, secondaryAction)
+  }
 
   const poll = useCallback(async () => {
     const startedAt = performance.now()
@@ -121,7 +151,7 @@ export default function RisksStep({ engagementId, jurisdictions, entity }: {
     const results = await Promise.all(js.map(async j => {
       const getStartedAt = performance.now()
       try {
-        const d = await api.getRisks(engagementId, j)
+        const d = await runWithRetry(() => api.getRisks(engagementId, j), { retries: 1 })
         logRisk("poll:get:ok", {
           engagementId: shortEngagement(engagementId),
           jurisdiction: j,
@@ -137,6 +167,9 @@ export default function RisksStep({ engagementId, jurisdictions, entity }: {
           durationMs: riskElapsedMs(getStartedAt),
           error: riskError(e),
         })
+        if (!riskRef.current[j]) {
+          void openIssueFromError(e, "poll risk review", { label: "Retry risk review", onClick: () => retry(j) })
+        }
         return [j, riskRef.current[j]] as const
       }
     }))
@@ -167,7 +200,10 @@ export default function RisksStep({ engagementId, jurisdictions, entity }: {
     setStarted(prev => new Set(prev).add(j))
     startedRef.current = new Set(startedRef.current).add(j)
     try {
-      const d = await api.startRisks(engagementId, j)
+      const d = await runWithRetry(
+        () => api.startRisks(engagementId, j),
+        { retries: 2, recover: () => api.recoverPipeline(engagementId, true) },
+      )
       logRisk("start:ok", {
         engagementId: shortEngagement(engagementId),
         jurisdiction: j,
@@ -184,6 +220,20 @@ export default function RisksStep({ engagementId, jurisdictions, entity }: {
           durationMs: riskElapsedMs(startedAt),
         })
         setNotReady(prev => new Set(prev).add(j))
+        if (!notReadyIssueRef.current.has(j)) {
+          notReadyIssueRef.current.add(j)
+          openIssue(
+            {
+              title: "Finish Draft before Risks",
+              message: `Risks run on the completed ${j} draft.`,
+              detail: "Complete Draft, then come back and check again.",
+              tone: "caution",
+              diagnostics: { operation: "start risks", engagementId, jurisdiction: j, blocker: "draft_not_complete" },
+            },
+            { label: "Go to Draft", onClick: () => onOpenDraft?.() },
+            { label: "Check again", onClick: () => retry(j), variant: "ghost" },
+          )
+        }
       } else {
         console.error("[veritax:risks] start:failed", {
           engagementId: shortEngagement(engagementId),
@@ -191,7 +241,12 @@ export default function RisksStep({ engagementId, jurisdictions, entity }: {
           durationMs: riskElapsedMs(startedAt),
           error: riskError(e),
         })
-        setError(String(e))
+        void openIssueFromError(
+          e,
+          "start risk review",
+          { label: "Retry risk review", onClick: () => retry(j) },
+          { label: "Go to Draft", onClick: () => onOpenDraft?.(), variant: "ghost" },
+        )
       }
     }
   }, [engagementId, poll])
@@ -213,12 +268,12 @@ export default function RisksStep({ engagementId, jurisdictions, entity }: {
     setActive(j)
     setOpenFinding(null)
     setSourcePreview(null)
-    setSourceError(null)
     startJurisdiction(j)
   }
 
   function retry(j: string) {
     logRisk("retry:begin", { engagementId: shortEngagement(engagementId), jurisdiction: j })
+    notReadyIssueRef.current.delete(j)
     setNotReady(prev => { const n = new Set(prev); n.delete(j); return n })
     setStarted(prev => { const n = new Set(prev); n.delete(j); return n })
     startedRef.current = new Set([...startedRef.current].filter(x => x !== j))
@@ -240,6 +295,24 @@ export default function RisksStep({ engagementId, jurisdictions, entity }: {
   const exposureCount = findings.filter(f => f.kind === "exposure").length
   const contradictionCount = findings.filter(f => f.kind === "discrepancy").length
   const needAttention = findings.filter(f => f.severity === "critical" || f.severity === "high").length
+
+  useEffect(() => {
+    if (risk?.status !== "failed") return
+    const key = `${engagementId}:${activeJurisdiction}:${risk.error ?? "failed"}`
+    if (failureIssueKeyRef.current === key) return
+    failureIssueKeyRef.current = key
+    openIssue(
+      {
+        title: "Risk review failed",
+        message: "Veritax could not finish the risk analysis for this draft.",
+        detail: risk.error || "Retry the risk review. If it repeats, copy diagnostics for backend logs.",
+        tone: "caution",
+        diagnostics: { operation: "risk review failed", engagementId, jurisdiction: activeJurisdiction, error: risk.error },
+      },
+      { label: "Retry risk review", onClick: () => retry(activeJurisdiction) },
+      { label: "Go to Draft", onClick: () => onOpenDraft?.(), variant: "ghost" },
+    )
+  }, [activeJurisdiction, engagementId, onOpenDraft, risk])
 
   function exportRegister() {
     const title = `${entity || "Entity"} — ${activeJurisdiction} · Risk Register`
@@ -264,7 +337,6 @@ export default function RisksStep({ engagementId, jurisdictions, entity }: {
   }
 
   async function openSource(evidence: RiskEvidence) {
-    setSourceError(null)
     setCopiedEvidence(false)
     if (!evidence.document_id) {
       logRisk("source:copy-only", { reference: evidence.reference, kind: evidence.kind })
@@ -281,7 +353,7 @@ export default function RisksStep({ engagementId, jurisdictions, entity }: {
     })
     setSourceLoading(evidence.document_id)
     try {
-      const doc = await api.getDocumentText(evidence.document_id)
+      const doc = await runWithRetry(() => api.getDocumentText(evidence.document_id!), { retries: 1 })
       logRisk("source:open:ok", {
         documentId: `${evidence.document_id.slice(0, 8)}...`,
         durationMs: riskElapsedMs(startedAt),
@@ -295,7 +367,34 @@ export default function RisksStep({ engagementId, jurisdictions, entity }: {
         durationMs: riskElapsedMs(startedAt),
         error: riskError(e),
       })
-      setSourceError("Source text is not available yet. The document may still be indexing.")
+      const status = parseApiError(e).status
+      if (status === 409) {
+        openIssue(
+          {
+            title: "Source is still indexing",
+            message: "The document exists, but its text is not ready for preview yet.",
+            detail: "Retry opening the source. If it repeats, go to Planning and retry indexing the file.",
+            tone: "caution",
+            diagnostics: { operation: "open risk source", status, documentId: evidence.document_id, reference: evidence.reference },
+          },
+          { label: "Retry opening source", onClick: () => void openSource(evidence) },
+          { label: "Go to Planning", onClick: () => onOpenPlanning?.(), variant: "ghost" },
+        )
+      } else if (status === 404) {
+        openIssue(
+          {
+            title: "Source pointer is stale",
+            message: "The risk finding points to a document the backend cannot find.",
+            detail: "Refresh findings or return to Planning to confirm the file is still attached.",
+            tone: "caution",
+            diagnostics: { operation: "open risk source", status, documentId: evidence.document_id, reference: evidence.reference },
+          },
+          { label: "Refresh findings", onClick: () => retry(activeJurisdiction) },
+          { label: "Go to Planning", onClick: () => onOpenPlanning?.(), variant: "ghost" },
+        )
+      } else {
+        void openIssueFromError(e, "open risk source", { label: "Retry opening source", onClick: () => void openSource(evidence) })
+      }
     } finally {
       setSourceLoading(null)
     }
@@ -337,8 +436,6 @@ export default function RisksStep({ engagementId, jurisdictions, entity }: {
               </button>
             )}
           </div>
-
-          {error && <p style={{ fontSize: 13, color: "#b00020" }}>Couldn’t load risks. Is the backend running? ({error})</p>}
           {risk?.analysis_mode === "fake" && (
             <p style={{ fontSize: 12, color: "#8a5a00", background: "#fff8e5", border: "1px solid #f0d58c", borderRadius: 6, padding: "0.625rem 0.75rem", margin: "0 0 0.875rem" }}>
               Development mode: these findings are generated by the fake analyzer, not a real model.
@@ -361,12 +458,12 @@ export default function RisksStep({ engagementId, jurisdictions, entity }: {
               </p>
               <button type="button" onClick={() => retry(activeJurisdiction)} style={{ height: 28, padding: "0 0.75rem", borderRadius: 6, border: "1px solid #e5e5e5", background: "#fff", color: "#555", fontSize: 12, cursor: "pointer" }}>Check again</button>
             </div>
-          ) : analyzing(risk) || (!risk && !error) ? (
+          ) : analyzing(risk) || !risk ? (
             <p style={{ display: "flex", alignItems: "center", gap: "0.5rem", fontSize: 13, color: "#888" }}>
               <Loader2 size={14} className="animate-spin" /> Analysing the {activeJurisdiction} file for risk…
             </p>
           ) : risk?.status === "failed" ? (
-            <p style={{ fontSize: 13, color: "#b00020" }}>Analysis failed: {risk.error}</p>
+            <p style={{ fontSize: 13, color: "#888" }}>Risk review paused. Use the recovery dialog to retry.</p>
           ) : findings.length === 0 ? (
             <p style={{ fontSize: 13, color: "#888" }}>No risks surfaced for this file.</p>
           ) : (
@@ -411,7 +508,7 @@ export default function RisksStep({ engagementId, jurisdictions, entity }: {
                 <tbody>
                   {visible.map(f => (
                     <tr key={f.id} style={{ cursor: "pointer", background: openFinding?.id === f.id ? "#f2f2f2" : "transparent" }}
-                      onClick={() => { setOpenFinding(f); setSourcePreview(null); setSourceError(null) }}
+                      onClick={() => { setOpenFinding(f); setSourcePreview(null) }}
                       onMouseEnter={e => { if (openFinding?.id !== f.id) e.currentTarget.style.background = "#fafafa" }}
                       onMouseLeave={e => { if (openFinding?.id !== f.id) e.currentTarget.style.background = "transparent" }}>
                       <td style={TD}><Chip style={{ ...SEVERITY_STYLE[f.severity], textTransform: "capitalize", fontWeight: 600 }}>{f.severity}</Chip></td>
@@ -510,7 +607,6 @@ export default function RisksStep({ engagementId, jurisdictions, entity }: {
                   </div>
                 ))}
                 {openFinding.evidence.length === 0 && <p style={{ fontSize: 12, color: "#aaa", margin: 0 }}>No evidence pointers recorded.</p>}
-                {sourceError && <p style={{ fontSize: 12, color: "#b00020", margin: 0 }}>{sourceError}</p>}
                 {sourcePreview && (
                   <div style={{ border: "1px solid #e5e5e5", borderRadius: 8, background: "#fff", padding: "0.875rem", display: "flex", flexDirection: "column", gap: "0.5rem" }}>
                     <p style={{ fontSize: 11, fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.04em", color: "#888", margin: 0 }}>Source preview</p>
@@ -537,6 +633,7 @@ export default function RisksStep({ engagementId, jurisdictions, entity }: {
           </aside>
         )}
       </div>
+      <ActionModal issue={issue} onClose={() => setIssue(null)} />
     </div>
   )
 }

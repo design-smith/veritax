@@ -4,6 +4,15 @@ import { useCallback, useEffect, useRef, useState } from "react"
 import { Upload, Check, AlertTriangle, Loader2, FileText, ArrowRight, RefreshCw } from "lucide-react"
 import { api, type CoverageResponse, type CoverageRow, type CoverageStatusValue } from "@/lib/api"
 import { Animate } from "@/components/ui/transition"
+import { ActionModal } from "@/components/ui/action-modal"
+import {
+  diagnoseApiFailure,
+  parseApiError,
+  runWithRetry,
+  withActions,
+  type ActionableIssue,
+  type ActionableIssueBase,
+} from "@/lib/actionable-errors"
 
 type Seg = "present" | "partial" | "missing"
 
@@ -107,17 +116,18 @@ function CoverageDonut({ present, partial, missing, active, onToggle, size = 52 
   )
 }
 
-export default function RequirementsStep({ engagementId, jurisdictions, onContinue, onOpenDraftSection, onDraftReadinessChange }: {
+export default function RequirementsStep({ engagementId, jurisdictions, onContinue, onOpenDraftSection, onDraftReadinessChange, onOpenPlanning }: {
   engagementId: string | null
   jurisdictions: string[]
   onContinue: () => void
   onOpenDraftSection: (jurisdiction: string, sectionId: string) => void
   onDraftReadinessChange?: (ready: boolean) => void
+  onOpenPlanning?: () => void
 }) {
   const [coverageByJuris, setCoverageByJuris] = useState<Record<string, CoverageResponse>>({})
   const [started, setStarted] = useState<Set<string>>(new Set())
   const [activeJurisdiction, setActive] = useState(jurisdictions[0] ?? "")
-  const [error, setError] = useState<string | null>(null)
+  const [issue, setIssue] = useState<ActionableIssue | null>(null)
   const [openReqId, setOpenReqId] = useState<string | null>(null)
   const [filters, setFilters] = useState<Set<Seg>>(new Set())
   const [supplementText, setSupplementText] = useState("")
@@ -125,7 +135,6 @@ export default function RequirementsStep({ engagementId, jurisdictions, onContin
   const [markingSatisfied, setMarkingSatisfied] = useState(false)
   const [recovering, setRecovering] = useState(false)
   const [refreshing, setRefreshing] = useState(false)
-  const [hoverLock, setHoverLock] = useState(false)
   const [indexPollNonce, setIndexPollNonce] = useState(0)
   // Documents index HERE (not on the Planning screen). Assessment waits until they're all embedded.
   const [docReady, setDocReady] = useState(false)
@@ -137,6 +146,24 @@ export default function RequirementsStep({ engagementId, jurisdictions, onContin
   const draftPrimedRef = useRef<Set<string>>(new Set())
   const draftPrimingRef = useRef<Set<string>>(new Set())
   const satisfyingRef = useRef<Set<string>>(new Set())
+
+  function openIssue(
+    base: ActionableIssueBase,
+    primaryAction: ActionableIssue["primaryAction"],
+    secondaryAction?: ActionableIssue["secondaryAction"],
+  ) {
+    setIssue(withActions(base, primaryAction, secondaryAction))
+  }
+
+  async function openIssueFromError(
+    error: unknown,
+    operation: string,
+    primaryAction: ActionableIssue["primaryAction"],
+    secondaryAction?: ActionableIssue["secondaryAction"],
+  ) {
+    const base = await diagnoseApiFailure(error, { operation, engagementId, jurisdiction: activeJurisdiction })
+    openIssue(base, primaryAction, secondaryAction)
+  }
 
   const setCoverage = (j: string, data: CoverageResponse) => setCoverageByJuris(prev => ({ ...prev, [j]: data }))
   const patchCoverageRow = (j: string, row: CoverageRow, opts?: { unlockDraft?: boolean }) => {
@@ -155,8 +182,14 @@ export default function RequirementsStep({ engagementId, jurisdictions, onContin
     if (!engagementId) return
     const js = [...startedRef.current]
     const results = await Promise.all(js.map(async j => {
-      try { return [j, await api.getCoverage(engagementId, j)] as const }
-      catch (e) { console.error("[veritax] poll failed:", e); return [j, coverageRef.current[j]] as const }
+      try { return [j, await runWithRetry(() => api.getCoverage(engagementId, j), { retries: 1 })] as const }
+      catch (e) {
+        console.error("[veritax] poll failed:", e)
+        if (!coverageRef.current[j]) {
+          void openIssueFromError(e, "poll requirements", { label: "Retry requirements", onClick: () => { setIndexPollNonce(n => n + 1); void startJurisdiction(j) } })
+        }
+        return [j, coverageRef.current[j]] as const
+      }
     }))
     const merged: Record<string, CoverageResponse> = {}
     for (const [j, d] of results) if (d) merged[j] = d
@@ -169,12 +202,20 @@ export default function RequirementsStep({ engagementId, jurisdictions, onContin
     setStarted(prev => new Set(prev).add(j))
     startedRef.current = new Set(startedRef.current).add(j)
     try {
-      const d = await api.startCoverage(engagementId, j)
+      const d = await runWithRetry(
+        () => api.startCoverage(engagementId, j),
+        { retries: 2, recover: () => api.recoverPipeline(engagementId, true) },
+      )
       setCoverage(j, d)
       if (d.summary.pending > 0 && !pollRef.current) pollRef.current = setTimeout(poll, 1200)
     } catch (e) {
       console.error("[veritax] failed to start coverage:", e)
-      setError(String(e))
+      void openIssueFromError(
+        e,
+        "start requirements assessment",
+        { label: "Retry requirements", onClick: () => { startedRef.current.delete(j); setStarted(prev => { const n = new Set(prev); n.delete(j); return n }); void startJurisdiction(j) } },
+        { label: "Go to Planning", onClick: () => onOpenPlanning?.(), variant: "ghost" },
+      )
     }
   }, [engagementId, poll])
 
@@ -184,6 +225,7 @@ export default function RequirementsStep({ engagementId, jurisdictions, onContin
     if (!engagementId) return
     let cancelled = false
     let timer: ReturnType<typeof setTimeout> | null = null
+    let failures = 0
     setDocReady(false)
     setIndexStatus({ done: 0, total: 0, failed: 0 })
     const check = async () => {
@@ -199,6 +241,16 @@ export default function RequirementsStep({ engagementId, jurisdictions, onContin
         else timer = setTimeout(check, 1500)
       } catch (e) {
         console.error("[veritax] index status poll failed:", e)
+        failures += 1
+        if (!cancelled && failures >= 3) {
+          void openIssueFromError(
+            e,
+            "check document indexing",
+            { label: "Retry check", onClick: () => setIndexPollNonce(n => n + 1) },
+            { label: "Run recovery", onClick: retryPipeline, variant: "ghost" },
+          )
+          return
+        }
         if (!cancelled) timer = setTimeout(check, 2000)
       }
     }
@@ -276,6 +328,37 @@ export default function RequirementsStep({ engagementId, jurisdictions, onContin
   })()
   const shownRows = filters.size === 0 ? revealed : revealed.filter(r => (filters as Set<string>).has(r.status))
 
+  function openFirstGap(statuses: CoverageStatusValue[] = ["failed", "missing", "partial", "pending"]) {
+    const target = rows.find(row => statuses.includes(row.status))
+    if (target) {
+      setOpenReqId(target.id)
+      setSupplementText("")
+    }
+  }
+
+  function openDraftBlockedIssue() {
+    if (coverageReady) {
+      onContinue()
+      return
+    }
+    openIssue(
+      {
+        title: "Draft is locked until evidence is ready",
+        message: readinessMessage ? `${readinessMessage}.` : "Every required item needs source support before drafting.",
+        detail: readinessAction,
+        tone: "caution",
+        diagnostics: {
+          operation: "continue to draft",
+          engagementId,
+          jurisdiction: activeJurisdiction,
+          summary: s ?? null,
+        },
+      },
+      { label: coverageFailed ? "Retry failed requirements" : "Open first gap", onClick: () => coverageFailed ? void retryPipeline() : openFirstGap() },
+      { label: "Re-assess", onClick: refresh, variant: "ghost" },
+    )
+  }
+
   async function supplement(body: { kind: "upload"; file: File } | { kind: "text"; text: string }) {
     if (!openReq || !engagementId) return
     const target = openReq
@@ -298,7 +381,10 @@ export default function RequirementsStep({ engagementId, jurisdictions, onContin
     patchCoverageRow(jurisdiction, optimistic, { unlockDraft: false })
     setSubmitting(true)
     try {
-      const row = await api.supplementCoverage(target.id, body)
+      const row = await runWithRetry(
+        () => api.supplementCoverage(target.id, body),
+        { retries: body.kind === "upload" ? 1 : 2, recover: () => api.recoverPipeline(engagementId, true) },
+      )
       patchCoverageRow(jurisdiction, row)
       void api.getCoverage(engagementId, jurisdiction)
         .then(data => setCoverage(jurisdiction, data))
@@ -308,6 +394,12 @@ export default function RequirementsStep({ engagementId, jurisdictions, onContin
       console.error("[veritax] supplement failed:", e)
       try { setCoverage(jurisdiction, await api.getCoverage(engagementId, jurisdiction)) }
       catch (refreshError) { console.error("[veritax] supplement rollback refresh failed:", refreshError) }
+      const base = await diagnoseApiFailure(e, { operation: "supplement requirement", engagementId, jurisdiction })
+      openIssue(
+        base,
+        { label: "Retry supplement", onClick: () => void supplement(body) },
+        { label: "Refresh row", onClick: () => void api.getCoverage(engagementId, jurisdiction).then(data => setCoverage(jurisdiction, data)), variant: "ghost" },
+      )
     } finally {
       setSubmitting(false)
     }
@@ -333,7 +425,7 @@ export default function RequirementsStep({ engagementId, jurisdictions, onContin
     patchCoverageRow(jurisdiction, optimistic, { unlockDraft: false })
     setMarkingSatisfied(true)
     try {
-      const row = await api.markCoverageSatisfied(target.id)
+      const row = await runWithRetry(() => api.markCoverageSatisfied(target.id), { retries: 1 })
       patchCoverageRow(jurisdiction, row)
       void api.getCoverage(engagementId, jurisdiction)
         .then(data => setCoverage(jurisdiction, data))
@@ -342,6 +434,35 @@ export default function RequirementsStep({ engagementId, jurisdictions, onContin
       console.error("[veritax] mark satisfied failed:", e)
       try { setCoverage(jurisdiction, await api.getCoverage(engagementId, jurisdiction)) }
       catch (refreshError) { console.error("[veritax] mark satisfied rollback refresh failed:", refreshError) }
+      const status = parseApiError(e).status
+      if (status === 404) {
+        openIssue(
+          {
+            title: "Requirement changed underneath you",
+            message: "The backend no longer has that requirement row.",
+            detail: "Refresh Requirements so the panel points at the current row.",
+            tone: "caution",
+            diagnostics: { operation: "mark satisfied", engagementId, jurisdiction, coverageId: target.id, status },
+          },
+          { label: "Refresh requirements", onClick: refresh },
+          { label: "Close panel", onClick: () => setOpenReqId(null), variant: "ghost" },
+        )
+      } else if (status === 409) {
+        openIssue(
+          {
+            title: "This row cannot be manually satisfied",
+            message: "The backend blocked manual satisfaction for this requirement.",
+            detail: parseApiError(e).detail || "Add source evidence or re-assess the requirement instead.",
+            tone: "caution",
+            diagnostics: { operation: "mark satisfied", engagementId, jurisdiction, coverageId: target.id, status },
+          },
+          { label: "Re-assess", onClick: refresh },
+          { label: "Cancel", onClick: () => {}, variant: "ghost" },
+        )
+      } else {
+        const base = await diagnoseApiFailure(e, { operation: "mark requirement satisfied", engagementId, jurisdiction })
+        openIssue(base, { label: "Try again", onClick: markSatisfied }, { label: "Refresh row", onClick: refresh, variant: "ghost" })
+      }
     } finally {
       satisfyingRef.current.delete(target.id)
       setMarkingSatisfied(false)
@@ -353,11 +474,15 @@ export default function RequirementsStep({ engagementId, jurisdictions, onContin
     if (!engagementId || !activeJurisdiction) return
     setRefreshing(true)
     try {
-      const d = await api.startCoverage(engagementId, activeJurisdiction, true)
+      const d = await runWithRetry(
+        () => api.startCoverage(engagementId, activeJurisdiction, true),
+        { retries: 2, recover: () => api.recoverPipeline(engagementId, true) },
+      )
       setCoverage(activeJurisdiction, d)
       if (!pollRef.current) pollRef.current = setTimeout(poll, 600)
     } catch (e) {
       console.error("[veritax] refresh (re-assess) failed:", e)
+      void openIssueFromError(e, "re-assess requirements", { label: "Retry re-assess", onClick: refresh })
     } finally {
       setRefreshing(false)
     }
@@ -366,9 +491,8 @@ export default function RequirementsStep({ engagementId, jurisdictions, onContin
   async function retryPipeline() {
     if (!engagementId) return
     setRecovering(true)
-    setError(null)
     try {
-      await api.recoverPipeline(engagementId, true)
+      await runWithRetry(() => api.recoverPipeline(engagementId, true), { retries: 2 })
       setIndexPollNonce(n => n + 1)
       if (startedRef.current.has(activeJurisdiction)) {
         try { setCoverage(activeJurisdiction, await api.getCoverage(engagementId, activeJurisdiction)) }
@@ -377,7 +501,7 @@ export default function RequirementsStep({ engagementId, jurisdictions, onContin
       }
     } catch (e) {
       console.error("[veritax] pipeline retry failed:", e)
-      setError(String(e))
+      void openIssueFromError(e, "recover requirements pipeline", { label: "Try recovery again", onClick: retryPipeline })
     } finally {
       setRecovering(false)
     }
@@ -420,39 +544,31 @@ export default function RequirementsStep({ engagementId, jurisdictions, onContin
           </div>
           <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: "0.5rem", flexShrink: 0 }}>
             {coverageFailed && s && (
-              <button type="button" onClick={retryPipeline} disabled={recovering} style={{
+              <button type="button" onClick={() => openIssue(
+                {
+                  title: "Some requirements failed",
+                  message: `${s.failed} requirement${s.failed === 1 ? "" : "s"} failed during assessment.`,
+                  detail: "Retry the failed work. If it fails again, open the first failed row and add evidence manually.",
+                  tone: "caution",
+                  diagnostics: { operation: "failed requirements", engagementId, jurisdiction: activeJurisdiction, summary: s },
+                },
+                { label: "Retry failed requirements", onClick: retryPipeline },
+                { label: "Open first failed row", onClick: () => openFirstGap(["failed"]), variant: "ghost" },
+              )} disabled={recovering} style={{
                 height: "var(--control-size-md)", padding: "0 var(--control-gutter-md)",
                 borderRadius: "var(--control-radius-md)", border: "1px solid var(--color-border)",
                 background: "transparent", color: "var(--color-text-danger-soft)",
                 fontSize: "var(--control-font-size-md)", cursor: recovering ? "not-allowed" : "pointer",
               }}>{recovering ? "Retrying..." : `Retry ${s.failed} failed`}</button>
             )}
-            <div style={{ position: "relative" }} onMouseEnter={() => setHoverLock(true)} onMouseLeave={() => setHoverLock(false)}>
-              <button type="button" disabled={!coverageReady} onClick={onContinue} style={{
+            <div style={{ position: "relative" }}>
+              <button type="button" aria-disabled={!coverageReady} onClick={openDraftBlockedIssue} style={{
                 height: "var(--control-size-md)", padding: "0 var(--control-gutter-lg)",
                 borderRadius: "var(--control-radius-md)", border: "none",
                 background: coverageReady ? "var(--color-background-primary-solid)" : "var(--alpha-08)",
                 color: coverageReady ? "var(--color-text-inverse)" : "var(--color-text-tertiary)",
-                fontSize: "var(--control-font-size-md)", fontWeight: "var(--font-weight-medium)", cursor: coverageReady ? "pointer" : "not-allowed",
+                fontSize: "var(--control-font-size-md)", fontWeight: "var(--font-weight-medium)", cursor: "pointer",
               }}>Continue to Draft</button>
-              {hoverLock && !coverageReady && readinessMessage && (
-                <div style={{
-                  position: "absolute", top: "calc(100% + 8px)", right: 0, zIndex: 30, width: 320,
-                  display: "grid", gridTemplateColumns: "auto 1fr", gap: "0.625rem", alignItems: "start",
-                  padding: "0.75rem 0.875rem", borderRadius: "var(--radius-md)", textAlign: "left",
-                  background: "var(--color-background-caution-soft)", boxShadow: "var(--shadow-300)",
-                }}>
-                  <AlertTriangle size={14} style={{ color: "var(--color-text-caution-soft)", marginTop: 2 }} />
-                  <div>
-                    <p style={{ fontSize: "var(--font-text-sm-size)", fontWeight: "var(--font-weight-medium)", margin: "0 0 0.25rem", color: "var(--color-text)" }}>
-                      Draft is locked until every required item has source support.
-                    </p>
-                    <p style={{ fontSize: "var(--font-text-xs-size)", color: "var(--color-text-secondary)", margin: 0, lineHeight: 1.5 }}>
-                      {readinessMessage}. {readinessAction}
-                    </p>
-                  </div>
-                </div>
-              )}
             </div>
           </div>
         </div>
@@ -485,13 +601,7 @@ export default function RequirementsStep({ engagementId, jurisdictions, onContin
             </div>
             <CoverageDonut present={s?.present ?? 0} partial={s?.partial ?? 0} missing={s?.missing ?? 0} active={filters} onToggle={toggleFilter} size={52} />
           </div>
-
-          {error && (
-            <p style={{ fontSize: "var(--font-text-sm-size)", color: "var(--color-text-danger-soft)", marginBottom: "1rem" }}>
-              Couldn’t load requirements. Is the backend running? ({error})
-            </p>
-          )}
-          {!docReady && !error ? (
+          {!docReady ? (
             <div style={{ display: "flex", flexDirection: "column", gap: "0.5rem" }}>
               <p style={{ display: "flex", alignItems: "center", gap: "0.5rem", fontSize: "var(--font-text-sm-size)", color: "var(--color-text-secondary)", margin: 0 }}>
                 <Loader2 size={14} className="animate-spin" />
@@ -511,7 +621,7 @@ export default function RequirementsStep({ engagementId, jurisdictions, onContin
                 </div>
               )}
             </div>
-          ) : !coverage && !error ? (
+          ) : !coverage ? (
             <p style={{ display: "flex", alignItems: "center", gap: "0.5rem", fontSize: "var(--font-text-sm-size)", color: "var(--color-text-tertiary)" }}>
               <Loader2 size={14} className="animate-spin" /> Assessing {activeJurisdiction}…
             </p>
@@ -689,6 +799,7 @@ export default function RequirementsStep({ engagementId, jurisdictions, onContin
           </Animate>
         )
       })()}
+      <ActionModal issue={issue} onClose={() => setIssue(null)} />
     </div>
   )
 }

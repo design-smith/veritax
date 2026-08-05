@@ -16,7 +16,7 @@ services:
         sync: false
       - key: VOYAGE_API_KEY
         sync: false
-      - key: CORS_ORIGINS       # your Vercel origin(s), comma-separated, no trailing slash
+      - key: CORS_ORIGINS       # app origin(s), e.g. https://app.veritaxai.com, comma-separated, no trailing slash
         sync: false
     # No object storage needed: uploads are stored on the local disk and only read once during
     # embedding. To use S3/R2 instead, add S3_ENDPOINT_URL + S3_ACCESS_KEY/S3_SECRET_KEY/S3_BUCKET/S3_REGION.

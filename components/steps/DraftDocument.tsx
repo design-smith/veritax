@@ -220,12 +220,13 @@ export function DraftSectionSidebar({ sections, activeSectionId, onSelect, onSel
   )
 }
 
-export default function DraftDocument({ jurisdiction, entity, sections, editing, onSectionsChange }: {
+export default function DraftDocument({ jurisdiction, entity, sections, editing, onSectionsChange, onSaveError }: {
   jurisdiction: string
   entity: string
   sections: DraftSection[]
   editing: boolean
   onSectionsChange?: (sections: DraftSection[]) => void
+  onSaveError?: (error: unknown, retry: () => Promise<void>) => void
 }) {
   const [docSections, setDocSections] = useState<DraftSection[]>(sections)
   const [draftText, setDraftText] = useState<Record<string, string>>({})
@@ -263,6 +264,7 @@ export default function DraftDocument({ jurisdiction, entity, sections, editing,
     } catch (e) {
       console.error("[veritax] draft section save failed:", e)
       setSaveError(prev => ({ ...prev, [section.id]: e instanceof Error ? e.message : String(e) }))
+      onSaveError?.(e, () => saveSection(section))
     } finally {
       setSaving(prev => ({ ...prev, [section.id]: false }))
     }

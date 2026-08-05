@@ -73,20 +73,19 @@ def test_draft_readiness_surfaces_critical_gate_first():
     assert not result.ready
     assert result.blocker == (
         "critical gate blocked: method/tested-party analysis is partial; "
-        "add verified source support before drafting"
+        "mark it satisfied or add source support before drafting"
     )
 
 
-def test_draft_readiness_blocks_manual_only_critical_gate():
+def test_draft_readiness_allows_manual_satisfied_critical_gate():
+    # A user marking a critical requirement satisfied (Manual evidence, no document) counts toward
+    # readiness — the user is asserting the requirement is supplied, so drafting can proceed.
     result = draft_readiness_for_rows([
         _row(CoverageStatus.present, name="Method selection", source="Manual"),
     ])
 
-    assert not result.ready
-    assert result.blocker == (
-        "critical gate blocked: method/tested-party analysis has no source evidence; "
-        "add a supplement or upload"
-    )
+    assert result.ready
+    assert result.blocker is None
 
 
 def test_draft_readiness_allows_critical_gate_with_source_evidence():

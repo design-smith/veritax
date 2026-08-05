@@ -41,7 +41,7 @@ The backend creates its own tables on startup (`create_all`), so an empty databa
    | `DATABASE_URL` | from step 1 |
    | `DEEPSEEK_API_KEY` | your DeepSeek key |
    | `VOYAGE_API_KEY` | your Voyage key |
-   | `CORS_ORIGINS` | your Vercel origin(s), e.g. `https://veritax.vercel.app` (comma-separated, **no trailing slash**) |
+   | `CORS_ORIGINS` | `https://app.veritaxai.com` plus any preview/current cutover origins, comma-separated, **no trailing slash** |
 
    No storage vars needed — the backend uses local disk unless you set the `S3_*` vars.
 
@@ -60,6 +60,13 @@ Vercel → Project → **Settings → Environment Variables**:
 | `NEXT_PUBLIC_SYNCFUSION_LICENSE_KEY` | your Syncfusion key |
 
 `NEXT_PUBLIC_*` are inlined at build time, so **trigger a redeploy** after saving.
+
+Attach the production app domain in Vercel:
+
+1. App project â†’ **Settings â†’ Domains** â†’ add `app.veritaxai.com`.
+2. In the DNS provider for `veritaxai.com`, create the DNS record Vercel asks for, usually `CNAME app cname.vercel-dns.com`.
+3. Wait for Vercel's domain check to show **Valid Configuration**.
+4. Set Supabase Auth **Site URL** to `https://app.veritaxai.com` and add redirect URLs for `https://app.veritaxai.com/**`, preview deployments, and `http://localhost:3000/**`.
 
 ---
 

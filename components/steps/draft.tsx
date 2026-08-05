@@ -4,6 +4,15 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { ArrowRight, Download, Edit3, Loader2 } from "lucide-react"
 import { api, type DraftResponse, type DraftSection } from "@/lib/api"
 import { Animate } from "@/components/ui/transition"
+import { ActionModal } from "@/components/ui/action-modal"
+import {
+  diagnoseApiFailure,
+  parseApiError,
+  runWithRetry,
+  withActions,
+  type ActionableIssue,
+  type ActionableIssueBase,
+} from "@/lib/actionable-errors"
 import DraftDocument, { DraftCover, DraftSectionSidebar } from "./DraftDocument"
 
 const FIRST_REVEAL_SECTIONS = 5
@@ -183,18 +192,19 @@ function DraftGenerationPreview({ draft, entity, jurisdiction, complete, failedS
   )
 }
 
-export default function DraftStep({ engagementId, jurisdictions, entity, onContinue, jumpTo, onJumped }: {
+export default function DraftStep({ engagementId, jurisdictions, entity, onContinue, onOpenRequirements, jumpTo, onJumped }: {
   engagementId: string | null
   jurisdictions: string[]
   entity: string
   onContinue: () => void
+  onOpenRequirements?: () => void
   jumpTo?: { jurisdiction: string; sectionId: string } | null
   onJumped?: () => void
 }) {
   const [draftByJuris, setDraftByJuris] = useState<Record<string, DraftResponse>>({})
   const [started, setStarted] = useState<Set<string>>(new Set())
   const [activeJurisdiction, setActive] = useState(jurisdictions[0] ?? "")
-  const [error, setError] = useState<string | null>(null)
+  const [issue, setIssue] = useState<ActionableIssue | null>(null)
   const [retrying, setRetrying] = useState(false)
   const [editing, setEditing] = useState(false)
   const [downloading, setDownloading] = useState(false)
@@ -204,9 +214,28 @@ export default function DraftStep({ engagementId, jurisdictions, entity, onConti
   const draftRef = useRef(draftByJuris); draftRef.current = draftByJuris
   const startedRef = useRef(started); startedRef.current = started
   const observedGeneratingRef = useRef<Set<string>>(new Set())
+  const failedIssueKeyRef = useRef<string>("")
   const pollRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   const setDraft = (j: string, data: DraftResponse) => setDraftByJuris(prev => ({ ...prev, [j]: data }))
+
+  function openIssue(
+    base: ActionableIssueBase,
+    primaryAction: ActionableIssue["primaryAction"],
+    secondaryAction?: ActionableIssue["secondaryAction"],
+  ) {
+    setIssue(withActions(base, primaryAction, secondaryAction))
+  }
+
+  async function openIssueFromError(
+    error: unknown,
+    operation: string,
+    primaryAction: ActionableIssue["primaryAction"],
+    secondaryAction?: ActionableIssue["secondaryAction"],
+  ) {
+    const base = await diagnoseApiFailure(error, { operation, engagementId, jurisdiction: activeJurisdiction })
+    openIssue(base, primaryAction, secondaryAction)
+  }
 
   const typedDoneStorageKey = useCallback((j: string) => (
     engagementId && j ? `veritax:draft-typed:${engagementId}:${j}` : ""
@@ -223,8 +252,14 @@ export default function DraftStep({ engagementId, jurisdictions, entity, onConti
     if (!engagementId) return
     const js = [...startedRef.current]
     const results = await Promise.all(js.map(async j => {
-      try { return [j, await api.getDraft(engagementId, j)] as const }
-      catch (e) { console.error("[veritax] draft poll failed:", e); return [j, draftRef.current[j]] as const }
+      try { return [j, await runWithRetry(() => api.getDraft(engagementId, j), { retries: 1 })] as const }
+      catch (e) {
+        console.error("[veritax] draft poll failed:", e)
+        if (!draftRef.current[j]) {
+          void openIssueFromError(e, "poll draft", { label: "Retry draft", onClick: () => void retryDraft() })
+        }
+        return [j, draftRef.current[j]] as const
+      }
     }))
     const merged: Record<string, DraftResponse> = {}
     for (const [j, d] of results) {
@@ -242,14 +277,37 @@ export default function DraftStep({ engagementId, jurisdictions, entity, onConti
     setStarted(prev => new Set(prev).add(j))
     startedRef.current = new Set(startedRef.current).add(j)
     try {
-      const d = await api.startDraft(engagementId, j)
+      const d = await runWithRetry(
+        () => api.startDraft(engagementId, j),
+        { retries: 2, recover: () => api.recoverPipeline(engagementId, true) },
+      )
       if (d.summary.pending > 0) observedGeneratingRef.current.add(j)
       if (isDraftComplete(d) && !observedGeneratingRef.current.has(j)) markTypedDone(j)
       setDraft(j, d)
       if (d.summary.pending > 0 && !pollRef.current) pollRef.current = setTimeout(poll, 1200)
     } catch (e) {
       console.error("[veritax] failed to start draft:", e)
-      setError(String(e))
+      const status = parseApiError(e).status
+      if (status === 409) {
+        openIssue(
+          {
+            title: "Requirements need attention",
+            message: parseApiError(e).detail || "Draft cannot start until the evidence gates are satisfied.",
+            detail: "Go back to Requirements, resolve the missing or failed rows, then retry Draft.",
+            tone: "caution",
+            diagnostics: { operation: "start draft", engagementId, jurisdiction: j, status },
+          },
+          { label: "Go to Requirements", onClick: () => onOpenRequirements?.() },
+          { label: "Retry Draft", onClick: () => { startedRef.current.delete(j); setStarted(prev => { const n = new Set(prev); n.delete(j); return n }); void startJurisdiction(j) }, variant: "ghost" },
+        )
+      } else {
+        void openIssueFromError(
+          e,
+          "start draft",
+          { label: "Retry draft", onClick: () => { startedRef.current.delete(j); setStarted(prev => { const n = new Set(prev); n.delete(j); return n }); void startJurisdiction(j) } },
+          { label: "Go to Requirements", onClick: () => onOpenRequirements?.(), variant: "ghost" },
+        )
+      }
     }
   }, [engagementId, markTypedDone, poll])
 
@@ -270,7 +328,7 @@ export default function DraftStep({ engagementId, jurisdictions, entity, onConti
     if (!engagementId || !complete) return
     setDownloading(true)
     try {
-      const blob = await api.downloadDraftDocx(engagementId, activeJurisdiction)
+      const blob = await runWithRetry(() => api.downloadDraftDocx(engagementId, activeJurisdiction), { retries: 2 })
       const url = URL.createObjectURL(blob)
       const a = document.createElement("a")
       a.href = url
@@ -279,6 +337,21 @@ export default function DraftStep({ engagementId, jurisdictions, entity, onConti
       URL.revokeObjectURL(url)
     } catch (e) {
       console.error("[veritax] docx download failed:", e)
+      void openIssueFromError(
+        e,
+        "download draft",
+        { label: "Retry download", onClick: downloadDraft },
+        { label: "Show incomplete sections", onClick: () => {
+          const first = draftRef.current[activeJurisdiction]?.sections.find(s => s.status !== "drafted")
+          if (first) openIssue({
+            title: "Incomplete section",
+            message: `${first.element_order}. ${first.element_name} is ${first.status}.`,
+            detail: first.error || "Finish the draft before exporting a complete Word file.",
+            tone: "caution",
+            diagnostics: { operation: "show incomplete section", engagementId, jurisdiction: activeJurisdiction, sectionId: first.id },
+          }, { label: "Retry draft", onClick: retryDraft })
+        }, variant: "ghost" },
+      )
     } finally {
       setDownloading(false)
     }
@@ -287,15 +360,14 @@ export default function DraftStep({ engagementId, jurisdictions, entity, onConti
   async function retryDraft() {
     if (!engagementId) return
     setRetrying(true)
-    setError(null)
     try {
-      await api.recoverPipeline(engagementId, true)
+      await runWithRetry(() => api.recoverPipeline(engagementId, true), { retries: 2 })
       try { setDraft(activeJurisdiction, await api.getDraft(engagementId, activeJurisdiction)) }
       catch (e) { console.error("[veritax] retry draft refresh failed:", e) }
       if (!pollRef.current) pollRef.current = setTimeout(poll, 600)
     } catch (e) {
       console.error("[veritax] draft retry failed:", e)
-      setError(String(e))
+      void openIssueFromError(e, "recover draft pipeline", { label: "Try recovery again", onClick: retryDraft })
     } finally {
       setRetrying(false)
     }
@@ -315,6 +387,35 @@ export default function DraftStep({ engagementId, jurisdictions, entity, onConti
   const complete = !!draft && draft.summary.total > 0 && draft.summary.pending === 0 && !failed
   const typedDone = typedDoneByJuris[activeJurisdiction] === true
   const showDraftActions = complete && typedDone && !!draft
+
+  useEffect(() => {
+    if (!failed || failedSections.length === 0) return
+    const key = `${engagementId}:${activeJurisdiction}:${failedSections.map(s => `${s.id}:${s.error ?? ""}`).join("|")}`
+    if (failedIssueKeyRef.current === key) return
+    failedIssueKeyRef.current = key
+    const first = failedSections[0]
+    const noContext = /no retrieved source context|source context|missing source|requirements/i.test(first.error ?? "")
+    openIssue(
+      {
+        title: "Draft section failed",
+        message: `${failedSections.length} section${failedSections.length === 1 ? "" : "s"} could not be drafted.`,
+        detail: first ? `${first.element_name}: ${first.error || "No backend error returned."}` : "Retry the draft pipeline.",
+        tone: "caution",
+        diagnostics: {
+          operation: "draft failed sections",
+          engagementId,
+          jurisdiction: activeJurisdiction,
+          failedSections: failedSections.map(s => ({ id: s.id, name: s.element_name, error: s.error })),
+        },
+      },
+      noContext
+        ? { label: "Go to Requirements", onClick: () => onOpenRequirements?.() }
+        : { label: "Retry failed sections", onClick: retryDraft },
+      noContext
+        ? { label: "Retry after reindex", onClick: retryDraft, variant: "ghost" }
+        : { label: "Go to Requirements", onClick: () => onOpenRequirements?.(), variant: "ghost" },
+    )
+  }, [activeJurisdiction, engagementId, failed, failedSections, onOpenRequirements])
 
   useEffect(() => {
     if (!draft) return
@@ -420,17 +521,12 @@ export default function DraftStep({ engagementId, jurisdictions, entity, onConti
 
       {/* Body — the document editor once drafting is complete, otherwise progress */}
       <div style={{ flex: 1, minHeight: 0, display: "flex", flexDirection: "column" }}>
-        {error && (
-          <p style={{ padding: "1rem 3.5rem", fontSize: "var(--font-text-sm-size)", color: "var(--color-text-danger-soft)" }}>
-            Couldn’t load draft. Is the backend running? ({error})
-          </p>
-        )}
         {draft?.draft_mode === "fake" && (
           <p style={{ padding: "0.625rem 3.5rem", margin: 0, fontSize: "var(--font-text-xs-size)", color: "#8a5a00", background: "#fff8e5", borderTop: "1px solid #f0d58c", borderBottom: "1px solid #f0d58c" }}>
             Development mode: this draft is generated by the fake drafter, not a real model.
           </p>
         )}
-        {!error && (!complete || !typedDone) && (
+        {(!complete || !typedDone) && (
           <DraftGenerationPreview
             draft={draft}
             entity={entity}
@@ -442,7 +538,7 @@ export default function DraftStep({ engagementId, jurisdictions, entity, onConti
             onTypedComplete={() => markTypedDone(activeJurisdiction)}
           />
         )}
-        {!error && complete && typedDone && draft && (
+        {complete && typedDone && draft && (
           <Animate enter="fade" duration={160} style={{ flex: 1, minHeight: 0, display: "flex", flexDirection: "column" }}>
             <DraftDocument
               jurisdiction={activeJurisdiction}
@@ -450,10 +546,17 @@ export default function DraftStep({ engagementId, jurisdictions, entity, onConti
               sections={draft.sections}
               editing={editing}
               onSectionsChange={sections => setDraft(activeJurisdiction, { ...draft, sections })}
+              onSaveError={(error, retry) => void openIssueFromError(
+                error,
+                "save draft edit",
+                { label: "Retry save", onClick: retry },
+                { label: "Keep editing", onClick: () => setEditing(true), variant: "ghost" },
+              )}
             />
           </Animate>
         )}
       </div>
+      <ActionModal issue={issue} onClose={() => setIssue(null)} />
     </div>
   )
 }

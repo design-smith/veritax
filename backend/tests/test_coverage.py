@@ -173,6 +173,23 @@ async def test_manual_satisfied_marks_row_present(client):
     assert body["evidence"][0]["source_label"] == "Manual"
 
 
+async def test_marking_all_requirements_satisfied_unlocks_draft(client):
+    # A sparse doc leaves required rows missing → draft locked. Marking every required row satisfied
+    # (the user asserting they're supplied) must flip draft_ready true so the user can advance.
+    eid = await _engagement_with_doc(client, b"placeholder text with nothing relevant")
+    await client.post(f"/engagements/{eid}/coverage", params={"jurisdiction": "Canada"})
+    got = (await client.get(f"/engagements/{eid}/coverage", params={"jurisdiction": "Canada"})).json()
+    assert got["summary"]["draft_ready"] is False
+
+    for row in got["requirements"]:
+        if not row["is_conditional"] and row["status"] != "present":
+            assert (await client.post(f"/coverage/{row['id']}/satisfied")).status_code == 200
+
+    after = (await client.get(f"/engagements/{eid}/coverage", params={"jurisdiction": "Canada"})).json()
+    assert after["summary"]["draft_ready"] is True
+    assert after["summary"]["draft_blocker"] is None
+
+
 def test_system_prompt_refuses_correctness():
     p = SYSTEM_PROMPT.lower()
     assert "must not" in p and "arm's-length" in p and "sufficiency" in p

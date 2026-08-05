@@ -25,6 +25,12 @@ async def test_unhandled_error_is_cors_visible(cors_client):
 
 
 async def test_veritax_custom_domain_is_cors_allowed(cors_client):
+    r = await cors_client.get("/health", headers={"Origin": "https://app.veritaxai.com"})
+    assert r.status_code == 200
+    assert r.headers.get("access-control-allow-origin") == "https://app.veritaxai.com"
+
+
+async def test_existing_veritaxai_domain_is_still_cors_allowed_during_cutover(cors_client):
     r = await cors_client.get("/health", headers={"Origin": "https://veritaxai.com"})
     assert r.status_code == 200
     assert r.headers.get("access-control-allow-origin") == "https://veritaxai.com"

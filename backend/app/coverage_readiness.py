@@ -57,6 +57,9 @@ def draft_readiness_from_counts(
 
 def draft_readiness_for_rows(rows: Iterable[object]) -> DraftReadiness:
     required = [r for r in rows if not getattr(r, "is_conditional", False)]
+    # Critical elements must be present — either assessed present, or explicitly marked satisfied by the
+    # user. A manual "mark satisfied" is the user asserting the requirement is supplied, so it counts
+    # toward readiness (we don't additionally demand document-backed evidence on top of present).
     for row in required:
         label = critical_quality_label(str(getattr(row, "element_name", "")))
         if label and getattr(row, "status", None) != CoverageStatus.present:
@@ -64,24 +67,10 @@ def draft_readiness_for_rows(rows: Iterable[object]) -> DraftReadiness:
             status_value = getattr(status, "value", status) or "unassessed"
             return DraftReadiness(
                 False,
-                f"critical gate blocked: {label} is {status_value}; add verified source support before drafting",
+                f"critical gate blocked: {label} is {status_value}; mark it satisfied or add source support before drafting",
                 sum(1 for r in required if getattr(r, "status", None) == CoverageStatus.present) / len(required)
                 if required else 0.0,
             )
-        if label:
-            evidence = list(getattr(row, "evidence", []) or [])
-            has_source_evidence = any(
-                str(getattr(item, "source_label", "")).strip().lower() != "manual"
-                and getattr(item, "document_id", None) is not None
-                for item in evidence
-            )
-            if not has_source_evidence:
-                return DraftReadiness(
-                    False,
-                    f"critical gate blocked: {label} has no source evidence; add a supplement or upload",
-                    sum(1 for r in required if getattr(r, "status", None) == CoverageStatus.present) / len(required)
-                    if required else 0.0,
-                )
     return draft_readiness_from_counts(
         required_total=len(required),
         present=sum(1 for r in required if getattr(r, "status", None) == CoverageStatus.present),

@@ -5,11 +5,31 @@ import { Check, ChevronDown, Globe, Upload, X } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { api, type DocumentRead } from "@/lib/api"
 import { Animate } from "@/components/ui/transition"
+import { ActionModal } from "@/components/ui/action-modal"
+import {
+  diagnoseApiFailure,
+  parseApiError,
+  runWithRetry,
+  withActions,
+  type ActionableIssue,
+  type ActionableIssueBase,
+} from "@/lib/actionable-errors"
 
 export type SourceId = "financials" | "agreements" | "public" | "interview"
+export type PlanningDocumentMap = Partial<Record<SourceId, DocumentRead[]>>
 
 // Provides the persisted engagement id to nested source inputs (upload zones, connector grid).
-const PlanningCtx = createContext<{ engagementId: string | null }>({ engagementId: null })
+const PlanningCtx = createContext<{
+  engagementId: string | null
+  documentsByKind: PlanningDocumentMap
+  updateDocuments: (kind: SourceId, updater: (docs: DocumentRead[]) => DocumentRead[]) => void
+  showIssue: (base: ActionableIssueBase, primaryAction: ActionableIssue["primaryAction"], secondaryAction?: ActionableIssue["secondaryAction"]) => void
+}>({
+  engagementId: null,
+  documentsByKind: {},
+  updateDocuments: () => {},
+  showIssue: () => {},
+})
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -89,14 +109,13 @@ function MultiSelect({ options, value, onChange, placeholder }: {
 
 // The api client throws `API <status> <url>: <body>`; pull the server's detail message for the chip.
 function uploadErrorMessage(err: unknown): string {
-  const raw = err instanceof Error ? err.message : String(err)
-  const body = raw.slice(raw.indexOf(": ") + 2)
-  try { return JSON.parse(body).detail ?? raw } catch { return raw }
+  const parsed = parseApiError(err)
+  return parsed.detail ?? parsed.message
 }
 
 // uploading → sent, awaiting response; processing → backend embedding; done → embedded; error → rejected/failed
 type UploadStatus = "uploading" | "processing" | "done" | "error"
-interface UploadItem { id: number; documentId?: string; name: string; status: UploadStatus; error?: string }
+interface UploadItem { id: string; documentId?: string; name: string; status: UploadStatus; error?: string }
 
 // Backend DocumentStatus → chip status. Poll until it settles (embedded/failed).
 const DOC_STATUS: Record<string, UploadStatus> = {
@@ -106,8 +125,10 @@ const STATUS_LABEL: Record<UploadStatus, string> = {
   uploading: "Uploading…", processing: "Processing…", done: "Processed", error: "Failed",
 }
 
-const uploadItemFromDocument = (doc: DocumentRead, id: number): UploadItem => ({
-  id,
+const EMPTY_DOCUMENTS: DocumentRead[] = []
+
+const uploadItemFromDocument = (doc: DocumentRead): UploadItem => ({
+  id: doc.id,
   documentId: doc.id,
   name: doc.original_filename,
   status: DOC_STATUS[doc.status] ?? "processing",
@@ -115,53 +136,57 @@ const uploadItemFromDocument = (doc: DocumentRead, id: number): UploadItem => ({
 })
 
 function UploadZone({ kind, accept = "*", hint }: { kind: SourceId; accept?: string; hint?: string }) {
-  const { engagementId } = useContext(PlanningCtx)
+  const { engagementId, documentsByKind, updateDocuments, showIssue } = useContext(PlanningCtx)
+  const documents = documentsByKind[kind] ?? EMPTY_DOCUMENTS
   const [dragging, setDragging] = useState(false)
   const [items, setItems] = useState<UploadItem[]>([])
   const inputRef = useRef<HTMLInputElement>(null)
   const nextId = useRef(0)
+  const pollingDocIds = useRef<Set<string>>(new Set())
 
   useEffect(() => {
     if (!engagementId) {
       setItems([])
       return
     }
-    let cancelled = false
-    api.getEngagement(engagementId)
-      .then(eng => {
-        if (cancelled) return
-        const docs = eng.sources.filter(source => source.kind === kind).flatMap(source => source.documents)
-        const entries = docs.map(doc => uploadItemFromDocument(doc, nextId.current++))
-        setItems(entries)
-        entries.forEach(entry => {
-          if (entry.documentId && entry.status === "processing") void pollDoc(entry.id, entry.documentId)
-        })
-      })
-      .catch(() => {})
-    return () => { cancelled = true }
+    const entries = documents.map(uploadItemFromDocument)
+    setItems(entries)
+    entries.forEach(entry => {
+      if (entry.documentId && entry.status === "processing") void pollDoc(entry.documentId)
+    })
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [engagementId, kind])
+  }, [engagementId, kind, documents])
 
   // Poll one document's processing status until it settles, then reflect it on its chip.
   // Ceiling is generous — extracting + embedding a large PDF can take a few minutes.
-  async function pollDoc(itemId: number, documentId: string) {
-    for (let i = 0; i < 160; i++) {
-      await new Promise(r => setTimeout(r, 1500))
-      try {
-        const doc = await api.getDocument(documentId)
-        const status = DOC_STATUS[doc.status] ?? "processing"
-        setItems(p => p.map(x => (x.id === itemId ? { ...x, status, error: doc.error ?? undefined } : x)))
-        if (status === "done" || status === "error") return
-    } catch (err) {
-      return
-    }
+  async function pollDoc(documentId: string) {
+    if (pollingDocIds.current.has(documentId)) return
+    pollingDocIds.current.add(documentId)
+    try {
+      for (let i = 0; i < 160; i++) {
+        await new Promise(r => setTimeout(r, 1500))
+        try {
+          const doc = await api.getDocument(documentId)
+          const status = DOC_STATUS[doc.status] ?? "processing"
+          setItems(p => p.map(x => (x.documentId === documentId ? { ...x, status, error: doc.error ?? undefined } : x)))
+          updateDocuments(kind, docs => docs.map(existing => (existing.id === documentId ? doc : existing)))
+          if (status === "done" || status === "error") return
+        } catch (err) {
+          return
+        }
+      }
+    } finally {
+      pollingDocIds.current.delete(documentId)
     }
   }
 
   async function addFiles(list: FileList | null) {
-    const arr = Array.from(list ?? [])
+    await uploadFiles(Array.from(list ?? []))
+  }
+
+  async function uploadFiles(arr: File[]) {
     if (!arr.length) return
-    const entries: UploadItem[] = arr.map(f => ({ id: nextId.current++, name: f.name, status: "uploading" }))
+    const entries: UploadItem[] = arr.map(f => ({ id: `local-${nextId.current++}`, name: f.name, status: "uploading" }))
     setItems(p => [...p, ...entries])
     const ids = new Set(entries.map(e => e.id))
     const markAll = (status: UploadStatus, error?: string) =>
@@ -173,25 +198,47 @@ function UploadZone({ kind, accept = "*", hint }: { kind: SourceId; accept?: str
       return
     }
     try {
-      const docs = await api.uploadDocuments(engagementId, kind, arr)
+      const docs = await runWithRetry(
+        () => api.uploadDocuments(engagementId, kind, arr),
+        { retries: 2, recover: () => api.recoverPipeline(engagementId, true) },
+      )
       // Backend returns documents in file order — correlate each chip to its doc and poll.
+      updateDocuments(kind, existing => [...existing, ...docs])
       setItems(p => p.map(x => {
         const idx = entries.findIndex(e => e.id === x.id)
-        return idx >= 0 && docs[idx] ? { ...x, documentId: docs[idx].id, status: DOC_STATUS[docs[idx].status] ?? "processing" } : x
+        return idx >= 0 && docs[idx] ? uploadItemFromDocument(docs[idx]) : x
       }))
-      entries.forEach((e, idx) => { if (docs[idx]) void pollDoc(e.id, docs[idx].id) })
+      docs.forEach(doc => { if ((DOC_STATUS[doc.status] ?? "processing") === "processing") void pollDoc(doc.id) })
     } catch (err) {
       console.error("[veritax] upload failed:", err)
       markAll("error", uploadErrorMessage(err))
+      const base = await diagnoseApiFailure(err, { operation: "upload documents", engagementId })
+      const status = parseApiError(err).status
+      showIssue(
+        status === 413
+          ? {
+              ...base,
+              title: "Upload a smaller file",
+              message: "The backend rejected this upload because at least one file is too large.",
+              detail: "Split the source or upload a smaller version, then try again.",
+              tone: "caution",
+            }
+          : base,
+        { label: status === 413 ? "Choose file" : "Try upload again", onClick: () => status === 413 ? inputRef.current?.click() : void uploadFiles(arr) },
+        { label: "Cancel", onClick: () => {}, variant: "ghost" },
+      )
     }
   }
 
   const removeFile = (item: UploadItem) => {
     setItems(p => p.filter(x => x.id !== item.id))
     if (item.documentId) {
+      const removedDoc = documents.find(doc => doc.id === item.documentId)
+      updateDocuments(kind, docs => docs.filter(doc => doc.id !== item.documentId))
       api.deleteDocument(item.documentId).catch(err => {
         console.error("[veritax] delete document failed:", err)
         setItems(p => [...p, item])
+        if (removedDoc) updateDocuments(kind, docs => docs.some(doc => doc.id === removedDoc.id) ? docs : [...docs, removedDoc])
       })
     }
   }
@@ -200,12 +247,45 @@ function UploadZone({ kind, accept = "*", hint }: { kind: SourceId; accept?: str
     if (!engagementId || !item.documentId) return
     setItems(p => p.map(x => (x.id === item.id ? { ...x, status: "processing", error: undefined } : x)))
     try {
-      await api.recoverPipeline(engagementId, true)
-      void pollDoc(item.id, item.documentId)
+      await runWithRetry(() => api.recoverPipeline(engagementId, true), { retries: 2 })
+      void pollDoc(item.documentId)
     } catch (err) {
       console.error("[veritax] retry document failed:", err)
       setItems(p => p.map(x => (x.id === item.id ? { ...x, status: "error", error: uploadErrorMessage(err) } : x)))
+      const base = await diagnoseApiFailure(err, { operation: "retry document indexing", engagementId })
+      showIssue(
+        base,
+        { label: "Retry indexing", onClick: () => void retryFile(item) },
+        { label: "Remove file", onClick: () => removeFile(item), variant: "ghost" },
+      )
     }
+  }
+
+  function openFailedFile(item: UploadItem) {
+    const ocrNeeded = /no extractable text|ocr|locked|encrypted/i.test(item.error ?? "")
+    showIssue(
+      {
+        title: ocrNeeded ? "Upload an OCR'd copy" : "This document did not index",
+        message: ocrNeeded
+          ? "The backend could not extract readable text from this file."
+          : "Veritax needs the document indexed before Requirements can use it.",
+        detail: item.error || "Retry indexing, remove it, or upload a replacement.",
+        tone: "caution",
+        diagnostics: {
+          operation: "document indexing",
+          engagementId,
+          documentId: item.documentId ?? null,
+          fileName: item.name,
+          error: item.error ?? null,
+        },
+      },
+      item.documentId && !ocrNeeded
+        ? { label: "Retry indexing", onClick: () => void retryFile(item) }
+        : { label: "Upload replacement", onClick: () => inputRef.current?.click() },
+      item.documentId && !ocrNeeded
+        ? { label: "Upload replacement", onClick: () => { removeFile(item); inputRef.current?.click() }, variant: "ghost" }
+        : { label: "Remove file", onClick: () => removeFile(item), variant: "ghost" },
+    )
   }
 
   return (
@@ -239,7 +319,7 @@ function UploadZone({ kind, accept = "*", hint }: { kind: SourceId; accept?: str
           <div style={{ display: "flex", flexWrap: "wrap", gap: "0.375rem" }}>
             {items.map((f, idx) => (
               <Animate key={f.id} as="span" enter="slide-up" duration={130} delay={Math.min(idx, 6) * 16}>
-              <span title={f.status === "error" ? f.error : STATUS_LABEL[f.status]} style={{
+              <span title={f.status === "error" ? f.error : STATUS_LABEL[f.status]} onClick={e => { if (f.status === "error") { e.stopPropagation(); openFailedFile(f) } }} style={{
                 display: "inline-flex", alignItems: "center", gap: "0.375rem",
                 padding: "0.125rem 0.375rem 0.125rem 0.5rem", borderRadius: "var(--radius-xs)",
                 background: f.status === "error" ? "var(--color-background-danger-soft)" : "var(--color-background-primary-soft)",
@@ -265,11 +345,6 @@ function UploadZone({ kind, accept = "*", hint }: { kind: SourceId; accept?: str
               </Animate>
             ))}
           </div>
-          {items.filter(f => f.status === "error" && f.error).map(f => (
-            <span key={f.id} style={{ fontSize: "var(--font-text-xs-size)", color: "var(--color-text-danger-soft)" }}>
-              {f.name}: {f.error}
-            </span>
-          ))}
         </div>
       )}
     </div>
@@ -305,7 +380,7 @@ function OrDivider() {
 }
 
 function ConnectorGrid({ kind, connectors }: { kind: SourceId; connectors: Connector[] }) {
-  const { engagementId } = useContext(PlanningCtx)
+  const { engagementId, showIssue } = useContext(PlanningCtx)
   const [connected, setConnected] = useState<Set<string>>(new Set())
   const [statusByProvider, setStatusByProvider] = useState<Record<string, string>>({})
 
@@ -316,13 +391,30 @@ function ConnectorGrid({ kind, connectors }: { kind: SourceId; connectors: Conne
       .catch(() => {})
   }, [])
 
+  async function recordConnector(name: string) {
+    if (!engagementId) return
+    try {
+      await runWithRetry(
+        () => api.createSource(engagementId, { kind, origin: "connected", connector_provider: name.toLowerCase() }),
+        { retries: 1 },
+      )
+    } catch (err) {
+      console.error("[veritax] failed to record connected source:", err)
+      const base = await diagnoseApiFailure(err, { operation: "save connector source", engagementId })
+      showIssue(
+        base,
+        { label: "Retry save", onClick: () => void recordConnector(name) },
+        { label: "Cancel", onClick: () => setConnected(p => { const s = new Set(p); s.delete(name); return s }), variant: "ghost" },
+      )
+    }
+  }
+
   function toggle(name: string) {
     const on = connected.has(name)
     setConnected(p => { const s = new Set(p); on ? s.delete(name) : s.add(name); return s })
     if (!on && engagementId) {
       // Record a connected-source stub (no OAuth yet).
-      api.createSource(engagementId, { kind, origin: "connected", connector_provider: name.toLowerCase() })
-        .catch(err => console.error("[veritax] failed to record connected source:", err))
+      void recordConnector(name)
     }
   }
 
@@ -389,20 +481,29 @@ function AgreementsInput() {
 }
 
 function WebsiteInput() {
-  const { engagementId } = useContext(PlanningCtx)
+  const { engagementId, showIssue } = useContext(PlanningCtx)
   const [url, setUrl] = useState("")
 
-  function saveUrl() {
+  async function saveUrl() {
     if (!engagementId) return
-    api.patchEngagement(engagementId, { website_url: url.trim() })
-      .catch(err => console.error("[veritax] failed to save website url:", err))
+    try {
+      await runWithRetry(() => api.patchEngagement(engagementId, { website_url: url.trim() }), { retries: 1 })
+    } catch (err) {
+      console.error("[veritax] failed to save website url:", err)
+      const base = await diagnoseApiFailure(err, { operation: "save website URL", engagementId })
+      showIssue(
+        base,
+        { label: "Retry save", onClick: () => void saveUrl() },
+        { label: "Cancel", onClick: () => {}, variant: "ghost" },
+      )
+    }
   }
 
   return (
     <div style={{ paddingLeft: "2rem", display: "flex", flexDirection: "column", gap: "0.5rem" }}>
       <input type="url" placeholder="https://example.com" value={url} onChange={e => setUrl(e.target.value)}
         onFocus={e => { e.currentTarget.style.borderColor = "var(--input-outline-border-color-focus)" }}
-        onBlur={e => { e.currentTarget.style.borderColor = "var(--input-outline-border-color)"; saveUrl() }}
+        onBlur={e => { e.currentTarget.style.borderColor = "var(--input-outline-border-color)"; void saveUrl() }}
         style={OUTLINE_INPUT} />
       <span style={{ display: "flex", alignItems: "center", gap: "0.3rem", fontSize: "var(--font-text-xs-size)", color: "var(--color-text-tertiary)" }}>
         <Globe size={11} />The tool will pull publicly available information from this URL.
@@ -436,6 +537,7 @@ export default function PlanningStep({
   engagementId,
   jurisdictions, onJurisdictionsChange,
   entity, onEntityChange,
+  documentsByKind, updateDocuments,
   sources, onSourcesChange, onContinue,
 }: {
   engagementId: string | null
@@ -443,15 +545,35 @@ export default function PlanningStep({
   onJurisdictionsChange: (v: string[]) => void
   entity: string
   onEntityChange: (v: string) => void
+  documentsByKind: PlanningDocumentMap
+  updateDocuments: (kind: SourceId, updater: (docs: DocumentRead[]) => DocumentRead[]) => void
   sources: Set<SourceId>
   onSourcesChange: (v: Set<SourceId>) => void
   onContinue: () => void
 }) {
   const [jurisdictionOptions, setJurisdictionOptions] = useState<string[]>(JURISDICTIONS_FALLBACK)
+  const [issue, setIssue] = useState<ActionableIssue | null>(null)
+
+  function showIssue(
+    base: ActionableIssueBase,
+    primaryAction: ActionableIssue["primaryAction"],
+    secondaryAction?: ActionableIssue["secondaryAction"],
+  ) {
+    setIssue(withActions(base, primaryAction, secondaryAction))
+  }
+
   useEffect(() => {
     api.getJurisdictions()
       .then(js => { if (js.length) setJurisdictionOptions(js) })
-      .catch(e => console.error("[veritax] failed to load jurisdictions; using fallback:", e))
+      .catch(async e => {
+        console.error("[veritax] failed to load jurisdictions; using fallback:", e)
+        const base = await diagnoseApiFailure(e, { operation: "load jurisdictions", engagementId })
+        showIssue(
+          { ...base, message: "Veritax is using the built-in jurisdiction list until the backend responds." },
+          { label: "Retry list", onClick: () => void api.getJurisdictions().then(js => { if (js.length) setJurisdictionOptions(js) }) },
+          { label: "Keep fallback", onClick: () => {}, variant: "ghost" },
+        )
+      })
   }, [])
 
   const toggle = (id: SourceId) => {
@@ -462,7 +584,7 @@ export default function PlanningStep({
   const canContinue = jurisdictions.length > 0 && entity.trim().length > 0 && sources.size > 0
 
   return (
-    <PlanningCtx.Provider value={{ engagementId }}>
+    <PlanningCtx.Provider value={{ engagementId, documentsByKind, updateDocuments, showIssue }}>
     <main style={{ flex: 1, display: "flex", flexDirection: "column", padding: "3rem 3.5rem", maxWidth: 760, overflowY: "auto" }}>
       <div style={{ display: "flex", alignItems: "flex-end", gap: "0.75rem", marginBottom: "2.5rem" }}>
         <div style={{ flex: "0 0 240px" }}>
@@ -539,6 +661,7 @@ export default function PlanningStep({
         })}
       </ul>
     </main>
+    <ActionModal issue={issue} onClose={() => setIssue(null)} />
     </PlanningCtx.Provider>
   )
 }

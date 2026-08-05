@@ -9,8 +9,8 @@ Project: `https://rosgldmxgxlujoziztey.supabase.co`
 
 ## 1. URL configuration (Authentication → URL Configuration)
 
-- **Site URL:** the deployed app URL (e.g. `https://veritax-virid.vercel.app`).
-- **Redirect URLs:** add `https://veritax-virid.vercel.app/**` and `http://localhost:3000/**`.
+- **Site URL:** `https://app.veritaxai.com`.
+- **Redirect URLs:** add `https://app.veritaxai.com/**`, any Vercel preview URLs you still use, and `http://localhost:3000/**`.
 
 ## 2. Email OTP as a 6-digit code (Authentication → Email Templates → "Magic Link")
 
