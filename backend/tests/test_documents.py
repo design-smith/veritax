@@ -1,4 +1,12 @@
 import hashlib
+from datetime import datetime, timezone
+
+from sqlalchemy import select
+
+from app.embeddings import FakeEmbedder
+from app.jobs import run_queued_pipeline_jobs_from_app
+from app.main import app
+from app.models import Document, DocumentStatus, PipelineJob, PipelineJobStatus
 
 
 async def _engagement(client) -> str:
@@ -41,6 +49,43 @@ async def test_upload_embeds_text_into_chunks(client):
     ).json()[0]
 
     # Background embedding ran within the request (ASGITransport).
+    got = (await client.get(f"/documents/{doc['id']}")).json()
+    assert got["status"] == "embedded"
+    assert got["error"] is None
+
+
+async def test_document_indexing_retries_transient_failure_in_background(client):
+    class FlakyEmbedder(FakeEmbedder):
+        def __init__(self) -> None:
+            super().__init__()
+            self.calls = 0
+
+        def embed_documents(self, texts):
+            self.calls += 1
+            if self.calls == 1:
+                raise RuntimeError("temporary provider timeout")
+            return super().embed_documents(texts)
+
+    app.state.embedder = FlakyEmbedder()
+    eid = await _engagement(client)
+    doc = (
+        await client.post(
+            f"/engagements/{eid}/documents",
+            data={"kind": "interview"},
+            files={"files": ("transcript.txt", ("functional analysis " * 200).encode(), "text/plain")},
+        )
+    ).json()[0]
+
+    async with app.state.session_factory() as session:
+        stored_doc = await session.get(Document, doc["id"])
+        job = (await session.execute(select(PipelineJob))).scalar_one()
+        assert stored_doc.status == DocumentStatus.uploaded
+        assert "Retrying automatically" in (stored_doc.error or "")
+        assert job.status == PipelineJobStatus.queued
+        job.next_run_at = datetime.now(timezone.utc)
+        await session.commit()
+
+    assert await run_queued_pipeline_jobs_from_app(app, max_jobs=1) == 1
     got = (await client.get(f"/documents/{doc['id']}")).json()
     assert got["status"] == "embedded"
     assert got["error"] is None

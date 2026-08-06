@@ -6,7 +6,7 @@ import time
 import uuid
 from datetime import datetime, timedelta, timezone
 
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, Request
 from sqlalchemy import delete, func, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
@@ -14,13 +14,15 @@ from sqlalchemy.orm import selectinload
 
 from ..config import settings
 from ..corpus import document_contexts_by_id, document_filename_map, retrieve_documents, union_docs
-from ..deps import get_embedder, get_risk_analyzer, get_session, get_session_factory, require_engagement_owner
+from ..deps import get_session, require_engagement_owner
 from ..embeddings import Embedder
+from ..jobs import enqueue_pipeline_job, schedule_pipeline_drain
 from ..models import (
     Confidence,
     DraftSection,
     DraftStatus,
     Engagement,
+    PipelineJobKind,
     RiskEvidence,
     RiskFinding,
     RiskKind,
@@ -400,12 +402,10 @@ async def run_analysis(session_factory: async_sessionmaker, analyzer: RiskAnalyz
 @router.post("/engagements/{engagement_id}/risks", response_model=RiskResponse, status_code=201)
 async def start_risks(
     engagement_id: uuid.UUID,
+    request: Request,
     background: BackgroundTasks,
     jurisdiction: str = Query(...),
     session: AsyncSession = Depends(get_session),
-    analyzer: RiskAnalyzer = Depends(get_risk_analyzer),
-    embedder: Embedder = Depends(get_embedder),
-    factory: async_sessionmaker = Depends(get_session_factory),
     _owner: Engagement = Depends(require_engagement_owner),
 ) -> RiskResponse:
     request_started_at = time.perf_counter()
@@ -526,6 +526,14 @@ async def start_risks(
     )
     run_id = (await session.execute(stmt)).scalar_one()
     await session.execute(delete(RiskFinding).where(RiskFinding.run_id == run_id))
+    await enqueue_pipeline_job(
+        session,
+        engagement_id=engagement_id,
+        kind=PipelineJobKind.analyze_risks,
+        dedupe_key=f"analyze_risks:{engagement_id}:{jurisdiction}",
+        payload={"jurisdiction": jurisdiction},
+        restart=True,
+    )
     await session.commit()
     log.info(
         "risks.start.run_queued engagement_id=%s jurisdiction=%s run_id=%s upsert_ms=%d total_ms=%d",
@@ -536,7 +544,7 @@ async def start_risks(
         _elapsed_ms(request_started_at),
     )
 
-    background.add_task(run_analysis, factory, analyzer, embedder, engagement_id, jurisdiction)
+    schedule_pipeline_drain(background, request.app, max_jobs=1)
     return await _response(session, engagement_id, jurisdiction)
 
 

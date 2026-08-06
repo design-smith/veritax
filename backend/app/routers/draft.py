@@ -8,7 +8,7 @@ import time
 import uuid
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, Request
 from fastapi.responses import Response
 from sqlalchemy import delete, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
@@ -27,18 +27,19 @@ from ..deps import (
     get_drafter,
     get_embedder,
     get_session,
-    get_session_factory,
     require_engagement_owner,
 )
 from ..docx_export import build_document
 from ..drafting import Drafter, DraftResult
 from ..embeddings import Embedder
+from ..jobs import enqueue_pipeline_job, schedule_pipeline_drain
 from ..models import (
     CitationKind,
     DraftCitation,
     DraftSection,
     DraftStatus,
     Engagement,
+    PipelineJobKind,
     RequirementCoverage,
 )
 from ..requirements import resolve_requirements
@@ -680,12 +681,10 @@ async def run_draft(session_factory: async_sessionmaker, drafter: Drafter, embed
 @router.post("/engagements/{engagement_id}/draft", response_model=DraftResponse, status_code=201)
 async def start_draft(
     engagement_id: uuid.UUID,
+    request: Request,
     background: BackgroundTasks,
     jurisdiction: str = Query(...),
     session: AsyncSession = Depends(get_session),
-    drafter: Drafter = Depends(get_drafter),
-    embedder: Embedder = Depends(get_embedder),
-    factory: async_sessionmaker = Depends(get_session_factory),
     _owner: Engagement = Depends(require_engagement_owner),
 ) -> DraftResponse:
     elements = resolve_requirements(jurisdiction)
@@ -712,10 +711,19 @@ async def start_draft(
         index_elements=["engagement_id", "jurisdiction", "requirement_key"]
     )
     result = await session.execute(stmt)
+    should_draft = (result.rowcount or 0) > 0
+    if should_draft:
+        await enqueue_pipeline_job(
+            session,
+            engagement_id=engagement_id,
+            kind=PipelineJobKind.draft_jurisdiction,
+            dedupe_key=f"draft_jurisdiction:{engagement_id}:{jurisdiction}",
+            payload={"jurisdiction": jurisdiction},
+        )
     await session.commit()
 
-    if (result.rowcount or 0) > 0:
-        background.add_task(run_draft, factory, drafter, embedder, engagement_id, jurisdiction)
+    if should_draft:
+        schedule_pipeline_drain(background, request.app, max_jobs=1)
     return await _response(session, engagement_id, jurisdiction)
 
 

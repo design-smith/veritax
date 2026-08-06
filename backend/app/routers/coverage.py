@@ -15,6 +15,7 @@ from fastapi import (
     Form,
     HTTPException,
     Query,
+    Request,
     UploadFile,
 )
 from sqlalchemy import delete, select, update
@@ -37,18 +38,16 @@ from ..diagnostics import rss_mb
 from ..evidence_quality import assessment_scope_instruction, scoped_query
 from ..deps import (
     assert_owner,
-    get_assessor,
     get_current_user,
-    get_drafter,
     get_embedder,
     get_session,
     get_session_factory,
     get_storage,
     require_engagement_owner,
 )
-from ..drafting import Drafter
 from ..embeddings import Embedder
 from ..ingest import embed_document, get_or_create_uploaded_source, store_upload
+from ..jobs import enqueue_pipeline_job, schedule_pipeline_drain
 from ..models import (
     Confidence,
     CoverageEvidence,
@@ -59,6 +58,7 @@ from ..models import (
     DraftSection,
     DraftStatus,
     Engagement,
+    PipelineJobKind,
     RequirementCoverage,
     Source,
     SourceKind,
@@ -252,19 +252,22 @@ async def _mark_present(
 
 
 async def _restart_draft_if_needed(
-    background: BackgroundTasks,
-    factory: async_sessionmaker,
-    drafter: Drafter,
-    embedder: Embedder,
+    session: AsyncSession,
     engagement_id: uuid.UUID,
     jurisdictions: list[str],
-) -> None:
+) -> int:
     if not jurisdictions:
-        return
-    from .draft import run_draft
-
+        return 0
     for jurisdiction in jurisdictions:
-        background.add_task(run_draft, factory, drafter, embedder, engagement_id, jurisdiction)
+        await enqueue_pipeline_job(
+            session,
+            engagement_id=engagement_id,
+            kind=PipelineJobKind.draft_jurisdiction,
+            dedupe_key=f"draft_jurisdiction:{engagement_id}:{jurisdiction}",
+            payload={"jurisdiction": jurisdiction},
+            restart=True,
+        )
+    return len(jurisdictions)
 
 
 async def _find_assessed_twin(session: AsyncSession, engagement_id: uuid.UUID, element) -> RequirementCoverage | None:
@@ -491,13 +494,11 @@ async def run_assessment(session_factory: async_sessionmaker, assessor: Assessor
 @router.post("/engagements/{engagement_id}/coverage", response_model=CoverageResponse, status_code=201)
 async def start_coverage(
     engagement_id: uuid.UUID,
+    request: Request,
     background: BackgroundTasks,
     jurisdiction: str = Query(...),
     force: bool = Query(False),  # user hit "refresh": re-run matching against the current corpus
     session: AsyncSession = Depends(get_session),
-    assessor: Assessor = Depends(get_assessor),
-    embedder: Embedder = Depends(get_embedder),
-    factory: async_sessionmaker = Depends(get_session_factory),
     _owner: Engagement = Depends(require_engagement_owner),
 ) -> CoverageResponse:
     elements = resolve_requirements(jurisdiction)
@@ -545,14 +546,24 @@ async def start_coverage(
         index_elements=["engagement_id", "jurisdiction", "requirement_key"]
     )
     result = await session.execute(stmt)
-    await session.commit()
 
     inserted = result.rowcount or 0
+    should_assess = inserted > 0 or force
+    if should_assess:
+        await enqueue_pipeline_job(
+            session,
+            engagement_id=engagement_id,
+            kind=PipelineJobKind.assess_requirements,
+            dedupe_key=f"assess_requirements:{engagement_id}:{jurisdiction}",
+            payload={"jurisdiction": jurisdiction},
+            restart=force,
+        )
+    await session.commit()
     log.info("start_coverage engagement=%s jurisdiction=%s force=%s: %d new row(s), %s",
              engagement_id, jurisdiction, force, inserted,
-             "scheduling assessment" if inserted > 0 or force else "already assessed/queued (no-op)")
-    if inserted > 0 or force:
-        background.add_task(run_assessment, factory, assessor, embedder, engagement_id, jurisdiction)
+             "queued assessment" if should_assess else "already assessed/queued (no-op)")
+    if should_assess:
+        schedule_pipeline_drain(background, request.app, max_jobs=1)
     return await _response(session, engagement_id, jurisdiction)
 
 
@@ -575,13 +586,13 @@ async def get_coverage(
 @router.post("/coverage/{coverage_id}/supplements", response_model=CoverageRead, status_code=201)
 async def add_supplement(
     coverage_id: uuid.UUID,
+    request: Request,
     background: BackgroundTasks,
     kind: SupplementKind = Form(...),
     text: str | None = Form(default=None),
     file: UploadFile | None = File(default=None),
     session: AsyncSession = Depends(get_session),
     storage: Storage = Depends(get_storage),
-    drafter: Drafter = Depends(get_drafter),
     embedder: Embedder = Depends(get_embedder),
     factory: async_sessionmaker = Depends(get_session_factory),
     user: AuthUser = Depends(get_current_user),
@@ -628,8 +639,10 @@ async def add_supplement(
         whats_present=f"User-supplied supplement satisfies {row.element_name}.",
     )
     redraft_jurisdictions = await _invalidate_drafts_for_element(session, row)
+    restarted = await _restart_draft_if_needed(session, row.engagement_id, redraft_jurisdictions)
     await session.commit()
-    await _restart_draft_if_needed(background, factory, drafter, embedder, row.engagement_id, redraft_jurisdictions)
+    if restarted:
+        schedule_pipeline_drain(background, request.app, max_jobs=restarted)
 
     doc_kind = await _doc_kind(session, row.engagement_id)
     section_by_key = await _draft_section_by_key(session, row.engagement_id, row.jurisdiction)
@@ -640,11 +653,9 @@ async def add_supplement(
 @router.post("/coverage/{coverage_id}/satisfied", response_model=CoverageRead)
 async def mark_satisfied(
     coverage_id: uuid.UUID,
+    request: Request,
     background: BackgroundTasks,
     session: AsyncSession = Depends(get_session),
-    drafter: Drafter = Depends(get_drafter),
-    embedder: Embedder = Depends(get_embedder),
-    factory: async_sessionmaker = Depends(get_session_factory),
     user: AuthUser = Depends(get_current_user),
 ) -> CoverageRead:
     row = await session.get(RequirementCoverage, coverage_id)
@@ -662,8 +673,10 @@ async def mark_satisfied(
         whats_present=f"User marked {row.element_name} satisfied.",
     )
     redraft_jurisdictions = await _invalidate_drafts_for_element(session, row)
+    restarted = await _restart_draft_if_needed(session, row.engagement_id, redraft_jurisdictions)
     await session.commit()
-    await _restart_draft_if_needed(background, factory, drafter, embedder, row.engagement_id, redraft_jurisdictions)
+    if restarted:
+        schedule_pipeline_drain(background, request.app, max_jobs=restarted)
 
     doc_kind = await _doc_kind(session, row.engagement_id)
     section_by_key = await _draft_section_by_key(session, row.engagement_id, row.jurisdiction)

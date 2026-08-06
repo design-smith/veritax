@@ -353,7 +353,7 @@ function UploadZone({ kind, accept = "*", hint }: { kind: SourceId; accept?: str
                 {f.status === "error" && f.documentId && (
                   <button type="button" onClick={e => { e.stopPropagation(); void retryFile(f) }}
                     style={{ background: "none", border: "none", cursor: "pointer", color: "var(--color-text-info-soft)", lineHeight: 1, padding: 0, flexShrink: 0, fontSize: "10px" }}>
-                    Retry
+                    Retry indexing
                   </button>
                 )}
                 <button type="button" onClick={e => { e.stopPropagation(); removeFile(f) }}

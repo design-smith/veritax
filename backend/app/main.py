@@ -17,6 +17,7 @@ from .deps import get_current_user
 from .db import SessionFactory, init_db
 from .drafting import AnthropicDrafter, DeepSeekDrafter, FakeDrafter
 from .embeddings import FakeEmbedder, VoyageEmbedder
+from .jobs import pipeline_worker_loop
 from .risks import AnthropicRiskAnalyzer, DeepSeekRiskAnalyzer, FakeRiskAnalyzer
 from .routers import connectors, coverage, documents, draft, engagements, pipeline, risks, search, sources
 from .storage import LocalStorage, S3Storage
@@ -97,7 +98,18 @@ async def lifespan(app: FastAPI):
         for route in app.routes
     )
     log.info("startup: coverage satisfied route registered=%s", has_satisfied_route)
-    yield
+    worker = asyncio.create_task(pipeline_worker_loop(app))
+    app.state.pipeline_worker = worker
+    log.info("startup: pipeline worker started")
+    try:
+        yield
+    finally:
+        worker.cancel()
+        try:
+            await worker
+        except asyncio.CancelledError:
+            pass
+        log.info("shutdown: pipeline worker stopped")
 
 
 app = FastAPI(title="Veritax Sources API", lifespan=lifespan)

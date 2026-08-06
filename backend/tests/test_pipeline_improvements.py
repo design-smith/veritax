@@ -33,9 +33,13 @@ class CountingDrafter(FakeDrafter):
     def __init__(self) -> None:
         self.batch_calls = 0
 
-    def draft_batch(self, elements, register, documents, coverage_notes):
+    def draft(self, element, register, documents, coverage_note, scope_note=""):
         self.batch_calls += 1
-        return super().draft_batch(elements, register, documents, coverage_notes)
+        return super().draft(element, register, documents, coverage_note, scope_note)
+
+    def draft_batch(self, elements, register, documents, coverage_notes, scope_notes=None):
+        self.batch_calls += 1
+        return super().draft_batch(elements, register, documents, coverage_notes, scope_notes)
 
 
 async def _engagement(client) -> str:
@@ -189,7 +193,7 @@ async def test_supplement_redrafts_existing_section(client):
     await client.post(
         f"/engagements/{eid}/documents",
         data={"kind": "interview"},
-        files={"files": ("notes.txt", b"management structure and reporting lines", "text/plain")},
+        files={"files": ("notes.txt", _ready_text("Netherlands", b"management structure and reporting lines"), "text/plain")},
     )
     await client.post(f"/engagements/{eid}/coverage", params={"jurisdiction": "Netherlands"})
     await client.post(f"/engagements/{eid}/draft", params={"jurisdiction": "Netherlands"})

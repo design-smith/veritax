@@ -478,7 +478,7 @@ class FakeDrafter:
             d = documents[0]
             content = (
                 f"## {element.element_name}\n\n"
-                f"{element.description} This section is drafted from the material on file.[1] "
+                f"This section is drafted from the material on file.[1] "
                 f"Figures are summarised in [[table:t1]] and the trend in [[chart:c1]].[1]"
             )
             quote = (d.text.strip()[:160] or element.description)

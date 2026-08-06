@@ -2,22 +2,20 @@ from __future__ import annotations
 
 import uuid
 
-from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, HTTPException, UploadFile
+from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, HTTPException, Request, UploadFile
 from sqlalchemy import select
-from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..auth import AuthUser
 from ..deps import (
     assert_owner,
     get_current_user,
-    get_embedder,
     get_session,
-    get_session_factory,
     get_storage,
     require_engagement_owner,
 )
-from ..embeddings import Embedder
-from ..ingest import embed_document, get_or_create_uploaded_source, store_upload
+from ..ingest import get_or_create_uploaded_source, store_upload
+from ..jobs import enqueue_index_document_job, schedule_pipeline_drain
 from ..models import Document, DocumentChunk, Engagement, Source, SourceKind
 from ..schemas import DocumentRead, DocumentTextRead
 from ..storage import Storage
@@ -31,13 +29,12 @@ _MAX_BYTES = MAX_UPLOAD_MB * 1024 * 1024
 @router.post("/engagements/{engagement_id}/documents", response_model=list[DocumentRead], status_code=201)
 async def upload_documents(
     engagement_id: uuid.UUID,
+    request: Request,
     background: BackgroundTasks,
     kind: SourceKind = Form(...),
     files: list[UploadFile] = File(default=[]),
     session: AsyncSession = Depends(get_session),
     storage: Storage = Depends(get_storage),
-    embedder: Embedder = Depends(get_embedder),
-    session_factory: async_sessionmaker = Depends(get_session_factory),
     _owner: Engagement = Depends(require_engagement_owner),
 ) -> list[Document]:
     if not files:
@@ -58,11 +55,11 @@ async def upload_documents(
             session, storage, engagement_id, source.id, f.filename or "upload", f.content_type, data
         )
         created.append(doc)
+    for doc in created:
+        await enqueue_index_document_job(session, doc)
     await session.commit()
 
-    # Path 2 runs after the response (findability embedding); each in its own session.
-    for doc in created:
-        background.add_task(embed_document, session_factory, storage, embedder, doc.id)
+    schedule_pipeline_drain(background, request.app, max_jobs=len(created))
 
     return created
 

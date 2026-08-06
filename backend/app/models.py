@@ -111,6 +111,21 @@ class RiskRunStatus(str, enum.Enum):
     failed = "failed"
 
 
+class PipelineJobKind(str, enum.Enum):
+    index_document = "index_document"
+    assess_requirements = "assess_requirements"
+    draft_jurisdiction = "draft_jurisdiction"
+    analyze_risks = "analyze_risks"
+
+
+class PipelineJobStatus(str, enum.Enum):
+    queued = "queued"
+    running = "running"
+    succeeded = "succeeded"
+    failed = "failed"
+    blocked = "blocked"
+
+
 def _uuid_col() -> Mapped[uuid.UUID]:
     return mapped_column(primary_key=True, default=uuid.uuid4)
 
@@ -486,6 +501,44 @@ class RiskRecommendation(Base):
     )
     order: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     text: Mapped[str] = mapped_column(Text, nullable=False)
+
+
+class PipelineJob(Base):
+    """Durable background work. Postgres is the queue; the worker is intentionally tiny."""
+
+    __tablename__ = "pipeline_jobs"
+    __table_args__ = (
+        UniqueConstraint("dedupe_key", name="uq_pipeline_job_dedupe"),
+        Index("ix_pipeline_jobs_runnable", "status", "next_run_at", "created_at"),
+        Index("ix_pipeline_jobs_engagement", "engagement_id"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
+    engagement_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("engagements.id", ondelete="CASCADE"), nullable=False
+    )
+    kind: Mapped[PipelineJobKind] = mapped_column(
+        Enum(PipelineJobKind, name="pipeline_job_kind"), nullable=False
+    )
+    dedupe_key: Mapped[str] = mapped_column(Text, nullable=False)
+    payload: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict)
+    status: Mapped[PipelineJobStatus] = mapped_column(
+        Enum(PipelineJobStatus, name="pipeline_job_status"),
+        nullable=False,
+        default=PipelineJobStatus.queued,
+    )
+    attempts: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    max_attempts: Mapped[int] = mapped_column(Integer, nullable=False, default=3)
+    next_run_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    locked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    action_required: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
 
 
 # Seed data for the connector registry (all available, none wired yet).

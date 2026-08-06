@@ -4,24 +4,15 @@ import uuid
 import logging
 from datetime import datetime, timedelta, timezone
 
-from fastapi import APIRouter, BackgroundTasks, Depends, Query
+from fastapi import APIRouter, BackgroundTasks, Depends, Query, Request
 from sqlalchemy import delete, false, or_, select
-from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
+from sqlalchemy.ext.asyncio import AsyncSession
 
-from ..assessment import Assessor
 from ..deps import (
-    get_assessor,
-    get_drafter,
-    get_embedder,
-    get_risk_analyzer,
     get_session,
-    get_session_factory,
-    get_storage,
     require_engagement_owner,
 )
-from ..drafting import Drafter
-from ..embeddings import Embedder
-from ..ingest import embed_document
+from ..jobs import enqueue_index_document_job, enqueue_pipeline_job, schedule_pipeline_drain
 from ..models import (
     CoverageEvidence,
     CoverageStatus,
@@ -31,18 +22,16 @@ from ..models import (
     DraftSection,
     DraftStatus,
     Engagement,
+    PipelineJobKind,
     RequirementCoverage,
     RiskFinding,
     RiskRun,
     RiskRunStatus,
     Source,
 )
-from ..risks import RiskAnalyzer
 from ..schemas import PipelineRecoveryResponse
-from ..storage import Storage
-from .coverage import run_assessment
-from .draft import _draft_blocked_by_coverage, run_draft
-from .risks import RISK_STALE_AFTER, draft_complete, run_analysis
+from .draft import _draft_blocked_by_coverage
+from .risks import RISK_STALE_AFTER, draft_complete
 
 router = APIRouter(tags=["pipeline"])
 log = logging.getLogger("veritax")
@@ -55,15 +44,10 @@ DRAFT_STALE_AFTER = timedelta(minutes=12)
 @router.post("/engagements/{engagement_id}/pipeline/recover", response_model=PipelineRecoveryResponse)
 async def recover_pipeline(
     engagement_id: uuid.UUID,
+    request: Request,
     background: BackgroundTasks,
     retry_failed: bool = Query(False),
     session: AsyncSession = Depends(get_session),
-    factory: async_sessionmaker = Depends(get_session_factory),
-    storage: Storage = Depends(get_storage),
-    embedder: Embedder = Depends(get_embedder),
-    assessor: Assessor = Depends(get_assessor),
-    drafter: Drafter = Depends(get_drafter),
-    risk_analyzer: RiskAnalyzer = Depends(get_risk_analyzer),
     _owner: Engagement = Depends(require_engagement_owner),
 ) -> PipelineRecoveryResponse:
     now = datetime.now(timezone.utc)
@@ -185,16 +169,39 @@ async def recover_pipeline(
     if risk_run_ids_to_clear:
         await session.execute(delete(RiskFinding).where(RiskFinding.run_id.in_(risk_run_ids_to_clear)))
 
-    await session.commit()
-
     for doc in stale_documents:
-        background.add_task(embed_document, factory, storage, embedder, doc.id)
+        await enqueue_index_document_job(session, doc, restart=True)
     for jurisdiction in coverage_jurisdictions:
-        background.add_task(run_assessment, factory, assessor, embedder, engagement_id, jurisdiction)
+        await enqueue_pipeline_job(
+            session,
+            engagement_id=engagement_id,
+            kind=PipelineJobKind.assess_requirements,
+            dedupe_key=f"assess_requirements:{engagement_id}:{jurisdiction}",
+            payload={"jurisdiction": jurisdiction},
+            restart=True,
+        )
     for jurisdiction in sorted(draft_jurisdictions):
-        background.add_task(run_draft, factory, drafter, embedder, engagement_id, jurisdiction)
+        await enqueue_pipeline_job(
+            session,
+            engagement_id=engagement_id,
+            kind=PipelineJobKind.draft_jurisdiction,
+            dedupe_key=f"draft_jurisdiction:{engagement_id}:{jurisdiction}",
+            payload={"jurisdiction": jurisdiction},
+            restart=True,
+        )
     for jurisdiction in sorted(risk_jurisdictions):
-        background.add_task(run_analysis, factory, risk_analyzer, embedder, engagement_id, jurisdiction)
+        await enqueue_pipeline_job(
+            session,
+            engagement_id=engagement_id,
+            kind=PipelineJobKind.analyze_risks,
+            dedupe_key=f"analyze_risks:{engagement_id}:{jurisdiction}",
+            payload={"jurisdiction": jurisdiction},
+            restart=True,
+        )
+    await session.commit()
+    total_jobs = len(stale_documents) + len(coverage_jurisdictions) + len(draft_jurisdictions) + len(risk_jurisdictions)
+    if total_jobs:
+        schedule_pipeline_drain(background, request.app, max_jobs=total_jobs)
 
     log.info(
         "pipeline.recover engagement_id=%s documents=%d coverage=%s draft=%s risks=%s retry_failed=%s",

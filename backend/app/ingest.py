@@ -136,6 +136,8 @@ async def embed_document(
     storage: Storage,
     embedder: Embedder,
     document_id: uuid.UUID,
+    *,
+    raise_on_failure: bool = False,
 ) -> None:
     """Extract text, chunk, embed, and store pgvector rows for semantic search."""
     async with session_factory() as session:
@@ -242,6 +244,8 @@ async def embed_document(
                 doc.status_updated_at = datetime.now(timezone.utc)
                 doc.error = str(exc)[:1000]
                 await session.commit()
+            if raise_on_failure:
+                raise
 
 
 async def get_or_create_uploaded_source(session, engagement_id: uuid.UUID, kind):
