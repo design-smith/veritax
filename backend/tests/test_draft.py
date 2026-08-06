@@ -1,7 +1,8 @@
 import io
 import zipfile
 
-from app.drafting import SYSTEM_PROMPT
+from app.drafting import SYSTEM_PROMPT, FakeDrafter
+from app.main import app
 from app.requirements import resolve_requirements
 
 
@@ -54,6 +55,32 @@ async def test_start_draft_idempotent(client):
     assert r1.status_code == 201 and r2.status_code == 201
     sections = (await client.get(f"/engagements/{eid}/draft", params={"jurisdiction": "Canada"})).json()["sections"]
     assert len(sections) == 6  # not doubled
+
+
+async def test_draft_stops_after_section_failure(client):
+    class FirstSectionFailingDrafter(FakeDrafter):
+        def __init__(self) -> None:
+            self.calls = 0
+
+        def draft(self, element, register, documents, coverage_note, scope_note=""):
+            self.calls += 1
+            if self.calls == 1:
+                raise RuntimeError("provider failed")
+            return super().draft(element, register, documents, coverage_note, scope_note)
+
+    app.state.drafter = FirstSectionFailingDrafter()
+    eid = await _engagement_ready_for_draft(client, "Canada", b"placeholder")
+
+    started = await client.post(f"/engagements/{eid}/draft", params={"jurisdiction": "Canada"})
+
+    assert started.status_code == 201
+    got = (await client.get(f"/engagements/{eid}/draft", params={"jurisdiction": "Canada"})).json()
+    assert app.state.drafter.calls == 1
+    assert got["summary"]["pending"] == 0
+    assert got["summary"]["failed"] == len(resolve_requirements("Canada"))
+    assert got["sections"][0]["error"] == "provider failed"
+    assert all(section["status"] == "failed" for section in got["sections"])
+    assert all("Draft stopped" in section["error"] for section in got["sections"][1:])
 
 
 async def test_regenerate_section(client):

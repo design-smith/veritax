@@ -290,7 +290,7 @@ async def _draft_one(session: AsyncSession, section: DraftSection, element, docu
         result = await asyncio.to_thread(drafter.draft, element, REGISTER, documents, coverage_note, scope_note)
         await _write_result(session, section, result, fname_to_docid, documents)
         log.info("draft_one DONE section=%s '%s' in %.1fs", section.id, element.element_name, time.monotonic() - t0)
-    except Exception as exc:  # noqa: BLE001 - record failure per section, keep the loop going
+    except Exception as exc:  # noqa: BLE001 - record the section failure; caller stops the run
         log.exception("draft_one FAILED section=%s '%s' after %.1fs", section.id, element.element_name, time.monotonic() - t0)
         section.status = DraftStatus.failed
         section.status_updated_at = datetime.now(timezone.utc)
@@ -355,20 +355,32 @@ async def _draft_batch(session: AsyncSession, sections: list[DraftSection], elem
 async def _mark_pending_failed(session_factory: async_sessionmaker, engagement_id: uuid.UUID,
                                jurisdiction: str, error: str) -> None:
     async with session_factory() as session:
-        rows = (
-            await session.execute(
-                select(DraftSection).where(
-                    DraftSection.engagement_id == engagement_id,
-                    DraftSection.jurisdiction == jurisdiction,
-                    DraftSection.status.in_([DraftStatus.pending, DraftStatus.drafting]),
-                )
+        await _mark_open_sections_failed(session, engagement_id, jurisdiction, error)
+
+
+async def _mark_open_sections_failed(
+    session: AsyncSession,
+    engagement_id: uuid.UUID,
+    jurisdiction: str,
+    error: str,
+) -> int:
+    rows = (
+        await session.execute(
+            select(DraftSection).where(
+                DraftSection.engagement_id == engagement_id,
+                DraftSection.jurisdiction == jurisdiction,
+                DraftSection.status.in_([DraftStatus.pending, DraftStatus.drafting]),
             )
-        ).scalars().all()
-        for row in rows:
-            row.status = DraftStatus.failed
-            row.status_updated_at = datetime.now(timezone.utc)
-            row.error = error[:1000]
-        await session.commit()
+        )
+    ).scalars().all()
+    now = datetime.now(timezone.utc)
+    message = f"Draft stopped: {error}"[:1000]
+    for row in rows:
+        row.status = DraftStatus.failed
+        row.status_updated_at = now
+        row.error = message
+    await session.commit()
+    return len(rows)
 
 
 async def _find_drafted_twin(session: AsyncSession, engagement_id: uuid.UUID, element) -> DraftSection | None:
@@ -515,7 +527,18 @@ async def run_draft(session_factory: async_sessionmaker, drafter: Drafter, embed
                     section.status_updated_at = datetime.now(timezone.utc)
                     section.error = "requirement not found in seed"
                     await session.commit()
-                    continue
+                    stopped = await _mark_open_sections_failed(
+                        session, engagement_id, jurisdiction, section.error
+                    )
+                    log.info(
+                        "run_draft STOPPED engagement=%s jurisdiction=%s failed_section=%s stopped_sections=%d reason=%s",
+                        engagement_id,
+                        jurisdiction,
+                        section.id,
+                        stopped,
+                        section.error,
+                    )
+                    return
                 twin = await _find_drafted_twin(session, engagement_id, element)
                 if twin is not None and twin.id != section.id:
                     await _copy_draft(session, section, twin)
@@ -548,7 +571,7 @@ async def run_draft(session_factory: async_sessionmaker, drafter: Drafter, embed
                             context_chars(documents),
                             rss_mb(),
                         )
-                    except Exception as exc:  # noqa: BLE001 - provider/search failure affects one section
+                    except Exception as exc:  # noqa: BLE001 - provider/search failure stops this run
                         log.exception(
                             "run_draft: context retrieval FAILED order=%d key=%s",
                             section.element_order,
@@ -558,13 +581,35 @@ async def run_draft(session_factory: async_sessionmaker, drafter: Drafter, embed
                         section.status_updated_at = datetime.now(timezone.utc)
                         section.error = str(exc)[:1000]
                         await session.commit()
-                        continue
+                        stopped = await _mark_open_sections_failed(
+                            session, engagement_id, jurisdiction, section.error
+                        )
+                        log.info(
+                            "run_draft STOPPED engagement=%s jurisdiction=%s failed_section=%s stopped_sections=%d reason=%s",
+                            engagement_id,
+                            jurisdiction,
+                            section.id,
+                            stopped,
+                            section.error,
+                        )
+                        return
                     if not documents:
                         section.status = DraftStatus.failed
                         section.status_updated_at = datetime.now(timezone.utc)
                         section.error = "no retrieved source context for this section; add or re-index source material"
                         await session.commit()
-                        continue
+                        stopped = await _mark_open_sections_failed(
+                            session, engagement_id, jurisdiction, section.error
+                        )
+                        log.info(
+                            "run_draft STOPPED engagement=%s jurisdiction=%s failed_section=%s stopped_sections=%d reason=%s",
+                            engagement_id,
+                            jurisdiction,
+                            section.id,
+                            stopped,
+                            section.error,
+                        )
+                        return
                     await _draft_one(session, section, element, documents,
                                      notes.get(section.requirement_key, ""),
                                      assessment_scope_instruction(
@@ -572,6 +617,19 @@ async def run_draft(session_factory: async_sessionmaker, drafter: Drafter, embed
                                      ),
                                      drafter, fname_to_docid)
                     await session.commit()
+                    if section.status == DraftStatus.failed:
+                        stopped = await _mark_open_sections_failed(
+                            session, engagement_id, jurisdiction, section.error or "draft section failed"
+                        )
+                        log.info(
+                            "run_draft STOPPED engagement=%s jurisdiction=%s failed_section=%s stopped_sections=%d reason=%s",
+                            engagement_id,
+                            jurisdiction,
+                            section.id,
+                            stopped,
+                            section.error,
+                        )
+                        return
                     documents.clear()
                     gc.collect()
                 else:
@@ -590,6 +648,19 @@ async def run_draft(session_factory: async_sessionmaker, drafter: Drafter, embed
                                          ),
                                          drafter, fname_to_docid)
                         await session.commit()
+                        if section.status == DraftStatus.failed:
+                            stopped = await _mark_open_sections_failed(
+                                session, engagement_id, jurisdiction, section.error or "draft section failed"
+                            )
+                            log.info(
+                                "run_draft STOPPED engagement=%s jurisdiction=%s failed_section=%s stopped_sections=%d reason=%s",
+                                engagement_id,
+                                jurisdiction,
+                                section.id,
+                                stopped,
+                                section.error,
+                            )
+                            return
                         documents.clear()
                         gc.collect()
 

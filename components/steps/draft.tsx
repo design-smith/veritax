@@ -37,6 +37,10 @@ function isDraftComplete(draft: DraftResponse | null): draft is DraftResponse {
   return !!draft && draft.summary.total > 0 && draft.summary.pending === 0 && draft.summary.failed === 0
 }
 
+function hasDraftFailure(draft: DraftResponse | null | undefined): boolean {
+  return !!draft && (draft.summary.failed > 0 || draft.sections.some(section => section.status === "failed"))
+}
+
 function TypedDraftText({ text }: { text: string }) {
   const blocks = text.split(/\n{2,}/)
   return (
@@ -247,6 +251,17 @@ export default function DraftStep({ engagementId, jurisdictions, entity, onConti
     if (key) localStorage.setItem(key, "1")
   }, [typedDoneStorageKey])
 
+  const stopJurisdictions = useCallback((jurisdictionsToStop: string[]) => {
+    if (jurisdictionsToStop.length === 0) return
+    const stopping = new Set(jurisdictionsToStop)
+    startedRef.current = new Set([...startedRef.current].filter(j => !stopping.has(j)))
+    setStarted(new Set(startedRef.current))
+    if (startedRef.current.size === 0 && pollRef.current) {
+      clearTimeout(pollRef.current)
+      pollRef.current = null
+    }
+  }, [])
+
   const poll = useCallback(async () => {
     pollRef.current = null
     if (!engagementId) return
@@ -262,15 +277,25 @@ export default function DraftStep({ engagementId, jurisdictions, entity, onConti
       }
     }))
     const merged: Record<string, DraftResponse> = {}
+    const stopped: string[] = []
     for (const [j, d] of results) {
       if (!d) continue
-      if (d.summary.pending > 0) observedGeneratingRef.current.add(j)
-      if (isDraftComplete(d) && !observedGeneratingRef.current.has(j)) markTypedDone(j)
+      if (hasDraftFailure(d)) {
+        stopped.push(j)
+      } else if (d.summary.pending > 0) {
+        observedGeneratingRef.current.add(j)
+      } else if (isDraftComplete(d) && !observedGeneratingRef.current.has(j)) {
+        markTypedDone(j)
+      }
       merged[j] = d
     }
+    stopJurisdictions(stopped)
     setDraftByJuris(prev => ({ ...prev, ...merged }))
-    if (Object.values(merged).some(d => d.summary.pending > 0)) pollRef.current = setTimeout(poll, 1800)
-  }, [engagementId, markTypedDone])
+    const stoppedSet = new Set(stopped)
+    if (Object.entries(merged).some(([j, d]) => !stoppedSet.has(j) && d.summary.pending > 0 && !hasDraftFailure(d))) {
+      pollRef.current = setTimeout(poll, 1800)
+    }
+  }, [engagementId, markTypedDone, stopJurisdictions])
 
   const startJurisdiction = useCallback(async (j: string) => {
     if (!engagementId || !j || startedRef.current.has(j)) return
@@ -281,12 +306,18 @@ export default function DraftStep({ engagementId, jurisdictions, entity, onConti
         () => api.startDraft(engagementId, j),
         { retries: 2, recover: () => api.recoverPipeline(engagementId, true) },
       )
-      if (d.summary.pending > 0) observedGeneratingRef.current.add(j)
-      if (isDraftComplete(d) && !observedGeneratingRef.current.has(j)) markTypedDone(j)
+      if (hasDraftFailure(d)) {
+        stopJurisdictions([j])
+      } else if (d.summary.pending > 0) {
+        observedGeneratingRef.current.add(j)
+      } else if (isDraftComplete(d) && !observedGeneratingRef.current.has(j)) {
+        markTypedDone(j)
+      }
       setDraft(j, d)
-      if (d.summary.pending > 0 && !pollRef.current) pollRef.current = setTimeout(poll, 1200)
+      if (!hasDraftFailure(d) && d.summary.pending > 0 && !pollRef.current) pollRef.current = setTimeout(poll, 1200)
     } catch (e) {
       console.error("[veritax] failed to start draft:", e)
+      stopJurisdictions([j])
       const status = parseApiError(e).status
       if (status === 409) {
         openIssue(
@@ -309,7 +340,7 @@ export default function DraftStep({ engagementId, jurisdictions, entity, onConti
         )
       }
     }
-  }, [engagementId, markTypedDone, poll])
+  }, [engagementId, markTypedDone, poll, stopJurisdictions])
 
   // Process only the FIRST jurisdiction on entry; the rest start when selected.
   useEffect(() => {
@@ -361,10 +392,24 @@ export default function DraftStep({ engagementId, jurisdictions, entity, onConti
     if (!engagementId) return
     setRetrying(true)
     try {
+      failedIssueKeyRef.current = ""
+      startedRef.current = new Set(startedRef.current).add(activeJurisdiction)
+      setStarted(new Set(startedRef.current))
+      setTypedDoneByJuris(prev => ({ ...prev, [activeJurisdiction]: false }))
+      const key = typedDoneStorageKey(activeJurisdiction)
+      if (key) localStorage.removeItem(key)
       await runWithRetry(() => api.recoverPipeline(engagementId, true), { retries: 2 })
-      try { setDraft(activeJurisdiction, await api.getDraft(engagementId, activeJurisdiction)) }
+      let stopped = false
+      try {
+        const refreshed = await api.getDraft(engagementId, activeJurisdiction)
+        setDraft(activeJurisdiction, refreshed)
+        if (hasDraftFailure(refreshed)) {
+          stopped = true
+          stopJurisdictions([activeJurisdiction])
+        }
+      }
       catch (e) { console.error("[veritax] retry draft refresh failed:", e) }
-      if (!pollRef.current) pollRef.current = setTimeout(poll, 600)
+      if (!stopped && !pollRef.current) pollRef.current = setTimeout(poll, 600)
     } catch (e) {
       console.error("[veritax] draft retry failed:", e)
       void openIssueFromError(e, "recover draft pipeline", { label: "Try recovery again", onClick: retryDraft })
@@ -456,14 +501,16 @@ export default function DraftStep({ engagementId, jurisdictions, entity, onConti
           {jurisdictions.map(j => {
             const isActive = j === activeJurisdiction
             const d = draftByJuris[j]
-            const isStarted = started.has(j)
-            const processing = isStarted && (!d || d.summary.pending > 0)
+            const hasFailed = hasDraftFailure(d)
+            const isRunning = started.has(j)
+            const isStarted = isRunning || !!d
+            const processing = isRunning && !hasFailed && (!d || d.summary.pending > 0)
             return (
               <button key={j} type="button" onClick={() => selectJurisdiction(j)} title={isStarted ? undefined : "Not drafted yet — click to draft"} style={{
                 display: "inline-flex", alignItems: "center", gap: "0.375rem",
                 padding: "0.25rem 0.75rem", borderRadius: "9999px", border: "none", cursor: "pointer",
                 background: isActive ? "var(--color-background-primary-solid)" : isStarted ? "var(--alpha-06)" : "transparent",
-                color: isActive ? "var(--color-text-inverse)" : isStarted ? "var(--color-text-secondary)" : "var(--color-text-tertiary)",
+                color: isActive ? "var(--color-text-inverse)" : hasFailed ? "var(--color-text-danger-soft)" : isStarted ? "var(--color-text-secondary)" : "var(--color-text-tertiary)",
                 fontSize: "var(--font-text-xs-size)", fontWeight: "var(--font-weight-medium)",
                 opacity: isStarted ? 1 : 0.55, transition: "all var(--transition-duration-basic)",
               }}>
