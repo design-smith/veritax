@@ -41,6 +41,50 @@ function hasDraftFailure(draft: DraftResponse | null | undefined): boolean {
   return !!draft && (draft.summary.failed > 0 || draft.sections.some(section => section.status === "failed"))
 }
 
+function explainDraftError(error: string | null | undefined): string {
+  const message = error?.trim()
+  if (!message) return "No backend error returned."
+
+  const unusedCitation = message.match(/draft returned citation\(s\) not used in content:\s*(.+)$/i)
+  if (unusedCitation) {
+    return `Veritax rejected this section because source record(s) ${unusedCitation[1]} were not attached to any sentence in the draft. The citation trail is inconsistent, so the section was not accepted.`
+  }
+
+  const missingRecord = message.match(/draft has uncaptured citation marker\(s\):\s*(.+)$/i)
+  if (missingRecord) {
+    return `Veritax rejected this section because citation marker(s) ${missingRecord[1]} appear in the text but no matching source record was returned.`
+  }
+
+  const uncitedSentence = message.match(/draft factual sentence lacks inline citation:\s*(.+)$/i)
+  if (uncitedSentence) {
+    return `Veritax rejected this section because this factual sentence has no source citation: ${uncitedSentence[1]}`
+  }
+
+  const numberMismatch = message.match(/draft number '([^']+)' is not present in the cited quote/i)
+  if (numberMismatch) {
+    return `Veritax rejected this section because the number '${numberMismatch[1]}' is not present in the cited source quote.`
+  }
+
+  if (/draft returned empty content/i.test(message)) {
+    return "Veritax rejected this section because the model returned no draft text."
+  }
+
+  if (/draft returned no citations/i.test(message)) {
+    return "Veritax rejected this section because it did not include source citations. Every factual claim needs a cited source before it can be shown."
+  }
+
+  if (/draft content has no inline citation markers/i.test(message)) {
+    return "Veritax rejected this section because the draft text did not link its claims to citations."
+  }
+
+  const missingSourceText = message.match(/document citation \[(\d+)\] quote was not found in retrieved source context/i)
+  if (missingSourceText) {
+    return `Veritax rejected this section because citation [${missingSourceText[1]}] was not found in the retrieved source text. The evidence link could not be verified.`
+  }
+
+  return message
+}
+
 function TypedDraftText({ text }: { text: string }) {
   const blocks = text.split(/\n{2,}/)
   return (
@@ -175,7 +219,7 @@ function DraftGenerationPreview({ draft, entity, jurisdiction, complete, failedS
             </p>
             {failedSections[0] && (
               <p style={{ fontSize: "var(--font-text-xs-size)", color: "var(--color-text-secondary)", margin: 0, maxWidth: 520 }}>
-                {failedSections[0].element_name}: {failedSections[0].error || "No backend error returned."}
+                {failedSections[0].element_name}: {explainDraftError(failedSections[0].error)}
               </p>
             )}
             <button type="button" onClick={onRetry} disabled={retrying} style={{
@@ -377,7 +421,7 @@ export default function DraftStep({ engagementId, jurisdictions, entity, onConti
           if (first) openIssue({
             title: "Incomplete section",
             message: `${first.element_order}. ${first.element_name} is ${first.status}.`,
-            detail: first.error || "Finish the draft before exporting a complete Word file.",
+            detail: first.error ? explainDraftError(first.error) : "Finish the draft before exporting a complete Word file.",
             tone: "caution",
             diagnostics: { operation: "show incomplete section", engagementId, jurisdiction: activeJurisdiction, sectionId: first.id },
           }, { label: "Retry draft", onClick: retryDraft })
@@ -444,7 +488,7 @@ export default function DraftStep({ engagementId, jurisdictions, entity, onConti
       {
         title: "Draft section failed",
         message: `${failedSections.length} section${failedSections.length === 1 ? "" : "s"} could not be drafted.`,
-        detail: first ? `${first.element_name}: ${first.error || "No backend error returned."}` : "Retry the draft pipeline.",
+        detail: first ? `${first.element_name}: ${explainDraftError(first.error)}` : "Retry the draft pipeline.",
         tone: "caution",
         diagnostics: {
           operation: "draft failed sections",

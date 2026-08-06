@@ -59,7 +59,7 @@ def test_draft_validation_rejects_ungrounded_output():
         "content": "Revenue is 99.0.[1]",
         "citations": [{"marker": 1, "kind": "document", "source_label": "fin.pdf", "quote": "Revenue was 99.0 in 2024"}],
     })
-    with pytest.raises(RuntimeError, match="quote was not found"):
+    with pytest.raises(RuntimeError, match="retrieved source text"):
         _validate_draft_result(result, DOCS, FNAME)
 
 
@@ -68,7 +68,7 @@ def test_draft_validation_rejects_uncited_factual_sentence():
         "content": "Revenue was stable.[1] Margin improved without a citation.",
         "citations": [{"marker": 1, "kind": "document", "source_label": "fin.pdf", "quote": "Revenue was 42.0 in 2024"}],
     })
-    with pytest.raises(RuntimeError, match="lacks inline citation"):
+    with pytest.raises(RuntimeError, match="no source citation"):
         _validate_draft_result(result, DOCS, FNAME)
 
 
@@ -77,7 +77,19 @@ def test_draft_validation_rejects_number_not_in_cited_quote():
         "content": "Revenue was 99.0 in 2024.[1]",
         "citations": [{"marker": 1, "kind": "document", "source_label": "fin.pdf", "quote": "Revenue was 42.0 in 2024"}],
     })
-    with pytest.raises(RuntimeError, match="not present in the cited quote"):
+    with pytest.raises(RuntimeError, match="not present in the cited source quote"):
+        _validate_draft_result(result, DOCS, FNAME)
+
+
+def test_draft_validation_explains_unused_source_record():
+    result = _draft_result_from({
+        "content": "Revenue was 42.0 in 2024.[1]",
+        "citations": [
+            {"marker": 1, "kind": "document", "source_label": "fin.pdf", "quote": "Revenue was 42.0 in 2024"},
+            {"marker": 6, "kind": "document", "source_label": "fin.pdf", "quote": "margin was 3.1 percent"},
+        ],
+    })
+    with pytest.raises(RuntimeError, match="not attached to any sentence"):
         _validate_draft_result(result, DOCS, FNAME)
 
 
@@ -86,5 +98,5 @@ def test_draft_validation_rejects_missing_citation_marker_record():
         "content": "Revenue is 42.0.[1]",
         "citations": [],
     })
-    with pytest.raises(RuntimeError, match="no citations"):
+    with pytest.raises(RuntimeError, match="source citations"):
         _validate_draft_result(result, DOCS, FNAME)

@@ -103,61 +103,65 @@ def _number_key(value: str) -> str:
     return re.sub(r"\D", "", value)
 
 
+def _marker_refs(markers: set[int]) -> str:
+    return ", ".join(f"[{marker}]" for marker in sorted(markers))
+
+
 def _validate_draft_result(result: DraftResult, documents: list[DocContext], fname_to_docid: dict[str, str]) -> None:
     content = result.content or ""
     if not content.strip():
-        raise RuntimeError("draft returned empty content")
+        raise RuntimeError("Veritax rejected this section because the model returned no draft text.")
     if not result.citations:
-        raise RuntimeError("draft returned no citations")
+        raise RuntimeError("Veritax rejected this section because it did not include source citations. Every factual claim needs a cited source before it can be shown.")
 
     content_markers = {int(m.group(1)) for m in _INLINE_MARKER.finditer(content)}
     citation_markers = {c.marker for c in result.citations}
     if not content_markers:
-        raise RuntimeError("draft content has no inline citation markers")
+        raise RuntimeError("Veritax rejected this section because the draft text did not link its claims to citations.")
     missing_records = content_markers - citation_markers
     missing_inline = citation_markers - content_markers
     if missing_records:
-        raise RuntimeError(f"draft has uncaptured citation marker(s): {sorted(missing_records)}")
+        raise RuntimeError(f"Veritax rejected this section because citation marker(s) {_marker_refs(missing_records)} appear in the text but no matching source record was returned.")
     if missing_inline:
-        raise RuntimeError(f"draft returned citation(s) not used in content: {sorted(missing_inline)}")
+        raise RuntimeError(f"Veritax rejected this section because source record(s) {_marker_refs(missing_inline)} were not attached to any sentence in the draft. The citation trail is inconsistent, so the section was not accepted.")
     citation_by_marker = {c.marker: c for c in result.citations}
 
     for sentence in _substantive_sentences(content):
         markers = {int(m.group(1)) for m in _INLINE_MARKER.finditer(sentence)}
         if not markers:
-            raise RuntimeError(f"draft factual sentence lacks inline citation: {sentence[:160]}")
+            raise RuntimeError(f"Veritax rejected this section because this factual sentence has no source citation: {sentence[:160]}")
         quote_text = " ".join(citation_by_marker[m].quote for m in markers if m in citation_by_marker)
         scrubbed = _OBJECT_MARKER.sub("", _INLINE_MARKER.sub("", sentence))
         for number in _NUMERIC_TOKEN.findall(scrubbed):
             key = _number_key(number)
             if key and key not in _number_key(quote_text):
-                raise RuntimeError(f"draft number '{number.strip()}' is not present in the cited quote")
+                raise RuntimeError(f"Veritax rejected this section because the number '{number.strip()}' is not present in the cited source quote.")
 
     table_ids = {str(t.get("id")) for t in result.tables}
     chart_ids = {str(c.get("id")) for c in result.charts}
     for kind, obj_id in _OBJECT_MARKER.findall(content):
         if kind == "table" and obj_id not in table_ids:
-            raise RuntimeError(f"draft referenced missing table: {obj_id}")
+            raise RuntimeError(f"Veritax rejected this section because it refers to table '{obj_id}', but the model did not return that table data.")
         if kind == "chart" and obj_id not in chart_ids:
-            raise RuntimeError(f"draft referenced missing chart: {obj_id}")
+            raise RuntimeError(f"Veritax rejected this section because it refers to chart '{obj_id}', but the model did not return that chart data.")
 
     fname_ci = {name.lower(): doc_id for name, doc_id in fname_to_docid.items()}
     docs = _doc_by_label(documents)
     for citation in result.citations:
         if citation.kind == "web":
             if not citation.url:
-                raise RuntimeError(f"web citation [{citation.marker}] is missing a URL")
+                raise RuntimeError(f"Veritax rejected this section because web citation [{citation.marker}] is missing its URL.")
             continue
         if citation.kind != "document":
-            raise RuntimeError(f"unsupported citation kind for [{citation.marker}]: {citation.kind}")
+            raise RuntimeError(f"Veritax rejected this section because citation [{citation.marker}] has unsupported source type '{citation.kind}'.")
         if citation.source_label not in fname_to_docid and citation.source_label.lower() not in fname_ci:
-            raise RuntimeError(f"document citation [{citation.marker}] does not map to an uploaded document: {citation.source_label}")
+            raise RuntimeError(f"Veritax rejected this section because citation [{citation.marker}] points to '{citation.source_label}', which does not match an uploaded document.")
         quote = _norm(citation.quote)
         if len(quote) < 16:
-            raise RuntimeError(f"document citation [{citation.marker}] quote is too short to verify")
+            raise RuntimeError(f"Veritax rejected this section because citation [{citation.marker}] does not include enough quoted source text to verify the claim.")
         doc = docs.get(citation.source_label) or docs.get(citation.source_label.lower())
         if doc is not None and quote not in _norm(doc.text):
-            raise RuntimeError(f"document citation [{citation.marker}] quote was not found in retrieved source context")
+            raise RuntimeError(f"Veritax rejected this section because citation [{citation.marker}] was not found in the retrieved source text. The evidence link could not be verified.")
 
 
 # ── Read helpers ─────────────────────────────────────────────────────────────

@@ -87,6 +87,12 @@ export function ActionModal({ issue, onClose }: {
     closeOnClick: false,
   } : null
   const secondary = issue.secondaryAction ?? diagnosticsAction
+  const primaryVariant = issue.primaryAction.variant ?? "solid"
+  const primaryButtonStyle = primaryVariant === "solid"
+    ? { background: "var(--color-background-primary-solid)", color: "var(--color-text-inverse)" }
+    : primaryVariant === "danger"
+      ? { background: "var(--color-background-danger-solid)", color: "var(--color-text-inverse)" }
+      : undefined
 
   return createPortal(
     <div
@@ -158,7 +164,8 @@ export function ActionModal({ issue, onClose }: {
               <Button
                 type="button"
                 size="sm"
-                variant={issue.primaryAction.variant ?? "solid"}
+                variant={primaryVariant}
+                style={primaryButtonStyle}
                 loading={pendingAction === issue.primaryAction.label}
                 onClick={() => void runAction(issue.primaryAction.label, issue.primaryAction.closeOnClick, issue.primaryAction.onClick)}
               >
