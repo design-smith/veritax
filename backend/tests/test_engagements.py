@@ -13,6 +13,7 @@ async def test_patch_stores_entity_and_jurisdictions(client):
             "entity_name": "GlobalTech Netherlands BV",
             "jurisdictions": ["Netherlands", "Germany", "Netherlands"],
             "website_url": "https://globaltech.example",
+            "selected_source_kinds": ["public", "interview"],
         },
     )
     assert r.status_code == 200
@@ -20,10 +21,26 @@ async def test_patch_stores_entity_and_jurisdictions(client):
     assert body["entity_name"] == "GlobalTech Netherlands BV"
     assert sorted(body["jurisdictions"]) == ["Germany", "Netherlands"]  # de-duped
     assert body["website_url"] == "https://globaltech.example"
+    assert body["selected_source_kinds"] == ["public", "interview"]
 
     got = (await client.get(f"/engagements/{eid}")).json()
     assert got["entity_name"] == "GlobalTech Netherlands BV"
     assert sorted(got["jurisdictions"]) == ["Germany", "Netherlands"]
+    assert got["website_url"] == "https://globaltech.example"
+    assert got["selected_source_kinds"] == ["public", "interview"]
+
+
+async def test_engagement_read_hydrates_selected_sources_from_saved_sources(client):
+    eid = (await client.post("/engagements")).json()["id"]
+    await client.post(
+        f"/engagements/{eid}/sources",
+        json={"kind": "interview", "origin": "connected", "connector_provider": "fireflies"},
+    )
+
+    got = (await client.get(f"/engagements/{eid}")).json()
+    assert got["selected_source_kinds"] == ["interview"]
+    assert got["sources"][0]["kind"] == "interview"
+    assert got["sources"][0]["connector_provider"] == "fireflies"
 
 
 async def test_patch_reuses_existing_entity(client):

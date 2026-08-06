@@ -59,6 +59,10 @@ async def init_db(eng=engine) -> None:
             await conn.execute(text("ALTER TABLE engagements ADD COLUMN IF NOT EXISTS user_id uuid"))
             await conn.execute(text("CREATE INDEX IF NOT EXISTS ix_engagements_user_id ON engagements (user_id)"))
             await conn.execute(text(
+                "ALTER TABLE engagements ADD COLUMN IF NOT EXISTS selected_source_kinds "
+                "jsonb NOT NULL DEFAULT '[]'::jsonb"
+            ))
+            await conn.execute(text(
                 "ALTER TABLE documents ADD COLUMN IF NOT EXISTS status_updated_at "
                 "timestamp with time zone DEFAULT now()"
             ))

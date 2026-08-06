@@ -92,6 +92,7 @@ export interface Engagement {
   entity_name: string | null
   jurisdictions: string[]
   website_url: string | null
+  selected_source_kinds: SourceKind[]
   sources: EngagementSource[]
 }
 
@@ -338,7 +339,7 @@ export const api = {
 
   patchEngagement: (
     id: string,
-    body: { entity_name?: string; jurisdictions?: string[]; website_url?: string },
+    body: { entity_name?: string; jurisdictions?: string[]; website_url?: string; selected_source_kinds?: SourceKind[] },
   ): Promise<unknown> =>
     afetch(`${BASE}/engagements/${id}`, {
       method: "PATCH",

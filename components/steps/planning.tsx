@@ -17,17 +17,36 @@ import {
 
 export type SourceId = "financials" | "agreements" | "public" | "interview"
 export type PlanningDocumentMap = Partial<Record<SourceId, DocumentRead[]>>
+export type PlanningSourceRow = {
+  id: string
+  kind: SourceId
+  origin: string
+  connector_provider: string | null
+  url: string | null
+}
 
 // Provides the persisted engagement id to nested source inputs (upload zones, connector grid).
 const PlanningCtx = createContext<{
   engagementId: string | null
   documentsByKind: PlanningDocumentMap
   updateDocuments: (kind: SourceId, updater: (docs: DocumentRead[]) => DocumentRead[]) => void
+  sourceRows: PlanningSourceRow[]
+  rememberSourceRow: (source: PlanningSourceRow) => void
+  selectedSources: Set<SourceId>
+  websiteUrl: string
+  onWebsiteUrlChange: (url: string) => void
+  persistSelectedSources: (next: Set<SourceId>, nextWebsiteUrl?: string) => void
   showIssue: (base: ActionableIssueBase, primaryAction: ActionableIssue["primaryAction"], secondaryAction?: ActionableIssue["secondaryAction"]) => void
 }>({
   engagementId: null,
   documentsByKind: {},
   updateDocuments: () => {},
+  sourceRows: [],
+  rememberSourceRow: () => {},
+  selectedSources: new Set(),
+  websiteUrl: "",
+  onWebsiteUrlChange: () => {},
+  persistSelectedSources: () => {},
   showIssue: () => {},
 })
 
@@ -380,7 +399,7 @@ function OrDivider() {
 }
 
 function ConnectorGrid({ kind, connectors }: { kind: SourceId; connectors: Connector[] }) {
-  const { engagementId, showIssue } = useContext(PlanningCtx)
+  const { engagementId, sourceRows, rememberSourceRow, selectedSources, persistSelectedSources, showIssue } = useContext(PlanningCtx)
   const [connected, setConnected] = useState<Set<string>>(new Set())
   const [statusByProvider, setStatusByProvider] = useState<Record<string, string>>({})
 
@@ -391,13 +410,29 @@ function ConnectorGrid({ kind, connectors }: { kind: SourceId; connectors: Conne
       .catch(() => {})
   }, [])
 
+  useEffect(() => {
+    const savedProviders = new Set(
+      sourceRows
+        .filter(source => source.kind === kind && source.origin === "connected" && source.connector_provider)
+        .map(source => source.connector_provider!.toLowerCase()),
+    )
+    setConnected(new Set(connectors.filter(c => savedProviders.has(c.name.toLowerCase())).map(c => c.name)))
+  }, [connectors, kind, sourceRows])
+
   async function recordConnector(name: string) {
     if (!engagementId) return
     try {
-      await runWithRetry(
+      const source = await runWithRetry(
         () => api.createSource(engagementId, { kind, origin: "connected", connector_provider: name.toLowerCase() }),
         { retries: 1 },
       )
+      rememberSourceRow({
+        id: source.id,
+        kind,
+        origin: "connected",
+        connector_provider: name.toLowerCase(),
+        url: null,
+      })
     } catch (err) {
       console.error("[veritax] failed to record connected source:", err)
       const base = await diagnoseApiFailure(err, { operation: "save connector source", engagementId })
@@ -413,6 +448,9 @@ function ConnectorGrid({ kind, connectors }: { kind: SourceId; connectors: Conne
     const on = connected.has(name)
     setConnected(p => { const s = new Set(p); on ? s.delete(name) : s.add(name); return s })
     if (!on && engagementId) {
+      const nextSources = new Set(selectedSources)
+      nextSources.add(kind)
+      persistSelectedSources(nextSources)
       // Record a connected-source stub (no OAuth yet).
       void recordConnector(name)
     }
@@ -481,27 +519,20 @@ function AgreementsInput() {
 }
 
 function WebsiteInput() {
-  const { engagementId, showIssue } = useContext(PlanningCtx)
-  const [url, setUrl] = useState("")
+  const { selectedSources, websiteUrl, onWebsiteUrlChange, persistSelectedSources } = useContext(PlanningCtx)
 
   async function saveUrl() {
-    if (!engagementId) return
-    try {
-      await runWithRetry(() => api.patchEngagement(engagementId, { website_url: url.trim() }), { retries: 1 })
-    } catch (err) {
-      console.error("[veritax] failed to save website url:", err)
-      const base = await diagnoseApiFailure(err, { operation: "save website URL", engagementId })
-      showIssue(
-        base,
-        { label: "Retry save", onClick: () => void saveUrl() },
-        { label: "Cancel", onClick: () => {}, variant: "ghost" },
-      )
-    }
+    const trimmed = websiteUrl.trim()
+    onWebsiteUrlChange(trimmed)
+    const nextSources = new Set(selectedSources)
+    if (trimmed) nextSources.add("public")
+    else nextSources.delete("public")
+    persistSelectedSources(nextSources, trimmed)
   }
 
   return (
     <div style={{ paddingLeft: "2rem", display: "flex", flexDirection: "column", gap: "0.5rem" }}>
-      <input type="url" placeholder="https://example.com" value={url} onChange={e => setUrl(e.target.value)}
+      <input type="url" placeholder="https://example.com" value={websiteUrl} onChange={e => onWebsiteUrlChange(e.target.value)}
         onFocus={e => { e.currentTarget.style.borderColor = "var(--input-outline-border-color-focus)" }}
         onBlur={e => { e.currentTarget.style.borderColor = "var(--input-outline-border-color)"; void saveUrl() }}
         style={OUTLINE_INPUT} />
@@ -538,6 +569,8 @@ export default function PlanningStep({
   jurisdictions, onJurisdictionsChange,
   entity, onEntityChange,
   documentsByKind, updateDocuments,
+  sourceRows, rememberSourceRow,
+  websiteUrl, onWebsiteUrlChange,
   sources, onSourcesChange, onContinue,
 }: {
   engagementId: string | null
@@ -547,6 +580,10 @@ export default function PlanningStep({
   onEntityChange: (v: string) => void
   documentsByKind: PlanningDocumentMap
   updateDocuments: (kind: SourceId, updater: (docs: DocumentRead[]) => DocumentRead[]) => void
+  sourceRows: PlanningSourceRow[]
+  rememberSourceRow: (source: PlanningSourceRow) => void
+  websiteUrl: string
+  onWebsiteUrlChange: (url: string) => void
   sources: Set<SourceId>
   onSourcesChange: (v: Set<SourceId>) => void
   onContinue: () => void
@@ -560,6 +597,26 @@ export default function PlanningStep({
     secondaryAction?: ActionableIssue["secondaryAction"],
   ) {
     setIssue(withActions(base, primaryAction, secondaryAction))
+  }
+
+  function persistSelectedSources(next: Set<SourceId>, nextWebsiteUrl = websiteUrl) {
+    onSourcesChange(new Set(next))
+    if (!engagementId) return
+    runWithRetry(
+      () => api.patchEngagement(engagementId, {
+        selected_source_kinds: Array.from(next),
+        website_url: nextWebsiteUrl,
+      }),
+      { retries: 1 },
+    ).catch(async err => {
+      console.error("[veritax] failed to save planning source selection:", err)
+      const base = await diagnoseApiFailure(err, { operation: "save planning source selection", engagementId })
+      showIssue(
+        base,
+        { label: "Retry save", onClick: () => persistSelectedSources(next, nextWebsiteUrl) },
+        { label: "Cancel", onClick: () => {}, variant: "ghost" },
+      )
+    })
   }
 
   useEffect(() => {
@@ -578,13 +635,30 @@ export default function PlanningStep({
 
   const toggle = (id: SourceId) => {
     const next = new Set(sources)
-    next.has(id) ? next.delete(id) : next.add(id)
-    onSourcesChange(next)
+    const removing = next.has(id)
+    removing ? next.delete(id) : next.add(id)
+    let nextWebsiteUrl = websiteUrl
+    if (id === "public" && removing) {
+      nextWebsiteUrl = ""
+      onWebsiteUrlChange("")
+    }
+    persistSelectedSources(next, nextWebsiteUrl)
   }
   const canContinue = jurisdictions.length > 0 && entity.trim().length > 0 && sources.size > 0
 
   return (
-    <PlanningCtx.Provider value={{ engagementId, documentsByKind, updateDocuments, showIssue }}>
+    <PlanningCtx.Provider value={{
+      engagementId,
+      documentsByKind,
+      updateDocuments,
+      sourceRows,
+      rememberSourceRow,
+      selectedSources: sources,
+      websiteUrl,
+      onWebsiteUrlChange,
+      persistSelectedSources,
+      showIssue,
+    }}>
     <main style={{ flex: 1, display: "flex", flexDirection: "column", padding: "3rem 3.5rem", maxWidth: 760, overflowY: "auto" }}>
       <div style={{ display: "flex", alignItems: "flex-end", gap: "0.75rem", marginBottom: "2.5rem" }}>
         <div style={{ flex: "0 0 240px" }}>

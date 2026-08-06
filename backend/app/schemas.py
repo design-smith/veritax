@@ -28,6 +28,7 @@ class EngagementPatch(BaseModel):
     entity_name: str | None = None
     jurisdictions: list[str] | None = None
     website_url: str | None = None
+    selected_source_kinds: list[SourceKind] | None = None
 
 
 class DocumentRead(BaseModel):
@@ -64,6 +65,7 @@ class EngagementRead(BaseModel):
     entity_name: str | None
     jurisdictions: list[str]
     website_url: str | None
+    selected_source_kinds: list[SourceKind]
     sources: list[SourceRead]
 
 

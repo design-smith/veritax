@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react"
 import { createPortal } from "react-dom"
+import { CircleAlert } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Animate } from "@/components/ui/transition"
 import { type ActionableIssue, copyDiagnostics } from "@/lib/actionable-errors"
@@ -76,9 +77,9 @@ export function ActionModal({ issue, onClose }: {
     }
   }
 
-  const stripColor = issue.tone === "danger"
-    ? "var(--color-background-danger-solid)"
-    : "var(--color-background-caution-solid)"
+  const iconColor = issue.tone === "danger"
+    ? "var(--color-text-danger-soft)"
+    : "var(--color-text-warning-soft)"
   const diagnosticsAction = issue.diagnostics ? {
     label: "Copy diagnostics",
     onClick: () => copyDiagnostics(issue),
@@ -101,7 +102,7 @@ export function ActionModal({ issue, onClose }: {
         alignItems: "center",
         justifyContent: "center",
         padding: "1.25rem",
-        background: "rgba(0,0,0,0.22)",
+        background: "rgb(0 0 0 / 18%)",
       }}
     >
       <Animate enter="scale" duration={150}>
@@ -112,22 +113,31 @@ export function ActionModal({ issue, onClose }: {
           aria-labelledby={titleId}
           aria-describedby={descId}
           style={{
-            width: "min(440px, calc(100vw - 2rem))",
-            overflow: "hidden",
-            borderRadius: "var(--radius-lg)",
+            width: "min(420px, calc(100vw - 2rem))",
+            borderRadius: "var(--radius-md)",
             border: "1px solid var(--color-border)",
-            background: "var(--color-surface)",
-            boxShadow: "var(--shadow-500)",
+            background: "var(--color-surface-elevated)",
+            boxShadow: "var(--shadow-400)",
+            padding: "1.25rem",
           }}
         >
-          <div style={{ height: 4, background: stripColor }} />
-          <div style={{ padding: "1.125rem 1.25rem 1.25rem" }}>
-            <h2 id={titleId} style={{ margin: "0 0 0.5rem", fontSize: "var(--font-text-lg-size)", fontWeight: "var(--font-weight-semibold)", color: "var(--color-text)", lineHeight: 1.3 }}>
-              {issue.title}
-            </h2>
-            <p id={descId} style={{ margin: 0, fontSize: "var(--font-text-sm-size)", color: "var(--color-text-secondary)", lineHeight: 1.6 }}>
-              {issue.message}
-            </p>
+          <div style={{ display: "flex", alignItems: "flex-start", gap: "0.625rem" }}>
+            <CircleAlert
+              aria-hidden="true"
+              size={17}
+              strokeWidth={1.7}
+              style={{ color: iconColor, flexShrink: 0, marginTop: 2 }}
+            />
+            <div style={{ minWidth: 0, flex: 1 }}>
+              <h2 id={titleId} style={{ margin: "0 0 0.375rem", fontSize: "var(--font-text-md-size)", fontWeight: "var(--font-weight-medium)", color: "var(--color-text)", lineHeight: 1.35 }}>
+                {issue.title}
+              </h2>
+              <p id={descId} style={{ margin: 0, fontSize: "var(--font-text-sm-size)", color: "var(--color-text-secondary)", lineHeight: 1.55 }}>
+                {issue.message}
+              </p>
+            </div>
+          </div>
+          <div style={{ paddingLeft: "1.625rem" }}>
             {issue.detail && (
               <p style={{ margin: "0.625rem 0 0", fontSize: "var(--font-text-xs-size)", color: "var(--color-text-tertiary)", lineHeight: 1.55 }}>
                 {issue.detail}
@@ -148,7 +158,7 @@ export function ActionModal({ issue, onClose }: {
               <Button
                 type="button"
                 size="sm"
-                variant={issue.primaryAction.variant ?? (issue.tone === "danger" ? "danger" : "solid")}
+                variant={issue.primaryAction.variant ?? "solid"}
                 loading={pendingAction === issue.primaryAction.label}
                 onClick={() => void runAction(issue.primaryAction.label, issue.primaryAction.closeOnClick, issue.primaryAction.onClick)}
               >

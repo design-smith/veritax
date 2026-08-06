@@ -4,7 +4,7 @@ import { useCallback, useEffect, useRef, useState, type CSSProperties } from "re
 import { useRouter } from "next/navigation"
 import dynamic from "next/dynamic"
 import { Activity, CalendarDays, ChevronDown, FileText, PanelLeftClose, PanelLeftOpen, ShieldCheck } from "lucide-react"
-import PlanningStep, { type PlanningDocumentMap, type SourceId } from "@/components/steps/planning"
+import PlanningStep, { type PlanningDocumentMap, type PlanningSourceRow, type SourceId } from "@/components/steps/planning"
 import RequirementsStep from "@/components/steps/requirements"
 import DraftStep from "@/components/steps/draft"
 import RisksStep from "@/components/steps/risks"
@@ -67,6 +67,30 @@ function planningDocumentsFromEngagement(engagement: Engagement): PlanningDocume
     documents[kind] = [...(documents[kind] ?? []), ...source.documents]
   }
   return documents
+}
+
+function planningSourceRowsFromEngagement(engagement: Engagement): PlanningSourceRow[] {
+  return engagement.sources
+    .filter(source => PLANNING_SOURCES.has(source.kind as SourceId))
+    .map(source => ({
+      id: source.id,
+      kind: source.kind as SourceId,
+      origin: source.origin,
+      connector_provider: source.connector_provider,
+      url: source.url,
+    }))
+}
+
+function planningSourcesFromEngagement(engagement: Engagement): Set<SourceId> {
+  const selected = new Set<SourceId>()
+  for (const kind of engagement.selected_source_kinds ?? []) {
+    if (PLANNING_SOURCES.has(kind as SourceId)) selected.add(kind as SourceId)
+  }
+  for (const source of engagement.sources) {
+    if (PLANNING_SOURCES.has(source.kind as SourceId)) selected.add(source.kind as SourceId)
+  }
+  if (engagement.website_url) selected.add("public")
+  return selected
 }
 
 function canonicalizePlanningUrl() {
@@ -219,6 +243,8 @@ export default function Page() {
   const [jurisdictions, setJ] = useState<string[]>([])
   const [entity, setEntity]   = useState("")
   const [sources, setSources] = useState<Set<SourceId>>(new Set())
+  const [websiteUrl, setWebsiteUrl] = useState("")
+  const [planningSourceRows, setPlanningSourceRows] = useState<PlanningSourceRow[]>([])
   const [planningDocuments, setPlanningDocuments] = useState<PlanningDocumentMap>(EMPTY_PLANNING_DOCUMENTS)
   const [engagementId, setEngagementId] = useState<string | null>(null)
   // Deep-link from a Requirements row to the draft section that fulfils it.
@@ -279,7 +305,9 @@ export default function Page() {
       if (seq !== undefined && seq !== engagementLoadSeq.current) return false
       setEntity(eng.entity_name ?? "")
       setJ(eng.jurisdictions)
-      setSources(new Set(eng.sources.map(s => s.kind).filter((k): k is SourceId => PLANNING_SOURCES.has(k as SourceId))))
+      setSources(planningSourcesFromEngagement(eng))
+      setWebsiteUrl(eng.website_url ?? "")
+      setPlanningSourceRows(planningSourceRowsFromEngagement(eng))
       setPlanningDocuments(planningDocumentsFromEngagement(eng))
       setEngagementId(id)
       localStorage.setItem(LS_ID, id)
@@ -298,6 +326,14 @@ export default function Page() {
       ...prev,
       [kind]: updater(prev[kind] ?? []),
     }))
+  }, [])
+
+  const rememberPlanningSourceRow = useCallback((source: PlanningSourceRow) => {
+    setPlanningSourceRows(prev => (
+      prev.some(existing => existing.id === source.id)
+        ? prev
+        : [...prev, source]
+    ))
   }, [])
 
   // Resume the file being worked on (or start a fresh one), then load the library.
@@ -346,6 +382,9 @@ export default function Page() {
           const { id } = await api.createEngagement()  // uploads need an id to attach to
           if (cancelled) return
           setPlanningDocuments(EMPTY_PLANNING_DOCUMENTS)
+          setPlanningSourceRows([])
+          setWebsiteUrl("")
+          setSources(new Set())
           setEngagementId(id)
           localStorage.setItem(LS_ID, id)
         } catch (error) {
@@ -401,6 +440,8 @@ export default function Page() {
     // Start a fresh Local File pipeline: jump into Planning immediately, then create the engagement
     // in the background so the pipeline shows instantly even if the create call is slow.
     setEntity(""); setJ([]); setSources(new Set()); setDraftJump(null); setDraftReady(false)
+    setWebsiteUrl("")
+    setPlanningSourceRows([])
     setPlanningDocuments(EMPTY_PLANNING_DOCUMENTS)
     setVisited(new Set([1])); setStep(1); setMounted(new Set([1]))
     setPage("workflow")
@@ -421,6 +462,8 @@ export default function Page() {
     setEntity(file.entity_name ?? "")
     setJ(file.jurisdictions)
     setSources(new Set())
+    setWebsiteUrl("")
+    setPlanningSourceRows([])
     setPlanningDocuments(EMPTY_PLANNING_DOCUMENTS)
     setEngagementId(id)
     localStorage.setItem(LS_ID, id)
@@ -430,9 +473,7 @@ export default function Page() {
     setStep(2)                          // land on Requirements so progress is visible
     setDraftJump(null)
     setPage("workflow")
-    if (id !== engagementId) {
-      void loadEngagement(id, seq)
-    }
+    void loadEngagement(id, seq)
   }
 
   async function signOut() {
@@ -455,7 +496,12 @@ export default function Page() {
 
   function continueFromPlanning() {
     if (engagementId) {
-      api.patchEngagement(engagementId, { entity_name: entity, jurisdictions })
+      api.patchEngagement(engagementId, {
+        entity_name: entity,
+        jurisdictions,
+        website_url: websiteUrl.trim(),
+        selected_source_kinds: Array.from(sources),
+      })
         .then(refreshFiles)  // the newly-named file now shows in the library
         .catch(error => {
           logAppError("save planning scope", error)
@@ -737,6 +783,10 @@ export default function Page() {
                 entity={entity}              onEntityChange={setEntity}
                 documentsByKind={planningDocuments}
                 updateDocuments={updatePlanningDocuments}
+                sourceRows={planningSourceRows}
+                rememberSourceRow={rememberPlanningSourceRow}
+                websiteUrl={websiteUrl}
+                onWebsiteUrlChange={setWebsiteUrl}
                 sources={sources}            onSourcesChange={setSources}
                 onContinue={continueFromPlanning}
               />

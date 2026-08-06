@@ -133,6 +133,7 @@ class Engagement(Base):
     user_id: Mapped[uuid.UUID | None] = mapped_column(nullable=True, index=True)
     entity_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("entities.id"), nullable=True)
     website_url: Mapped[str | None] = mapped_column(Text, nullable=True)
+    selected_source_kinds: Mapped[list[str]] = mapped_column(JSONB, nullable=False, default=list)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()

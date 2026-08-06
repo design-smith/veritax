@@ -8,10 +8,32 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..auth import AuthUser
 from ..deps import assert_owner, get_current_user, get_session
-from ..models import Document, Engagement, EngagementJurisdiction, Entity, Source
+from ..models import Document, Engagement, EngagementJurisdiction, Entity, Source, SourceKind
 from ..schemas import DocumentRead, EngagementPatch, EngagementRead, EngagementSummary, IdResponse, SourceRead
 
 router = APIRouter(prefix="/engagements", tags=["engagements"])
+
+PLANNING_SOURCE_KINDS = (
+    SourceKind.financials,
+    SourceKind.agreements,
+    SourceKind.public,
+    SourceKind.interview,
+)
+
+
+def _normalize_selected_source_kinds(values: list[SourceKind | str] | None) -> list[SourceKind]:
+    selected: list[SourceKind] = []
+    seen: set[SourceKind] = set()
+    for raw in values or []:
+        try:
+            kind = raw if isinstance(raw, SourceKind) else SourceKind(raw)
+        except ValueError:
+            continue
+        if kind not in PLANNING_SOURCE_KINDS or kind in seen:
+            continue
+        selected.append(kind)
+        seen.add(kind)
+    return selected
 
 
 async def _to_read(
@@ -19,6 +41,7 @@ async def _to_read(
     engagement_id: uuid.UUID,
     entity_id: uuid.UUID | None,
     website_url: str | None,
+    selected_source_kinds: list[str] | None,
 ) -> EngagementRead:
     entity_name = None
     if entity_id:
@@ -80,11 +103,20 @@ async def _to_read(
                 )
             )
 
+    selected = _normalize_selected_source_kinds(selected_source_kinds)
+    source_selected = _normalize_selected_source_kinds([row.kind for row in source_rows])
+    for kind in source_selected:
+        if kind not in selected:
+            selected.append(kind)
+    if website_url and SourceKind.public not in selected:
+        selected.append(SourceKind.public)
+
     return EngagementRead(
         id=engagement_id,
         entity_name=entity_name,
         jurisdictions=sorted(jurisdictions),
         website_url=website_url,
+        selected_source_kinds=selected,
         sources=[
             SourceRead(
                 id=s.id,
@@ -154,13 +186,13 @@ async def get_engagement(
 ) -> EngagementRead:
     row = (
         await session.execute(
-            select(Engagement.id, Engagement.entity_id, Engagement.website_url, Engagement.user_id)
+            select(Engagement.id, Engagement.entity_id, Engagement.website_url, Engagement.selected_source_kinds, Engagement.user_id)
             .where(Engagement.id == engagement_id)
         )
     ).one_or_none()
     if row is None or row.user_id != user.id:
         raise HTTPException(status_code=404, detail="engagement not found")
-    return await _to_read(session, row.id, row.entity_id, row.website_url)
+    return await _to_read(session, row.id, row.entity_id, row.website_url, row.selected_source_kinds)
 
 
 @router.patch("/{engagement_id}", response_model=EngagementRead)
@@ -197,6 +229,14 @@ async def patch_engagement(
 
     if body.website_url is not None:
         eng.website_url = body.website_url.strip() or None
+        if eng.website_url:
+            selected = _normalize_selected_source_kinds(eng.selected_source_kinds)
+            if SourceKind.public not in selected:
+                selected.append(SourceKind.public)
+            eng.selected_source_kinds = [kind.value for kind in selected]
+
+    if body.selected_source_kinds is not None:
+        eng.selected_source_kinds = [kind.value for kind in _normalize_selected_source_kinds(body.selected_source_kinds)]
 
     await session.commit()
-    return await _to_read(session, eng.id, eng.entity_id, eng.website_url)
+    return await _to_read(session, eng.id, eng.entity_id, eng.website_url, eng.selected_source_kinds)
