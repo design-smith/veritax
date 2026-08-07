@@ -139,7 +139,7 @@ Make classification results reusable only when the stored fingerprint still matc
 
 ---
 
-## DCSV-07: Build PDF and Word-Like Preview Classification
+## DCSV-07: Build PDF Preview Classification
 
 **Type:** AFK
 
@@ -149,7 +149,7 @@ Make classification results reusable only when the stored fingerprint still matc
 
 ### What to build
 
-Classify PDF and Word-like uploaded files from a cheap preview before Requirements Matching starts.
+Classify PDF uploads from a cheap preview before Requirements Matching starts.
 
 ### Acceptance criteria
 
@@ -157,11 +157,33 @@ Classify PDF and Word-like uploaded files from a cheap preview before Requiremen
 - [ ] OCR preview is attempted only when normal preview text is empty or too thin.
 - [ ] Obvious documents are classified by deterministic rules without LLM calls.
 - [ ] Thin or unclear preview stores `Unknown` instead of failing Requirements.
-- [ ] Tests cover Relevant, Partially Relevant, Unknown, and Out of Scope outcomes for PDF-like files.
+- [ ] Tests cover Relevant, Partially Relevant, Unknown, and Out of Scope outcomes for PDF files.
 
 ---
 
-## DCSV-08: Build CSV Preview Classification
+## DCSV-08: Build Word Preview Classification
+
+**Type:** AFK
+
+**Blocked by:** DCSV-04, DCSV-05
+
+**User stories covered:** Pre-Requirements Safety
+
+### What to build
+
+Classify DOCX and Word-like uploads from document metadata and a bounded text preview.
+
+### Acceptance criteria
+
+- [ ] Preview uses filename, MIME type, size, and the first roughly 4,000 extracted characters.
+- [ ] Obvious agreements, policies, questionnaires, and narrative reports are classified by deterministic rules without LLM calls.
+- [ ] Thin or unclear preview stores `Unknown` instead of failing Requirements.
+- [ ] Large Word-like files are previewed without full-document classification work.
+- [ ] Tests cover Relevant, Partially Relevant, Unknown, and Out of Scope outcomes for Word-like files.
+
+---
+
+## DCSV-09: Build CSV Preview Classification
 
 **Type:** AFK
 
@@ -182,7 +204,7 @@ Classify CSV uploads from shape and header previews instead of prose extraction.
 
 ---
 
-## DCSV-09: Build Excel Preview Classification
+## DCSV-10: Build Excel Preview Classification
 
 **Type:** AFK
 
@@ -203,11 +225,11 @@ Classify spreadsheet workbooks from workbook metadata and first-row previews.
 
 ---
 
-## DCSV-10: Wire Classification into Requirements Startup
+## DCSV-11: Wire Classification into Requirements Startup
 
 **Type:** AFK
 
-**Blocked by:** DCSV-03, DCSV-06, DCSV-07, DCSV-08, DCSV-09
+**Blocked by:** DCSV-03, DCSV-06, DCSV-07, DCSV-08, DCSV-09, DCSV-10
 
 **User stories covered:** Pre-Requirements Safety
 
@@ -225,11 +247,11 @@ Run classification automatically at the start of Requirements, immediately befor
 
 ---
 
-## DCSV-11: Add LLM Fallback for Ambiguous Classification
+## DCSV-12: Add LLM Fallback for Ambiguous Classification
 
 **Type:** AFK
 
-**Blocked by:** DCSV-07, DCSV-08, DCSV-09
+**Blocked by:** DCSV-07, DCSV-08, DCSV-09, DCSV-10
 
 **User stories covered:** Pre-Requirements Safety, Future Evidence Intelligence
 
@@ -249,11 +271,11 @@ Use the LLM only when deterministic rules are inconclusive. Store observed signa
 
 ---
 
-## DCSV-12: Process Only Usable Documents Automatically
+## DCSV-13: Process Only Usable Documents Automatically
 
 **Type:** AFK
 
-**Blocked by:** DCSV-10
+**Blocked by:** DCSV-11
 
 **User stories covered:** Pre-Requirements Safety
 
@@ -271,33 +293,54 @@ After classification, process only Relevant, Partially Relevant, and Unknown upl
 
 ---
 
-## DCSV-13: Exclude Out-of-Scope Sources from Downstream Context
+## DCSV-14: Exclude Out-of-Scope Sources from Draft and Risks
 
 **Type:** AFK
 
-**Blocked by:** DCSV-12
+**Blocked by:** DCSV-13
 
 **User stories covered:** Pre-Requirements Safety
 
 ### What to build
 
-Prevent skipped Out of Scope documents from leaking into Draft retrieval, Risks, and future GraphRAG inputs.
+Prevent skipped Out of Scope documents from leaking into Draft retrieval and Risks.
 
 ### Acceptance criteria
 
 - [ ] Draft retrieval excludes Out of Scope uploaded documents.
 - [ ] Risks source retrieval excludes Out of Scope uploaded documents.
-- [ ] GraphRAG or graph-ingestion entry points exclude Out of Scope documents when present.
 - [ ] Source filters do not exclude targeted supplements.
 - [ ] Tests cover at least Draft and Risks exclusion.
 
 ---
 
-## DCSV-14: Return Skipped File Reasons from Coverage API
+## DCSV-15: Add GraphRAG Out-of-Scope Guard Contract
 
 **Type:** AFK
 
-**Blocked by:** DCSV-12
+**Blocked by:** DCSV-13
+
+**User stories covered:** Pre-Requirements Safety, Future Evidence Intelligence
+
+### What to build
+
+Define the graph-ingestion guard so future GraphRAG work cannot ingest documents classified as Out of Scope.
+
+### Acceptance criteria
+
+- [ ] Shared source filter or service method exposes whether a source is usable for graph ingestion.
+- [ ] Out of Scope uploaded documents are excluded by that filter.
+- [ ] Targeted supplements remain eligible for their targeted requirement context.
+- [ ] If no GraphRAG runtime exists yet, add the guard contract and tests around the shared filter instead of inventing a graph pipeline.
+- [ ] Future GraphRAG PRD references this guard as a dependency.
+
+---
+
+## DCSV-16: Return Skipped File Reasons from Coverage API
+
+**Type:** AFK
+
+**Blocked by:** DCSV-13
 
 **User stories covered:** Out-of-Scope Visibility
 
@@ -315,11 +358,11 @@ Return compact skipped-file metadata from coverage reads so the frontend can exp
 
 ---
 
-## DCSV-15: Show Requirements Skipped-Files Notice
+## DCSV-17: Show Requirements Skipped-Files Notice
 
 **Type:** AFK
 
-**Blocked by:** DCSV-14
+**Blocked by:** DCSV-16
 
 **User stories covered:** Out-of-Scope Visibility
 
@@ -337,11 +380,11 @@ Show a compact informational notice in Requirements only when files were skipped
 
 ---
 
-## DCSV-16: Preserve Supplement Override for Skipped Files
+## DCSV-18: Preserve Supplement Override for Skipped Files
 
 **Type:** AFK
 
-**Blocked by:** DCSV-12
+**Blocked by:** DCSV-13
 
 **User stories covered:** Pre-Requirements Safety, Out-of-Scope Visibility
 
@@ -358,11 +401,11 @@ Allow a user-supplied supplement to process for its targeted requirement even if
 
 ---
 
-## DCSV-17: Store Classification Diagnostics Without User Noise
+## DCSV-19: Store Classification Diagnostics Without User Noise
 
 **Type:** AFK
 
-**Blocked by:** DCSV-05, DCSV-10
+**Blocked by:** DCSV-05, DCSV-11
 
 **User stories covered:** Future Evidence Intelligence
 
