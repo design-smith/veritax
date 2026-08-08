@@ -6,11 +6,22 @@ from app.models import Document, DocumentStatus
 
 async def test_search_returns_hits_from_embedded_chunks(client):
     eid = (await client.post("/engagements")).json()["id"]
+    await client.patch(
+        f"/engagements/{eid}",
+        json={"entity_name": "Acme BV", "jurisdictions": ["Netherlands"], "fiscal_year": "FY2025"},
+    )
     await client.post(
         f"/engagements/{eid}/documents",
         data={"kind": "agreements"},
-        files={"files": ("doc.txt", ("transfer pricing benchmark study " * 100).encode(), "text/plain")},
+        files={
+            "files": (
+                "doc.txt",
+                ("Acme BV Netherlands FY2025 transfer pricing benchmark study " * 100).encode(),
+                "text/plain",
+            )
+        },
     )
+    assert (await client.post(f"/engagements/{eid}/coverage", params={"jurisdiction": "Netherlands"})).status_code == 201
 
     r = await client.get("/search", params={"q": "benchmark study", "engagement_id": eid})
     assert r.status_code == 200

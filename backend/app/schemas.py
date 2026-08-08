@@ -27,6 +27,7 @@ class IdResponse(BaseModel):
 class EngagementPatch(BaseModel):
     entity_name: str | None = None
     jurisdictions: list[str] | None = None
+    fiscal_year: str | None = None
     website_url: str | None = None
     selected_source_kinds: list[SourceKind] | None = None
 
@@ -39,6 +40,7 @@ class DocumentRead(BaseModel):
     size_bytes: int
     content_hash: str
     status: DocumentStatus
+    extraction_status: str | None = None
     error: str | None
     created_at: datetime
 
@@ -64,6 +66,7 @@ class EngagementRead(BaseModel):
     id: uuid.UUID
     entity_name: str | None
     jurisdictions: list[str]
+    fiscal_year: str | None
     website_url: str | None
     selected_source_kinds: list[SourceKind]
     sources: list[SourceRead]
@@ -74,6 +77,7 @@ class EngagementSummary(BaseModel):
     id: uuid.UUID
     entity_name: str | None
     jurisdictions: list[str]
+    fiscal_year: str | None
     updated_at: datetime
 
 
@@ -140,10 +144,17 @@ class CoverageSummary(BaseModel):
     draft_min_present_ratio: float
 
 
+class SkippedDocumentRead(BaseModel):
+    document_id: uuid.UUID
+    filename: str
+    reason: str
+
+
 class CoverageResponse(BaseModel):
     jurisdiction: str
     summary: CoverageSummary
     requirements: list[CoverageRead]
+    skipped_documents: list[SkippedDocumentRead] = []
 
 
 class DraftCitationRead(BaseModel):
@@ -188,12 +199,106 @@ class DraftResponse(BaseModel):
     sections: list[DraftSectionRead]
 
 
+class RequirementResultRead(BaseModel):
+    requirement_key: str
+    element_name: str
+    status: str        # present | partial | missing | invalid | blocked | conditional
+    severity: str = "medium"  # critical | high | medium | low
+    explanation: str | None
+    missing: list[list[str]] = []  # groups of acceptable document types still needed (each group = OR)
+    overridden: bool = False
+
+
+class RequirementResultsResponse(BaseModel):
+    jurisdiction: str
+    results: list[RequirementResultRead]
+
+
+class RequirementEvidenceRead(BaseModel):
+    document_id: uuid.UUID | None
+    document_type: str
+    role: str
+
+
+class RequirementDetailResponse(BaseModel):
+    requirement_key: str
+    element_name: str
+    status: str
+    severity: str = "medium"
+    explanation: str | None
+    missing: list[list[str]] = []
+    overridden: bool = False
+    evidence: list[RequirementEvidenceRead] = []
+
+
+class OverrideRequest(BaseModel):
+    justification: str
+
+
+class MissingGroupRead(BaseModel):
+    acceptable: list[str]        # any one of these document types satisfies the gap
+    sources: list[str] = []      # connectors that could supply them (e.g. SAP, Oracle)
+
+
+class RequirementMissingResponse(BaseModel):
+    requirement_key: str
+    status: str
+    severity: str = "medium"
+    missing: list[MissingGroupRead] = []
+
+
 class PipelineRecoveryResponse(BaseModel):
     retried_failed: bool
     documents_restarted: int
     coverage_jurisdictions_restarted: list[str]
     draft_jurisdictions_restarted: list[str]
     risk_jurisdictions_restarted: list[str]
+
+
+class FactSourceRead(BaseModel):
+    document_id: uuid.UUID
+    page: int | None
+    locator: str
+    quote: str
+
+
+class FactEntityMentionRead(BaseModel):
+    id: uuid.UUID
+    raw_name: str
+    role: str
+    resolution_status: str
+    canonical_entity_id: uuid.UUID | None
+    canonical_entity_name: str | None
+
+
+class FactRead(BaseModel):
+    id: uuid.UUID
+    canonical_fact_id: uuid.UUID | None
+    document_id: uuid.UUID
+    fact_type: str
+    value_raw: str
+    value_normalized: str | None
+    value_type: str
+    unit: str | None
+    period: str | None
+    scope_level: str
+    resolution_status: str
+    entity_mention: FactEntityMentionRead | None
+    sources: list[FactSourceRead]
+
+
+class DocumentFactsResponse(BaseModel):
+    document_id: uuid.UUID
+    facts: list[FactRead]
+
+
+class CanonicalEntityRead(BaseModel):
+    id: uuid.UUID
+    engagement_id: uuid.UUID
+    legal_name: str
+    jurisdiction: str | None
+    entity_type: str | None
+    aliases: list[str]
 
 
 class RiskEvidenceRead(BaseModel):

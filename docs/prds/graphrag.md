@@ -8,7 +8,7 @@
 
 **Dependencies:**
 
-* ✅ Document Classification & Source Validation
+* ✅ Document Classification & Source Validation, including the shared usable-source guard that excludes Out of Scope uploaded documents from graph ingestion
 * ✅ Structured Extraction & Entity Resolution
 * ✅ Controlled Transaction Mapping
 * ✅ Requirement Matching & Evidence Sufficiency

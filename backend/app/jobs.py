@@ -181,6 +181,20 @@ async def _mark_document_retrying(session: AsyncSession, job: PipelineJob, error
     doc.error = f"Retrying automatically after {error}"[:1000]
 
 
+async def _mark_extraction_failed(session: AsyncSession, job: PipelineJob, error: str) -> None:
+    if job.kind != PipelineJobKind.extract_document:
+        return
+    doc_id = job.payload.get("document_id")
+    if not doc_id:
+        return
+    doc = await session.get(Document, uuid.UUID(str(doc_id)))
+    if doc is None:
+        return
+    doc.extraction_status = "failed"
+    doc.status_updated_at = _now()
+    doc.error = error[:1000]
+
+
 async def _mark_job_succeeded(session: AsyncSession, job_id: uuid.UUID) -> None:
     job = await session.get(PipelineJob, job_id)
     if job is None:
@@ -210,6 +224,7 @@ async def _mark_job_failed(session: AsyncSession, job_id: uuid.UUID, exc: BaseEx
     else:
         job.status = PipelineJobStatus.failed
         job.completed_at = _now()
+        await _mark_extraction_failed(session, job, error)
     job.locked_at = None
     job.error = error
     await session.commit()
@@ -225,6 +240,17 @@ async def _run_job(app: FastAPI, job: PipelineJob) -> None:
             app.state.embedder,
             uuid.UUID(str(job.payload["document_id"])),
             raise_on_failure=True,
+        )
+        return
+
+    if job.kind == PipelineJobKind.extract_document:
+        from .extraction_jobs import run_extraction_job
+
+        await run_extraction_job(
+            app.state.session_factory,
+            app.state.storage,
+            uuid.UUID(str(job.payload["document_id"])),
+            str(job.payload["schema_key"]),
         )
         return
 
@@ -304,4 +330,3 @@ async def pipeline_worker_loop(app: FastAPI) -> None:
         ran = await run_queued_pipeline_jobs_from_app(app, max_jobs=1)
         if ran == 0:
             await asyncio.sleep(WORKER_IDLE_SECONDS)
-

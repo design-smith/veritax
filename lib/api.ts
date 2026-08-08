@@ -67,6 +67,7 @@ export interface DocumentRead {
   size_bytes: number
   content_hash: string
   status: "uploaded" | "embedding" | "embedded" | "failed"
+  extraction_status: string | null
   error: string | null
   created_at: string
 }
@@ -76,6 +77,43 @@ export interface DocumentTextRead {
   original_filename: string
   status: "uploaded" | "embedding" | "embedded" | "failed"
   text: string
+}
+
+export interface FactSourceRead {
+  document_id: string
+  page: number | null
+  locator: string
+  quote: string
+}
+
+export interface FactEntityMentionRead {
+  id: string
+  raw_name: string
+  role: string
+  resolution_status: string
+  canonical_entity_id: string | null
+  canonical_entity_name: string | null
+}
+
+export interface FactRead {
+  id: string
+  canonical_fact_id: string | null
+  document_id: string
+  fact_type: string
+  value_raw: string
+  value_normalized: string | null
+  value_type: string
+  unit: string | null
+  period: string | null
+  scope_level: string
+  resolution_status: string
+  entity_mention: FactEntityMentionRead | null
+  sources: FactSourceRead[]
+}
+
+export interface DocumentFactsResponse {
+  document_id: string
+  facts: FactRead[]
 }
 
 export interface EngagementSource {
@@ -91,6 +129,7 @@ export interface Engagement {
   id: string
   entity_name: string | null
   jurisdictions: string[]
+  fiscal_year: string | null
   website_url: string | null
   selected_source_kinds: SourceKind[]
   sources: EngagementSource[]
@@ -100,6 +139,7 @@ export interface EngagementSummary {
   id: string
   entity_name: string | null
   jurisdictions: string[]
+  fiscal_year: string | null
   updated_at: string
 }
 
@@ -155,6 +195,7 @@ export interface CoverageResponse {
     draft_min_present_ratio: number
   }
   requirements: CoverageRow[]
+  skipped_documents: { document_id: string; filename: string; reason: string }[]
 }
 
 export type DraftStatusValue = "pending" | "drafting" | "drafted" | "failed"
@@ -339,7 +380,7 @@ export const api = {
 
   patchEngagement: (
     id: string,
-    body: { entity_name?: string; jurisdictions?: string[]; website_url?: string; selected_source_kinds?: SourceKind[] },
+    body: { entity_name?: string; jurisdictions?: string[]; fiscal_year?: string; website_url?: string; selected_source_kinds?: SourceKind[] },
   ): Promise<unknown> =>
     afetch(`${BASE}/engagements/${id}`, {
       method: "PATCH",
@@ -361,6 +402,9 @@ export const api = {
 
   getDocumentText: (documentId: string): Promise<DocumentTextRead> =>
     afetch(`${BASE}/documents/${documentId}/text`).then(r => parse<DocumentTextRead>(r)),
+
+  getDocumentFacts: (documentId: string): Promise<DocumentFactsResponse> =>
+    afetch(`${BASE}/documents/${documentId}/facts`).then(r => parse<DocumentFactsResponse>(r)),
 
   deleteDocument: (documentId: string): Promise<void> =>
     afetch(`${BASE}/documents/${documentId}`, { method: "DELETE" }).then(parseVoid),

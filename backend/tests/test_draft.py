@@ -1,8 +1,10 @@
 import io
+import uuid
 import zipfile
 
 from app.drafting import SYSTEM_PROMPT, FakeDrafter
 from app.main import app
+from app.models import Document, DocumentChunk
 from app.requirements import resolve_requirements
 
 
@@ -129,6 +131,55 @@ async def test_draft_docx_download_uses_clean_local_file_cover(client):
     assert "Draft prepared for review" in doc
     assert "Prepared by Veritax" in doc
     assert "Planning File" not in doc
+
+
+async def test_draft_retrieval_excludes_out_of_scope_documents(client):
+    eid = (await client.post("/engagements")).json()["id"]
+    await client.patch(
+        f"/engagements/{eid}",
+        json={"entity_name": "Acme BV", "jurisdictions": ["Netherlands"], "fiscal_year": "FY2025"},
+    )
+    await client.post(
+        f"/engagements/{eid}/documents",
+        data={"kind": "interview"},
+        files={"files": ("notes.txt", _ready_text("Netherlands", b"Acme BV Netherlands FY2025"), "text/plain")},
+    )
+    skipped = (
+        await client.post(
+            f"/engagements/{eid}/documents",
+            data={"kind": "agreements"},
+            files={
+                "files": (
+                    "wrong-year.txt",
+                    b"Service agreement for Acme BV. Territory Netherlands. FY2024.",
+                    "text/plain",
+                )
+            },
+        )
+    ).json()[0]
+    started = await client.post(f"/engagements/{eid}/coverage", params={"jurisdiction": "Netherlands"})
+    assert started.json()["skipped_documents"][0]["filename"] == "wrong-year.txt"
+    coverage = (await client.get(f"/engagements/{eid}/coverage", params={"jurisdiction": "Netherlands"})).json()
+    assert coverage["summary"]["draft_ready"] is True
+    assert coverage["skipped_documents"][0]["filename"] == "wrong-year.txt"
+    async with app.state.session_factory() as session:
+        doc = await session.get(Document, uuid.UUID(skipped["id"]))
+        doc.status = "embedded"
+        session.add(
+            DocumentChunk(
+                document_id=uuid.UUID(skipped["id"]),
+                chunk_index=0,
+                content="Wrong year service agreement FY2024.",
+                embedding=app.state.embedder.embed_documents(["Wrong year service agreement FY2024."])[0],
+            )
+        )
+        await session.commit()
+
+    await client.post(f"/engagements/{eid}/draft", params={"jurisdiction": "Netherlands"})
+    got = (await client.get(f"/engagements/{eid}/draft", params={"jurisdiction": "Netherlands"})).json()
+
+    cited_labels = {citation["source_label"] for section in got["sections"] for citation in section["citations"]}
+    assert "wrong-year.txt" not in cited_labels
 
 
 async def test_unknown_jurisdiction_404(client):

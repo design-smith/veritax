@@ -72,3 +72,8 @@ def get_drafter(request: Request) -> Drafter:
 
 def get_risk_analyzer(request: Request) -> RiskAnalyzer:
     return request.app.state.risk_analyzer
+
+
+def get_classified_docs_provider(request: Request):
+    """The classified-documents source for requirement matching (real stub in prod, fake in tests)."""
+    return request.app.state.classified_docs_provider

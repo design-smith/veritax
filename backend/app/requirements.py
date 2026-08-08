@@ -23,6 +23,12 @@ class ResolvedElement:
     sub_requirements: tuple[str, ...]
     required: bool  # False = conditional (only a gap when its trigger applies)
     verified: bool  # True = confirmed against statute; False = needs content-ops review
+    evidence_policy: dict | None = None  # {document_type: role}; drives requirement matching. None = not yet policied.
+    sufficiency: dict | None = None      # evaluation policy: AND/OR tree over document types. None = any primary.
+    requires_executed: bool = False      # soft scope: satisfying evidence must be executed (else invalid)
+    requires_fiscal_year: bool = False   # soft scope: satisfying evidence must match the period (else invalid)
+    depends_on: tuple[int, ...] = ()     # element orders that must be present, else this is blocked
+    severity: str = "medium"             # how badly a gap here hurts: critical | high | medium | low
 
 
 @lru_cache(maxsize=1)
@@ -68,6 +74,12 @@ def resolve_requirements(country: str) -> tuple[ResolvedElement, ...]:
             sub_requirements=tuple(el.get("sub_requirements", [])),
             required=el.get("required", True),
             verified=el.get("verified", False),
+            evidence_policy=el.get("evidence_policy"),
+            sufficiency=el.get("sufficiency"),
+            requires_executed=el.get("requires_executed", False),
+            requires_fiscal_year=el.get("requires_fiscal_year", False),
+            depends_on=tuple(el.get("depends_on", ())),
+            severity=el.get("severity", "medium"),
         )
         for el in sorted(by_order.values(), key=lambda e: e["order"])
     ]

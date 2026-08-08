@@ -6,6 +6,7 @@ import {
   api,
   DraftNotCompleteError,
   type DocumentTextRead,
+  type FactRead,
   type RiskEvidence,
   type RiskResponse,
   type RiskFinding,
@@ -42,6 +43,12 @@ const snippet = (text: string, needle: string) => {
   const end = at >= 0 ? Math.min(text.length, at + needle.length + 1400) : Math.min(text.length, 2200)
   return text.slice(start, end).trim()
 }
+const factLabel = (type: string) => type.replace(/_/g, " ").replace(/\b\w/g, c => c.toUpperCase())
+const factValue = (fact: FactRead) => {
+  if (!fact.value_normalized || fact.value_normalized === fact.value_raw) return fact.value_raw
+  return `${fact.value_raw} · ${fact.value_normalized}`
+}
+const scopeLabel = (scope: string) => scope.replace(/_/g, " ")
 
 // ── Small presentational bits (ported from the original) ─────────────────────────────────────
 function Chip({ children, style }: { children: React.ReactNode; style?: React.CSSProperties }) {
@@ -107,7 +114,13 @@ export default function RisksStep({ engagementId, jurisdictions, entity, onOpenD
   const [search, setSearch] = useState("")
   const [view, setView] = useState<KindFilter>("all")
   const [openFinding, setOpenFinding] = useState<RiskFinding | null>(null)
-  const [sourcePreview, setSourcePreview] = useState<{ doc: DocumentTextRead; evidence: RiskEvidence } | null>(null)
+  const [sourcePreview, setSourcePreview] = useState<{
+    doc: DocumentTextRead
+    evidence: RiskEvidence
+    facts: FactRead[]
+    highlightedFactId?: string
+    highlightQuote?: string
+  } | null>(null)
   const [sourceLoading, setSourceLoading] = useState<string | null>(null)
   const [copiedEvidence, setCopiedEvidence] = useState(false)
 
@@ -353,14 +366,24 @@ export default function RisksStep({ engagementId, jurisdictions, entity, onOpenD
     })
     setSourceLoading(evidence.document_id)
     try {
-      const doc = await runWithRetry(() => api.getDocumentText(evidence.document_id!), { retries: 1 })
+      const [doc, factsPayload] = await Promise.all([
+        runWithRetry(() => api.getDocumentText(evidence.document_id!), { retries: 1 }),
+        runWithRetry(() => api.getDocumentFacts(evidence.document_id!), { retries: 1 }).catch(error => {
+          console.warn("[veritax:risks] source:facts:failed", {
+            documentId: `${evidence.document_id!.slice(0, 8)}...`,
+            error: riskError(error),
+          })
+          return { document_id: evidence.document_id!, facts: [] }
+        }),
+      ])
       logRisk("source:open:ok", {
         documentId: `${evidence.document_id.slice(0, 8)}...`,
         durationMs: riskElapsedMs(startedAt),
         status: doc.status,
         textChars: doc.text.length,
+        facts: factsPayload.facts.length,
       })
-      setSourcePreview({ doc, evidence })
+      setSourcePreview({ doc, evidence, facts: factsPayload.facts, highlightQuote: evidence.detail })
     } catch (e) {
       console.error("[veritax:risks] source:open:failed", {
         documentId: `${evidence.document_id.slice(0, 8)}...`,
@@ -398,6 +421,12 @@ export default function RisksStep({ engagementId, jurisdictions, entity, onOpenD
     } finally {
       setSourceLoading(null)
     }
+  }
+
+  function selectSourceFact(fact: FactRead) {
+    const quote = fact.sources[0]?.quote
+    if (!sourcePreview || !quote) return
+    setSourcePreview({ ...sourcePreview, highlightedFactId: fact.id, highlightQuote: quote })
   }
 
   if (!engagementId) return <main style={{ flex: 1, padding: "3rem 3rem", color: "#888" }}>Preparing session…</main>
@@ -612,8 +641,40 @@ export default function RisksStep({ engagementId, jurisdictions, entity, onOpenD
                     <p style={{ fontSize: 11, fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.04em", color: "#888", margin: 0 }}>Source preview</p>
                     <p style={{ fontSize: 12, color: "#000", margin: 0 }}>{sourcePreview.doc.original_filename}</p>
                     <pre style={{ margin: 0, whiteSpace: "pre-wrap", maxHeight: 220, overflow: "auto", fontSize: 11, lineHeight: 1.55, color: "#555", background: "#fafafa", borderRadius: 6, padding: "0.75rem" }}>
-                      {snippet(sourcePreview.doc.text, sourcePreview.evidence.detail)}
+                      {snippet(sourcePreview.doc.text, sourcePreview.highlightQuote ?? sourcePreview.evidence.detail)}
                     </pre>
+                    {sourcePreview.facts.length > 0 && (
+                      <div style={{ borderTop: "1px solid #eee", paddingTop: "0.75rem", display: "flex", flexDirection: "column", gap: "0.375rem" }}>
+                        <p style={{ fontSize: 11, fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.04em", color: "#888", margin: 0 }}>Extracted facts</p>
+                        {sourcePreview.facts.map(fact => {
+                          const source = fact.sources[0]
+                          const active = sourcePreview.highlightedFactId === fact.id
+                          return (
+                            <button key={fact.id} type="button" onClick={() => selectSourceFact(fact)} style={{
+                              display: "flex", flexDirection: "column", alignItems: "stretch", gap: "0.25rem",
+                              textAlign: "left", border: active ? "1px solid #cfcfcf" : "1px solid #eee",
+                              borderRadius: 6, background: active ? "#f7f7f7" : "#fff", padding: "0.625rem",
+                              cursor: source?.quote ? "pointer" : "default",
+                            }}>
+                              <span style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", gap: "0.75rem" }}>
+                                <span style={{ fontSize: 12, fontWeight: 600, color: "#000" }}>{factLabel(fact.fact_type)}</span>
+                                <span style={{ fontSize: 11, color: "#888", textTransform: "capitalize" }}>{scopeLabel(fact.scope_level)}</span>
+                              </span>
+                              <span style={{ fontSize: 12, color: "#555", lineHeight: 1.45 }}>{factValue(fact)}</span>
+                              {fact.entity_mention?.canonical_entity_name && (
+                                <span style={{ fontSize: 11, color: "#777" }}>Entity: {fact.entity_mention.canonical_entity_name}</span>
+                              )}
+                              {source && (
+                                <>
+                                  <span style={{ fontSize: 11, color: "#999" }}>{source.locator}</span>
+                                  <span style={{ fontSize: 11, color: "#777", lineHeight: 1.45 }}>&ldquo;{source.quote}&rdquo;</span>
+                                </>
+                              )}
+                            </button>
+                          )
+                        })}
+                      </div>
+                    )}
                   </div>
                 )}
               </div>

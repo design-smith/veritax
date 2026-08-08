@@ -3,6 +3,10 @@ FROM python:3.12-slim
 
 WORKDIR /app
 
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends ocrmypdf tesseract-ocr-eng \
+    && rm -rf /var/lib/apt/lists/*
+
 # Install from project metadata (main deps only — no dev extras). Copy metadata + source, then build.
 COPY pyproject.toml ./
 COPY app ./app

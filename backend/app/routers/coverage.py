@@ -18,13 +18,14 @@ from fastapi import (
     Request,
     UploadFile,
 )
-from sqlalchemy import delete, select, update
+from sqlalchemy import delete, or_, select, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from sqlalchemy.orm import selectinload
 
 from ..assessment import Assessor
 from ..auth import AuthUser
+from ..classification_store import load_classification, scope_fingerprint, store_classification
 from ..config import settings
 from ..coverage_readiness import draft_readiness_for_rows
 from ..corpus import (
@@ -35,6 +36,7 @@ from ..corpus import (
     union_docs,
 )
 from ..diagnostics import rss_mb
+from ..document_classifier import CLASSIFIER_VERSION, classify_document_bytes, unknown_classification
 from ..evidence_quality import assessment_scope_instruction, scoped_query
 from ..deps import (
     assert_owner,
@@ -46,26 +48,35 @@ from ..deps import (
     require_engagement_owner,
 )
 from ..embeddings import Embedder
+from ..extraction_eligibility import extraction_eligibility
+from ..extraction_jobs import queue_extraction_jobs_for_engagement
 from ..ingest import embed_document, get_or_create_uploaded_source, store_upload
-from ..jobs import enqueue_pipeline_job, schedule_pipeline_drain
+from ..jobs import enqueue_index_document_job, enqueue_pipeline_job, schedule_pipeline_drain
 from ..models import (
     Confidence,
     CoverageEvidence,
     CoverageStatus,
     CoverageSupplement,
     Document,
+    DocumentClassification,
+    DocumentRelevance,
+    DocumentScope,
+    DocumentStatus,
     DraftCitation,
     DraftSection,
     DraftStatus,
     Engagement,
+    EngagementJurisdiction,
+    Entity,
     PipelineJobKind,
     RequirementCoverage,
     Source,
     SourceKind,
+    SourceOrigin,
     SupplementKind,
 )
 from ..requirements import available_jurisdictions, resolve_requirements
-from ..schemas import CoverageEvidenceRead, CoverageRead, CoverageResponse, CoverageSummary
+from ..schemas import CoverageEvidenceRead, CoverageRead, CoverageResponse, CoverageSummary, SkippedDocumentRead
 from ..storage import Storage
 
 router = APIRouter(tags=["coverage"])
@@ -161,6 +172,51 @@ async def _draft_section_by_key(session: AsyncSession, engagement_id: uuid.UUID,
     return {rk: sid for rk, sid in rows}
 
 
+def _skip_reason(validation: dict, *, entity_name: str | None, jurisdictions: list[str], fiscal_year: str | None) -> str:
+    if validation.get("entity") == "fail" and entity_name:
+        return f"Entity does not match {entity_name}."
+    if validation.get("fiscal_year") == "fail" and fiscal_year:
+        return f"Fiscal year does not match {fiscal_year}."
+    if validation.get("jurisdiction") == "fail" and jurisdictions:
+        return f"Jurisdiction does not match {', '.join(jurisdictions)}."
+    return "Document appears outside this engagement scope."
+
+
+async def _skipped_documents(session: AsyncSession, engagement_id: uuid.UUID) -> list[SkippedDocumentRead]:
+    entity_name, jurisdictions, fiscal_year = await _engagement_scope(session, engagement_id)
+    rows = (
+        await session.execute(
+            select(
+                Document.id,
+                Document.original_filename,
+                DocumentScope.source_validation_result,
+            )
+            .join(Source, Source.id == Document.source_id)
+            .join(DocumentClassification, DocumentClassification.document_id == Document.id)
+            .join(DocumentScope, DocumentScope.document_id == Document.id)
+            .where(
+                Source.engagement_id == engagement_id,
+                Source.kind != SourceKind.supplement,
+                DocumentClassification.relevance == DocumentRelevance.out_of_scope,
+            )
+            .order_by(Document.created_at)
+        )
+    ).all()
+    return [
+        SkippedDocumentRead(
+            document_id=row.id,
+            filename=row.original_filename,
+            reason=_skip_reason(
+                row.source_validation_result or {},
+                entity_name=entity_name,
+                jurisdictions=jurisdictions,
+                fiscal_year=fiscal_year,
+            ),
+        )
+        for row in rows
+    ]
+
+
 async def _invalidate_drafts_for_element(session: AsyncSession, row: RequirementCoverage) -> list[str]:
     sections = (
         await session.execute(
@@ -193,6 +249,7 @@ async def _response(session: AsyncSession, engagement_id: uuid.UUID, jurisdictio
         jurisdiction=jurisdiction,
         summary=_summary(rows),
         requirements=[_to_read(r, doc_kind, section_by_key) for r in rows],
+        skipped_documents=await _skipped_documents(session, engagement_id),
     )
 
 
@@ -268,6 +325,157 @@ async def _restart_draft_if_needed(
             restart=True,
         )
     return len(jurisdictions)
+
+
+async def _engagement_scope(session: AsyncSession, engagement_id: uuid.UUID) -> tuple[str | None, list[str], str | None]:
+    row = (
+        await session.execute(
+            select(Entity.name, Engagement.fiscal_year)
+            .select_from(Engagement)
+            .outerjoin(Entity, Entity.id == Engagement.entity_id)
+            .where(Engagement.id == engagement_id)
+        )
+    ).one_or_none()
+    if row is None:
+        return None, [], None
+    jurisdictions = (
+        await session.execute(
+            select(EngagementJurisdiction.jurisdiction)
+            .where(EngagementJurisdiction.engagement_id == engagement_id)
+            .order_by(EngagementJurisdiction.jurisdiction)
+        )
+    ).scalars().all()
+    return row.name, list(jurisdictions), row.fiscal_year
+
+
+async def _classify_uploaded_documents(
+    session: AsyncSession,
+    storage: Storage,
+    engagement_id: uuid.UUID,
+    llm_fallback=None,
+) -> int:
+    entity_name, jurisdictions, fiscal_year = await _engagement_scope(session, engagement_id)
+    docs = (
+        await session.execute(
+            select(Document)
+            .join(Source, Source.id == Document.source_id)
+            .where(
+                Source.engagement_id == engagement_id,
+                Source.origin == SourceOrigin.uploaded,
+                Source.kind != SourceKind.supplement,
+                Source.kind != SourceKind.interview,
+            )
+            .order_by(Document.created_at)
+        )
+    ).scalars().all()
+    classified = 0
+    for doc in docs:
+        if await _classify_document_with_scope(
+            session,
+            storage,
+            doc,
+            entity_name=entity_name,
+            jurisdictions=jurisdictions,
+            fiscal_year=fiscal_year,
+            llm_fallback=llm_fallback,
+        ):
+            classified += 1
+    return classified
+
+
+async def _classify_document_with_scope(
+    session: AsyncSession,
+    storage: Storage,
+    doc: Document,
+    *,
+    entity_name: str | None,
+    jurisdictions: list[str],
+    fiscal_year: str | None,
+    llm_fallback=None,
+) -> bool:
+    t0 = time.monotonic()
+    fingerprint = scope_fingerprint(
+        document_hash=doc.content_hash,
+        entity_name=entity_name,
+        jurisdictions=jurisdictions,
+        fiscal_year=fiscal_year,
+        classifier_version=CLASSIFIER_VERSION,
+    )
+    existing = await load_classification(session, doc.id)
+    if existing is not None and existing.scope_fingerprint == fingerprint:
+        return False
+    try:
+        data = await asyncio.to_thread(storage.get, doc.storage_key)
+        result = await asyncio.to_thread(
+            classify_document_bytes,
+            filename=doc.original_filename,
+            content_type=doc.content_type,
+            content_hash=doc.content_hash,
+            data=data,
+            entity_name=entity_name,
+            jurisdictions=jurisdictions,
+            fiscal_year=fiscal_year,
+            llm_fallback=llm_fallback,
+        )
+    except Exception as exc:  # noqa: BLE001 - classification degrades; Requirements still runs
+        log.exception("classify FAILED doc=%s file=%s", doc.id, doc.original_filename)
+        result = unknown_classification(
+            filename=doc.original_filename,
+            content_hash=doc.content_hash,
+            entity_name=entity_name,
+            jurisdictions=jurisdictions,
+            fiscal_year=fiscal_year,
+            error=str(exc),
+        )
+    await store_classification(session, doc.id, result)
+    log.info(
+        "classify doc=%s classifier_version=%s taxonomy_version=%s type=%s relevance=%s state=%s score=%s elapsed=%.1fs",
+        doc.id,
+        result.classifier_version,
+        result.taxonomy_version,
+        result.document_type,
+        result.relevance,
+        result.classification_state,
+        result.classification_score,
+        time.monotonic() - t0,
+    )
+    return True
+
+
+async def _supplement_extraction_eligibility(session: AsyncSession, doc: Document):
+    classification = await load_classification(session, doc.id)
+    if classification is None:
+        return None
+    return extraction_eligibility(
+        document_type=classification.document_type,
+        classification_state=getattr(classification.classification_state, "value", classification.classification_state),
+        relevance=getattr(classification.relevance, "value", classification.relevance),
+        source_validation_result=classification.scope.source_validation_result,
+        document_active=doc.is_active,
+    )
+
+
+async def _queue_uploaded_documents(session: AsyncSession, engagement_id: uuid.UUID) -> int:
+    docs = (
+        await session.execute(
+            select(Document)
+            .join(Source, Source.id == Document.source_id)
+            .outerjoin(DocumentClassification, DocumentClassification.document_id == Document.id)
+            .where(
+                Source.engagement_id == engagement_id,
+                Document.status == DocumentStatus.uploaded,
+                or_(
+                    Source.kind == SourceKind.supplement,
+                    DocumentClassification.document_id.is_(None),
+                    DocumentClassification.relevance != DocumentRelevance.out_of_scope,
+                ),
+            )
+            .order_by(Document.created_at)
+        )
+    ).scalars().all()
+    for doc in docs:
+        await enqueue_index_document_job(session, doc)
+    return len(docs)
 
 
 async def _find_assessed_twin(session: AsyncSession, engagement_id: uuid.UUID, element) -> RequirementCoverage | None:
@@ -499,6 +707,7 @@ async def start_coverage(
     jurisdiction: str = Query(...),
     force: bool = Query(False),  # user hit "refresh": re-run matching against the current corpus
     session: AsyncSession = Depends(get_session),
+    storage: Storage = Depends(get_storage),
     _owner: Engagement = Depends(require_engagement_owner),
 ) -> CoverageResponse:
     elements = resolve_requirements(jurisdiction)
@@ -549,6 +758,20 @@ async def start_coverage(
 
     inserted = result.rowcount or 0
     should_assess = inserted > 0 or force
+    classified_documents = (
+        await _classify_uploaded_documents(
+            session,
+            storage,
+            engagement_id,
+            getattr(request.app.state, "classification_fallback", None),
+        )
+        if should_assess else 0
+    )
+    queued_documents = await _queue_uploaded_documents(session, engagement_id) if should_assess else 0
+    queued_extractions = (
+        await queue_extraction_jobs_for_engagement(session, engagement_id, restart=force)
+        if should_assess else 0
+    )
     if should_assess:
         await enqueue_pipeline_job(
             session,
@@ -559,11 +782,11 @@ async def start_coverage(
             restart=force,
         )
     await session.commit()
-    log.info("start_coverage engagement=%s jurisdiction=%s force=%s: %d new row(s), %s",
-             engagement_id, jurisdiction, force, inserted,
+    log.info("start_coverage engagement=%s jurisdiction=%s force=%s: %d new row(s), classified_documents=%d, queued_documents=%d, queued_extractions=%d, %s",
+             engagement_id, jurisdiction, force, inserted, classified_documents, queued_documents, queued_extractions,
              "queued assessment" if should_assess else "already assessed/queued (no-op)")
     if should_assess:
-        schedule_pipeline_drain(background, request.app, max_jobs=1)
+        schedule_pipeline_drain(background, request.app, max_jobs=queued_documents + queued_extractions + 1)
     return await _response(session, engagement_id, jurisdiction)
 
 
@@ -620,9 +843,41 @@ async def add_supplement(
         text_value = text
 
     doc = await store_upload(session, storage, row.engagement_id, src.id, filename, content_type, data)
-    session.add(CoverageSupplement(coverage_id=row.id, kind=kind, document_id=doc.id, text=text_value))
+    session.add(
+        CoverageSupplement(
+            coverage_id=row.id,
+            kind=kind,
+            document_id=doc.id,
+            source_context="supplement",
+            target_requirement_id=row.id,
+            text=text_value,
+        )
+    )
+
+    queued_extractions = 0
+    if kind == SupplementKind.upload:
+        entity_name, jurisdictions, fiscal_year = await _engagement_scope(session, row.engagement_id)
+        await _classify_document_with_scope(
+            session,
+            storage,
+            doc,
+            entity_name=entity_name,
+            jurisdictions=jurisdictions,
+            fiscal_year=fiscal_year,
+            llm_fallback=getattr(request.app.state, "classification_fallback", None),
+        )
+        eligibility = await _supplement_extraction_eligibility(session, doc)
+        if eligibility is None or eligibility.status != "pending":
+            doc.extraction_status = eligibility.status if eligibility is not None else "skipped_unknown"
+            await session.commit()
+            doc_kind = await _doc_kind(session, row.engagement_id)
+            section_by_key = await _draft_section_by_key(session, row.engagement_id, row.jurisdiction)
+            await session.refresh(row)
+            return _to_read(row, doc_kind, section_by_key)
+        queued_extractions = await queue_extraction_jobs_for_engagement(session, row.engagement_id)
+
     await session.commit()
-    # Embed the supplement INLINE (not background) so Draft can retrieve it immediately.
+    # Embed accepted supplements INLINE (not background) so Draft can retrieve them immediately.
     await embed_document(factory, storage, embedder, doc.id)
 
     locator = (
@@ -643,6 +898,8 @@ async def add_supplement(
     await session.commit()
     if restarted:
         schedule_pipeline_drain(background, request.app, max_jobs=restarted)
+    if queued_extractions:
+        schedule_pipeline_drain(background, request.app, max_jobs=queued_extractions)
 
     doc_kind = await _doc_kind(session, row.engagement_id)
     section_by_key = await _draft_section_by_key(session, row.engagement_id, row.jurisdiction)

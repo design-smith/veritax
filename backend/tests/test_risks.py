@@ -1,3 +1,7 @@
+import uuid
+
+from app.main import app
+from app.models import Document, DocumentChunk
 from app.risks import SYSTEM_PROMPT
 from app.requirements import resolve_requirements
 
@@ -74,6 +78,51 @@ async def test_rerun_replaces_findings(client):
     await client.post(f"/engagements/{eid}/risks", params={"jurisdiction": "Canada"})
     got = (await client.get(f"/engagements/{eid}/risks", params={"jurisdiction": "Canada"})).json()
     assert got["summary"]["total"] == 2  # not doubled
+
+
+async def test_risks_retrieval_excludes_out_of_scope_documents(client):
+    eid = (await client.post("/engagements")).json()["id"]
+    await client.patch(
+        f"/engagements/{eid}",
+        json={"entity_name": "Acme BV", "jurisdictions": ["Canada"], "fiscal_year": "FY2025"},
+    )
+    await client.post(
+        f"/engagements/{eid}/documents",
+        data={"kind": "interview"},
+        files={"files": ("notes.txt", _ready_text("Canada", b"Acme BV Canada FY2025 services at cost"), "text/plain")},
+    )
+    skipped = (
+        await client.post(
+            f"/engagements/{eid}/documents",
+            data={"kind": "agreements"},
+            files={
+                "files": (
+                    "wrong-year.txt",
+                    b"Service agreement for Acme BV. Territory Canada. FY2024.",
+                    "text/plain",
+                )
+            },
+        )
+    ).json()[0]
+    await _draft(client, eid, "Canada")
+    async with app.state.session_factory() as session:
+        doc = await session.get(Document, uuid.UUID(skipped["id"]))
+        doc.status = "embedded"
+        session.add(
+            DocumentChunk(
+                document_id=uuid.UUID(skipped["id"]),
+                chunk_index=0,
+                content="Wrong year service agreement FY2024.",
+                embedding=app.state.embedder.embed_documents(["Wrong year service agreement FY2024."])[0],
+            )
+        )
+        await session.commit()
+
+    assert (await client.post(f"/engagements/{eid}/risks", params={"jurisdiction": "Canada"})).status_code == 201
+    got = (await client.get(f"/engagements/{eid}/risks", params={"jurisdiction": "Canada"})).json()
+
+    source_labels = {e["source_label"] for finding in got["findings"] for e in finding["evidence"]}
+    assert "wrong-year.txt" not in source_labels
 
 
 def test_system_prompt_encodes_the_laws():

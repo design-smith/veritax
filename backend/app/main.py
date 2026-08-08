@@ -15,11 +15,25 @@ from .assessment import AnthropicAssessor, DeepSeekAssessor, FakeAssessor
 from .config import settings
 from .deps import get_current_user
 from .db import SessionFactory, init_db
+from .document_classifier import AnthropicClassificationFallback, DeepSeekClassificationFallback
 from .drafting import AnthropicDrafter, DeepSeekDrafter, FakeDrafter
 from .embeddings import FakeEmbedder, VoyageEmbedder
 from .jobs import pipeline_worker_loop
 from .risks import AnthropicRiskAnalyzer, DeepSeekRiskAnalyzer, FakeRiskAnalyzer
-from .routers import connectors, coverage, documents, draft, engagements, pipeline, risks, search, sources
+from .matching import ClassificationBackedProvider
+from .routers import (
+    connectors,
+    coverage,
+    documents,
+    draft,
+    engagements,
+    facts,
+    pipeline,
+    requirements,
+    risks,
+    search,
+    sources,
+)
 from .storage import LocalStorage, S3Storage
 
 log = logging.getLogger("veritax")
@@ -82,22 +96,22 @@ async def lifespan(app: FastAPI):
         app.state.assessor = DeepSeekAssessor()
         app.state.drafter = DeepSeekDrafter()
         app.state.risk_analyzer = DeepSeekRiskAnalyzer()
+        app.state.classification_fallback = DeepSeekClassificationFallback()
     elif provider == "anthropic":
         log.warning("Using Anthropic (%s / %s) for assessment + drafting + risks",
                     settings.assessment_model, settings.draft_model)
         app.state.assessor = AnthropicAssessor()
         app.state.drafter = AnthropicDrafter()
         app.state.risk_analyzer = AnthropicRiskAnalyzer()
+        app.state.classification_fallback = AnthropicClassificationFallback()
     else:
         log.warning("Using Fake assessor/drafter/risk-analyzer (LLM_PROVIDER=%r; dev only, not real)", provider)
         app.state.assessor = FakeAssessor()
         app.state.drafter = FakeDrafter()
         app.state.risk_analyzer = FakeRiskAnalyzer()
-    has_satisfied_route = any(
-        getattr(route, "path", None) == "/coverage/{coverage_id}/satisfied"
-        for route in app.routes
-    )
-    log.info("startup: coverage satisfied route registered=%s", has_satisfied_route)
+        app.state.classification_fallback = None
+    # Requirement matching reads classified documents from the classification store.
+    app.state.classified_docs_provider = ClassificationBackedProvider()
     worker = asyncio.create_task(pipeline_worker_loop(app))
     app.state.pipeline_worker = worker
     log.info("startup: pipeline worker started")
@@ -141,11 +155,13 @@ for _router in (
     engagements.router,
     connectors.router,
     documents.router,
+    facts.router,
     sources.router,
     search.router,
     coverage.router,
     draft.router,
     pipeline.router,
+    requirements.router,
     risks.router,
 ):
     app.include_router(_router, dependencies=[Depends(get_current_user)])

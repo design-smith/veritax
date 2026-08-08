@@ -7,6 +7,7 @@ from app import corpus
 from app.drafting import FakeDrafter
 from app.embeddings import FakeEmbedder
 from app.ingest import INDEX_CHUNK_BATCH
+from app.jobs import enqueue_index_document_job, run_queued_pipeline_jobs_from_app
 from app.main import app
 from app.models import Document, DocumentChunk, DocumentStatus, RequirementCoverage, CoverageStatus
 from app.processing import iter_chunks
@@ -46,6 +47,14 @@ async def _engagement(client) -> str:
     return (await client.post("/engagements")).json()["id"]
 
 
+async def _index_document(document_id: str) -> None:
+    async with app.state.session_factory() as session:
+        doc = await session.get(Document, uuid.UUID(document_id))
+        await enqueue_index_document_job(session, doc)
+        await session.commit()
+    assert await run_queued_pipeline_jobs_from_app(app, max_jobs=1) == 1
+
+
 def _ready_text(jurisdiction: str, text: bytes) -> bytes:
     required = " ".join(f"{e.element_name} {e.description}" for e in resolve_requirements(jurisdiction))
     return text + b" " + required.encode()
@@ -62,6 +71,7 @@ async def test_duplicate_upload_reuses_existing_chunks(client):
         files={"files": ("first.txt", content, "text/plain")},
     )
     assert first.status_code == 201
+    await _index_document(first.json()[0]["id"])
     assert app.state.embedder.document_batches == 1
 
     second = await client.post(
@@ -70,8 +80,8 @@ async def test_duplicate_upload_reuses_existing_chunks(client):
         files={"files": ("second.txt", content, "text/plain")},
     )
     assert second.status_code == 201
+    await _index_document(second.json()[0]["id"])
     assert app.state.embedder.document_batches == 1
-    assert second.json()[0]["status"] == "uploaded"
 
     got = (await client.get(f"/documents/{second.json()[0]['id']}")).json()
     assert got["status"] == "embedded"
@@ -90,6 +100,7 @@ async def test_large_upload_embeds_in_bounded_batches(client):
     )
 
     assert response.status_code == 201
+    await _index_document(response.json()[0]["id"])
     assert expected_batches > 1
     assert app.state.embedder.document_batches == expected_batches
 
@@ -104,6 +115,7 @@ async def test_zero_text_document_fails_visibly(client):
         )
     ).json()[0]
 
+    await _index_document(doc["id"])
     got = (await client.get(f"/documents/{doc['id']}")).json()
     assert got["status"] == "failed"
     assert "no extractable text" in got["error"]

@@ -1,0 +1,173 @@
+{
+  "taxonomy_version": "2026-08-06",
+  "document_types": [
+    {
+      "document_type": "Service Agreement",
+      "allowed_tags": ["Intercompany", "Services", "Legal", "Executed", "Draft"],
+      "deterministic_signals": ["service agreement", "services agreement", "statement of work", "service provider"],
+      "candidate_extractors": ["Agreement Extractor", "Pricing Extractor", "Entity Extractor"],
+      "candidate_requirement_categories": ["Material Agreements", "Controlled Transactions", "FAR"],
+      "scope_rules": ["defined parties", "effective date", "governing law"]
+    },
+    {
+      "document_type": "Distribution Agreement",
+      "allowed_tags": ["Intercompany", "Distribution", "Legal", "Executed", "Draft"],
+      "deterministic_signals": ["distribution agreement", "distributor", "reseller"],
+      "candidate_extractors": ["Agreement Extractor", "Pricing Extractor", "Entity Extractor"],
+      "candidate_requirement_categories": ["Material Agreements", "Controlled Transactions", "FAR"],
+      "scope_rules": ["defined parties", "effective date", "territory"]
+    },
+    {
+      "document_type": "Manufacturing Agreement",
+      "allowed_tags": ["Intercompany", "Manufacturing", "Legal", "Executed", "Draft"],
+      "deterministic_signals": ["manufacturing agreement", "contract manufacturer", "supply agreement"],
+      "candidate_extractors": ["Agreement Extractor", "Pricing Extractor", "Entity Extractor"],
+      "candidate_requirement_categories": ["Material Agreements", "Controlled Transactions", "FAR"],
+      "scope_rules": ["defined parties", "effective date", "manufacturing location"]
+    },
+    {
+      "document_type": "License Agreement",
+      "allowed_tags": ["Intercompany", "Royalty", "Legal", "Executed", "Draft"],
+      "deterministic_signals": ["license agreement", "licence agreement", "royalty", "intellectual property"],
+      "candidate_extractors": ["Agreement Extractor", "Pricing Extractor", "Entity Extractor"],
+      "candidate_requirement_categories": ["Material Agreements", "Controlled Transactions", "Intangibles"],
+      "scope_rules": ["defined parties", "effective date", "licensed rights"]
+    },
+    {
+      "document_type": "Loan Agreement",
+      "allowed_tags": ["Intercompany", "Financial", "Legal", "Executed", "Draft"],
+      "deterministic_signals": ["loan agreement", "facility agreement", "interest rate", "borrower", "lender"],
+      "candidate_extractors": ["Agreement Extractor", "Pricing Extractor", "Entity Extractor"],
+      "candidate_requirement_categories": ["Material Agreements", "Controlled Transactions", "Financial Transactions"],
+      "scope_rules": ["defined parties", "effective date", "principal amount"]
+    },
+    {
+      "document_type": "Cost Sharing Agreement",
+      "allowed_tags": ["Intercompany", "Services", "Royalty", "Legal", "Executed", "Draft"],
+      "deterministic_signals": ["cost sharing agreement", "cost contribution agreement", "participant share"],
+      "candidate_extractors": ["Agreement Extractor", "Pricing Extractor", "Entity Extractor"],
+      "candidate_requirement_categories": ["Material Agreements", "Controlled Transactions", "Intangibles"],
+      "scope_rules": ["defined parties", "effective date", "participants"]
+    },
+    {
+      "document_type": "Annual Report",
+      "allowed_tags": ["Financial", "Public", "Global", "English"],
+      "deterministic_signals": ["annual report", "auditor's report", "consolidated financial statements"],
+      "candidate_extractors": ["Entity Extractor"],
+      "candidate_requirement_categories": ["Business Description", "Management Structure", "Competitor Discussion"],
+      "scope_rules": ["reporting entity", "reporting period"]
+    },
+    {
+      "document_type": "Trial Balance",
+      "allowed_tags": ["Financial", "Local"],
+      "deterministic_signals": ["trial balance", "account code", "debit", "credit"],
+      "candidate_extractors": ["Financial Extractor", "Entity Extractor"],
+      "candidate_requirement_categories": ["Financial Information", "Financial Tie-out"],
+      "scope_rules": ["entity", "fiscal period"]
+    },
+    {
+      "document_type": "General Ledger",
+      "allowed_tags": ["Financial", "Local"],
+      "deterministic_signals": ["general ledger", "journal", "posting date", "account code"],
+      "candidate_extractors": ["Financial Extractor", "Transaction Extractor", "Entity Extractor"],
+      "candidate_requirement_categories": ["Controlled Transactions", "Financial Information", "Financial Tie-out"],
+      "scope_rules": ["entity", "fiscal period"]
+    },
+    {
+      "document_type": "Invoice Population",
+      "allowed_tags": ["Financial", "Intercompany", "Local"],
+      "deterministic_signals": ["invoice", "counterparty", "customer", "supplier", "amount"],
+      "candidate_extractors": ["Transaction Extractor", "Entity Extractor"],
+      "candidate_requirement_categories": ["Controlled Transactions", "Transaction Amounts"],
+      "scope_rules": ["entity", "fiscal period", "counterparty"]
+    },
+    {
+      "document_type": "Segmented P&L",
+      "allowed_tags": ["Financial", "Local"],
+      "deterministic_signals": ["segmented p&l", "segmented profit and loss", "operating margin"],
+      "candidate_extractors": ["Financial Extractor", "Entity Extractor"],
+      "candidate_requirement_categories": ["Financial Information", "Method Selection", "Tested Party"],
+      "scope_rules": ["entity", "fiscal period", "segment"]
+    },
+    {
+      "document_type": "Master File",
+      "allowed_tags": ["OECD", "Global", "Transfer Pricing"],
+      "deterministic_signals": ["master file", "oecd", "group overview", "intangibles"],
+      "candidate_extractors": ["Entity Extractor"],
+      "candidate_requirement_categories": ["Group Business Description", "Intangibles", "Intercompany Financing"],
+      "scope_rules": ["group", "fiscal period"]
+    },
+    {
+      "document_type": "Local File",
+      "allowed_tags": ["OECD", "Local", "Transfer Pricing"],
+      "deterministic_signals": ["local file", "controlled transaction", "tested party", "arm's length"],
+      "candidate_extractors": ["Entity Extractor", "Transaction Extractor"],
+      "candidate_requirement_categories": ["Local File", "Controlled Transactions", "Economic Analysis"],
+      "scope_rules": ["entity", "jurisdiction", "fiscal period"]
+    },
+    {
+      "document_type": "Benchmark Study",
+      "allowed_tags": ["Benchmarking", "Financial", "OECD"],
+      "deterministic_signals": ["benchmark study", "interquartile range", "comparable companies", "database search"],
+      "candidate_extractors": ["Benchmark Extractor", "Financial Extractor"],
+      "candidate_requirement_categories": ["Benchmarking", "Arm's-Length Range", "Comparable Financial Data"],
+      "scope_rules": ["tested transaction", "fiscal period", "geography"]
+    },
+    {
+      "document_type": "APA",
+      "allowed_tags": ["Legal", "Transfer Pricing"],
+      "deterministic_signals": ["advance pricing agreement", "apa", "competent authority"],
+      "candidate_extractors": ["Agreement Extractor", "Entity Extractor"],
+      "candidate_requirement_categories": ["APAs and Rulings", "Method Selection"],
+      "scope_rules": ["covered entity", "covered period"]
+    },
+    {
+      "document_type": "Tax Ruling",
+      "allowed_tags": ["Legal", "Tax"],
+      "deterministic_signals": ["tax ruling", "advance tax ruling", "ruling request"],
+      "candidate_extractors": ["Agreement Extractor", "Entity Extractor"],
+      "candidate_requirement_categories": ["APAs and Rulings"],
+      "scope_rules": ["covered entity", "covered period"]
+    },
+    {
+      "document_type": "Registry Extract",
+      "allowed_tags": ["Legal", "Entity"],
+      "deterministic_signals": ["registry extract", "companies house", "chamber of commerce", "registered address"],
+      "candidate_extractors": ["Entity Extractor"],
+      "candidate_requirement_categories": ["Legal Entity Identification", "Organization Structure"],
+      "scope_rules": ["legal entity", "registration date"]
+    },
+    {
+      "document_type": "Organization Chart",
+      "allowed_tags": ["Entity", "Management"],
+      "deterministic_signals": ["organization chart", "organisational chart", "reporting line"],
+      "candidate_extractors": ["Entity Extractor"],
+      "candidate_requirement_categories": ["Management Structure", "Organization Structure"],
+      "scope_rules": ["entity", "period"]
+    },
+    {
+      "document_type": "Presentation",
+      "allowed_tags": ["Business", "Management"],
+      "deterministic_signals": ["presentation", "deck", "agenda"],
+      "candidate_extractors": ["Entity Extractor"],
+      "candidate_requirement_categories": ["Business Description", "FAR"],
+      "scope_rules": ["entity", "date"]
+    },
+    {
+      "document_type": "Email",
+      "allowed_tags": ["Correspondence"],
+      "deterministic_signals": ["from:", "to:", "subject:"],
+      "candidate_extractors": ["Entity Extractor"],
+      "candidate_requirement_categories": ["Supplemental Evidence"],
+      "scope_rules": ["sender", "recipient", "date"]
+    },
+    {
+      "document_type": "Unknown",
+      "allowed_tags": [],
+      "deterministic_signals": [],
+      "candidate_extractors": [],
+      "candidate_requirement_categories": [],
+      "scope_rules": []
+    }
+  ]
+}

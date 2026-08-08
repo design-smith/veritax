@@ -7,6 +7,7 @@ from datetime import datetime
 from pgvector.sqlalchemy import Vector
 from sqlalchemy import (
     BigInteger,
+    Boolean,
     DateTime,
     Enum,
     ForeignKey,
@@ -50,6 +51,20 @@ class DocumentStatus(str, enum.Enum):
     failed = "failed"
 
 
+class ClassificationState(str, enum.Enum):
+    accepted = "accepted"
+    needs_review = "needs_review"
+    unknown = "unknown"
+    rejected = "rejected"
+
+
+class DocumentRelevance(str, enum.Enum):
+    relevant = "relevant"
+    partially_relevant = "partially_relevant"
+    out_of_scope = "out_of_scope"
+    unknown = "unknown"
+
+
 class ConnectorCategory(str, enum.Enum):
     accounting = "accounting"
     notetaker = "notetaker"
@@ -87,6 +102,19 @@ class DraftStatus(str, enum.Enum):
     failed = "failed"
 
 
+class RequirementStatus(str, enum.Enum):
+    """Deterministic requirement-matching verdict. Slice 1 emits present/missing; the rest are reserved so
+    the column type is stable across slices (partial/invalid = slice 2, blocked = slice 3, conflicted is set
+    later by Contradiction Detection). conditional = a required:false element whose trigger hasn't applied."""
+    present = "present"
+    partial = "partial"
+    missing = "missing"
+    invalid = "invalid"
+    blocked = "blocked"
+    conditional = "conditional"
+    conflicted = "conflicted"
+
+
 class CitationKind(str, enum.Enum):
     document = "document"  # confidential source document
     web = "web"            # external research (gap-filler)
@@ -113,6 +141,7 @@ class RiskRunStatus(str, enum.Enum):
 
 class PipelineJobKind(str, enum.Enum):
     index_document = "index_document"
+    extract_document = "extract_document"
     assess_requirements = "assess_requirements"
     draft_jurisdiction = "draft_jurisdiction"
     analyze_risks = "analyze_risks"
@@ -148,6 +177,7 @@ class Engagement(Base):
     user_id: Mapped[uuid.UUID | None] = mapped_column(nullable=True, index=True)
     entity_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("entities.id"), nullable=True)
     website_url: Mapped[str | None] = mapped_column(Text, nullable=True)
+    fiscal_year: Mapped[str | None] = mapped_column(Text, nullable=True)
     selected_source_kinds: Mapped[list[str]] = mapped_column(JSONB, nullable=False, default=list)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(
@@ -217,6 +247,10 @@ class Document(Base):
         default=DocumentStatus.uploaded,
     )
     error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    extraction_status: Mapped[str | None] = mapped_column(Text, nullable=True)
+    is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    deleted_by: Mapped[uuid.UUID | None] = mapped_column(nullable=True)
     status_updated_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=True
     )
@@ -248,6 +282,273 @@ class DocumentChunk(Base):
     content: Mapped[str] = mapped_column(Text, nullable=False)
     embedding: Mapped[list[float]] = mapped_column(Vector(settings.embedding_dim), nullable=False)
     token_count: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class DocumentClassification(Base):
+    __tablename__ = "document_classifications"
+
+    document_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("documents.id", ondelete="CASCADE"), primary_key=True
+    )
+    taxonomy_version: Mapped[str] = mapped_column(Text, nullable=False)
+    document_type: Mapped[str] = mapped_column(Text, nullable=False)
+    classification_score: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    classification_state: Mapped[ClassificationState] = mapped_column(
+        Enum(ClassificationState, name="classification_state"),
+        nullable=False,
+        default=ClassificationState.unknown,
+    )
+    relevance: Mapped[DocumentRelevance] = mapped_column(
+        Enum(DocumentRelevance, name="document_relevance"),
+        nullable=False,
+        default=DocumentRelevance.unknown,
+    )
+    deterministic_signals: Mapped[list] = mapped_column(JSONB, nullable=False, default=list)
+    llm_supporting_quotes: Mapped[list] = mapped_column(JSONB, nullable=False, default=list)
+    candidate_requirements: Mapped[list] = mapped_column(JSONB, nullable=False, default=list)
+    candidate_extractors: Mapped[list] = mapped_column(JSONB, nullable=False, default=list)
+    scope_fingerprint: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    classifier_version: Mapped[str] = mapped_column(Text, nullable=False)
+    diagnostics: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict)
+    classified_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class DocumentTag(Base):
+    __tablename__ = "document_tags"
+
+    document_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("documents.id", ondelete="CASCADE"), primary_key=True
+    )
+    tag: Mapped[str] = mapped_column(Text, primary_key=True)
+
+
+class DocumentScope(Base):
+    __tablename__ = "document_scope"
+
+    document_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("documents.id", ondelete="CASCADE"), primary_key=True
+    )
+    entity: Mapped[str | None] = mapped_column(Text, nullable=True)
+    jurisdiction: Mapped[str | None] = mapped_column(Text, nullable=True)
+    fiscal_year: Mapped[str | None] = mapped_column(Text, nullable=True)
+    language: Mapped[str | None] = mapped_column(Text, nullable=True)
+    document_status: Mapped[str | None] = mapped_column(Text, nullable=True)
+    version: Mapped[str | None] = mapped_column(Text, nullable=True)
+    source_validation_result: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict)
+
+
+class ExtractionRun(Base):
+    __tablename__ = "extraction_runs"
+    __table_args__ = (
+        Index("ix_extraction_runs_document_active", "document_id", "active"),
+        Index("ix_extraction_runs_fingerprint", "fingerprint"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
+    engagement_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("engagements.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    document_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("documents.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    schema_key: Mapped[str] = mapped_column(Text, nullable=False)
+    schema_version: Mapped[str] = mapped_column(Text, nullable=False)
+    classification_type: Mapped[str] = mapped_column(Text, nullable=False)
+    classification_version: Mapped[str] = mapped_column(Text, nullable=False)
+    runner_version: Mapped[str] = mapped_column(Text, nullable=False)
+    model_version: Mapped[str] = mapped_column(Text, nullable=False)
+    fingerprint: Mapped[str] = mapped_column(String(64), nullable=False)
+    status: Mapped[str] = mapped_column(Text, nullable=False)
+    active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    superseded_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    diagnostics: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict)
+    started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    facts: Mapped[list[ExtractedFact]] = relationship(
+        cascade="all, delete-orphan", lazy="selectin", order_by="ExtractedFact.created_at"
+    )
+    expected_fields: Mapped[list[ExtractionExpectedField]] = relationship(
+        cascade="all, delete-orphan", lazy="selectin", order_by="ExtractionExpectedField.field_name"
+    )
+
+
+class ExtractedFact(Base):
+    __tablename__ = "extracted_facts"
+    __table_args__ = (
+        Index("ix_extracted_facts_run", "extraction_run_id"),
+        Index("ix_extracted_facts_document", "document_id"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
+    engagement_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("engagements.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    extraction_run_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("extraction_runs.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    document_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("documents.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    schema_key: Mapped[str] = mapped_column(Text, nullable=False)
+    schema_version: Mapped[str] = mapped_column(Text, nullable=False)
+    fact_type: Mapped[str] = mapped_column(Text, nullable=False)
+    value_raw: Mapped[str] = mapped_column(Text, nullable=False)
+    value_normalized: Mapped[str | None] = mapped_column(Text, nullable=True)
+    value_type: Mapped[str] = mapped_column(Text, nullable=False)
+    unit: Mapped[str | None] = mapped_column(Text, nullable=True)
+    period: Mapped[str | None] = mapped_column(Text, nullable=True)
+    scope_level: Mapped[str] = mapped_column(Text, nullable=False)
+    entity_mention_id: Mapped[uuid.UUID | None] = mapped_column(nullable=True)
+    resolution_status: Mapped[str] = mapped_column(Text, nullable=False, default="not_required")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    sources: Mapped[list[FactSource]] = relationship(
+        cascade="all, delete-orphan", lazy="selectin", order_by="FactSource.created_at"
+    )
+
+
+class EntityMention(Base):
+    __tablename__ = "entity_mentions"
+    __table_args__ = (
+        Index("ix_entity_mentions_run", "extraction_run_id"),
+        Index("ix_entity_mentions_document", "document_id"),
+        Index("ix_entity_mentions_fact", "extracted_fact_id"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
+    engagement_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("engagements.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    document_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("documents.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    extraction_run_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("extraction_runs.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    extracted_fact_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("extracted_facts.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    raw_name: Mapped[str] = mapped_column(Text, nullable=False)
+    normalized_name: Mapped[str] = mapped_column(Text, nullable=False)
+    role: Mapped[str] = mapped_column(Text, nullable=False)
+    locator: Mapped[str] = mapped_column(Text, nullable=False)
+    quote: Mapped[str] = mapped_column(Text, nullable=False)
+    resolved_entity_id: Mapped[uuid.UUID | None] = mapped_column(nullable=True)
+    resolution_status: Mapped[str] = mapped_column(Text, nullable=False, default="unresolved")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class CanonicalEntity(Base):
+    __tablename__ = "canonical_entities"
+    __table_args__ = (
+        UniqueConstraint("engagement_id", "normalized_name", name="uq_canonical_entity_name"),
+        Index("ix_canonical_entities_engagement", "engagement_id"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
+    engagement_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("engagements.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    legal_name: Mapped[str] = mapped_column(Text, nullable=False)
+    normalized_name: Mapped[str] = mapped_column(Text, nullable=False)
+    jurisdiction: Mapped[str | None] = mapped_column(Text, nullable=True)
+    entity_type: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class EntityAlias(Base):
+    __tablename__ = "entity_aliases"
+    __table_args__ = (
+        UniqueConstraint("engagement_id", "normalized_alias", name="uq_entity_alias"),
+        Index("ix_entity_aliases_entity", "canonical_entity_id"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
+    engagement_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("engagements.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    canonical_entity_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("canonical_entities.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    alias: Mapped[str] = mapped_column(Text, nullable=False)
+    normalized_alias: Mapped[str] = mapped_column(Text, nullable=False)
+    source_entity_mention_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("entity_mentions.id", ondelete="SET NULL"), nullable=True
+    )
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class CanonicalFact(Base):
+    __tablename__ = "canonical_facts"
+    __table_args__ = (
+        UniqueConstraint("engagement_id", "canonical_key", name="uq_canonical_fact_key"),
+        Index("ix_canonical_facts_engagement", "engagement_id"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
+    engagement_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("engagements.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    fact_type: Mapped[str] = mapped_column(Text, nullable=False)
+    value_normalized: Mapped[str] = mapped_column(Text, nullable=False)
+    value_type: Mapped[str] = mapped_column(Text, nullable=False)
+    unit: Mapped[str | None] = mapped_column(Text, nullable=True)
+    period: Mapped[str | None] = mapped_column(Text, nullable=True)
+    scope_level: Mapped[str] = mapped_column(Text, nullable=False)
+    canonical_key: Mapped[str] = mapped_column(Text, nullable=False)
+    active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    conflict_candidate: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+
+    sources: Mapped[list[CanonicalFactSource]] = relationship(
+        cascade="all, delete-orphan", lazy="selectin", order_by="CanonicalFactSource.created_at"
+    )
+
+
+class CanonicalFactSource(Base):
+    __tablename__ = "canonical_fact_sources"
+
+    canonical_fact_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("canonical_facts.id", ondelete="CASCADE"), primary_key=True
+    )
+    extracted_fact_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("extracted_facts.id", ondelete="CASCADE"), primary_key=True
+    )
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class FactSource(Base):
+    __tablename__ = "fact_sources"
+
+    id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
+    fact_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("extracted_facts.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    document_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("documents.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    page: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    locator: Mapped[str] = mapped_column(Text, nullable=False)
+    quote: Mapped[str] = mapped_column(Text, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class ExtractionExpectedField(Base):
+    __tablename__ = "extraction_expected_fields"
+
+    id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
+    extraction_run_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("extraction_runs.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    field_name: Mapped[str] = mapped_column(Text, nullable=False)
+    status: Mapped[str] = mapped_column(Text, nullable=False)
+    reason: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
@@ -321,7 +622,10 @@ class RequirementCoverage(Base):
         cascade="all, delete-orphan", lazy="selectin"
     )
     supplements: Mapped[list[CoverageSupplement]] = relationship(
-        cascade="all, delete-orphan", lazy="selectin", order_by="CoverageSupplement.created_at"
+        cascade="all, delete-orphan",
+        lazy="selectin",
+        order_by="CoverageSupplement.created_at",
+        foreign_keys="CoverageSupplement.coverage_id",
     )
 
 
@@ -356,6 +660,10 @@ class CoverageSupplement(Base):
     )
     document_id: Mapped[uuid.UUID | None] = mapped_column(
         ForeignKey("documents.id", ondelete="SET NULL"), nullable=True
+    )
+    source_context: Mapped[str] = mapped_column(Text, nullable=False, default="supplement")
+    target_requirement_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("requirement_coverage.id", ondelete="SET NULL"), nullable=True, index=True
     )
     text: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
@@ -416,6 +724,76 @@ class DraftCitation(Base):
     source_label: Mapped[str] = mapped_column(Text, nullable=False)
     quote: Mapped[str] = mapped_column(Text, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class RequirementResult(Base):
+    """Deterministic requirement-matching verdict from the evidence-policy engine. Runs on the new
+    /requirements path; replaces RequirementCoverage at cutover. Definitions/policies stay in the JSON seed —
+    only per-engagement results live here."""
+
+    __tablename__ = "requirement_results"
+    __table_args__ = (
+        UniqueConstraint("engagement_id", "jurisdiction", "requirement_key", name="uq_requirement_result"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
+    engagement_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("engagements.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    jurisdiction: Mapped[str] = mapped_column(Text, nullable=False)
+    requirement_key: Mapped[str] = mapped_column(Text, nullable=False)
+    element_name: Mapped[str] = mapped_column(Text, nullable=False)
+    status: Mapped[RequirementStatus] = mapped_column(
+        Enum(RequirementStatus, name="requirement_status"), nullable=False
+    )
+    explanation: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Unmet parts of the evaluation policy: list of acceptable-document-type groups (satisfy any one per group).
+    missing: Mapped[list] = mapped_column(JSONB, nullable=False, default=list)
+    overridden: Mapped[bool] = mapped_column(default=False)  # human "mark satisfied" is in effect
+    status_updated_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=True
+    )
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    evidence: Mapped[list[RequirementEvidence]] = relationship(
+        cascade="all, delete-orphan", lazy="selectin"
+    )
+
+
+class RequirementOverride(Base):
+    """A practitioner's explicit 'mark satisfied' — audited human judgment that survives recompute of the
+    deterministic result and is re-applied on every evaluation."""
+
+    __tablename__ = "requirement_overrides"
+    __table_args__ = (
+        UniqueConstraint("engagement_id", "jurisdiction", "requirement_key", name="uq_requirement_override"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
+    engagement_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("engagements.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    jurisdiction: Mapped[str] = mapped_column(Text, nullable=False)
+    requirement_key: Mapped[str] = mapped_column(Text, nullable=False)
+    actor: Mapped[str] = mapped_column(Text, nullable=False)         # who asserted it (email or user id)
+    justification: Mapped[str] = mapped_column(Text, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class RequirementEvidence(Base):
+    """A document that counted toward a requirement's verdict, with the role it played (evidence policy)."""
+
+    __tablename__ = "requirement_evidence"
+
+    id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
+    result_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("requirement_results.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    document_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("documents.id", ondelete="SET NULL"), nullable=True
+    )
+    document_type: Mapped[str] = mapped_column(Text, nullable=False)
+    role: Mapped[str] = mapped_column(Text, nullable=False)
 
 
 class RiskRun(Base):

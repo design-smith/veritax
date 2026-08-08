@@ -40,7 +40,7 @@ async def search(
         .join(Document, Document.id == DocumentChunk.document_id)
         .join(Source, Source.id == Document.source_id)
         .join(Engagement, Engagement.id == Source.engagement_id)
-        .where(Document.status == DocumentStatus.embedded)
+        .where(Document.status == DocumentStatus.embedded, Document.is_active.is_(True))
     )
     # Always scope to the caller's own data — never search across users.
     if engagement_id is not None:

@@ -1,8 +1,9 @@
 from __future__ import annotations
 
 import uuid
+from datetime import datetime, timezone
 
-from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, HTTPException, Request, UploadFile
+from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -15,7 +16,6 @@ from ..deps import (
     require_engagement_owner,
 )
 from ..ingest import get_or_create_uploaded_source, store_upload
-from ..jobs import enqueue_index_document_job, schedule_pipeline_drain
 from ..models import Document, DocumentChunk, Engagement, Source, SourceKind
 from ..schemas import DocumentRead, DocumentTextRead
 from ..storage import Storage
@@ -29,8 +29,6 @@ _MAX_BYTES = MAX_UPLOAD_MB * 1024 * 1024
 @router.post("/engagements/{engagement_id}/documents", response_model=list[DocumentRead], status_code=201)
 async def upload_documents(
     engagement_id: uuid.UUID,
-    request: Request,
-    background: BackgroundTasks,
     kind: SourceKind = Form(...),
     files: list[UploadFile] = File(default=[]),
     session: AsyncSession = Depends(get_session),
@@ -55,22 +53,26 @@ async def upload_documents(
             session, storage, engagement_id, source.id, f.filename or "upload", f.content_type, data
         )
         created.append(doc)
-    for doc in created:
-        await enqueue_index_document_job(session, doc)
     await session.commit()
-
-    schedule_pipeline_drain(background, request.app, max_jobs=len(created))
 
     return created
 
 
-async def _owned_document(session: AsyncSession, document_id: uuid.UUID, user: AuthUser) -> Document:
+async def _owned_document(
+    session: AsyncSession,
+    document_id: uuid.UUID,
+    user: AuthUser,
+    *,
+    include_inactive: bool = False,
+) -> Document:
     """Load a document only if the caller owns its engagement (document → source → engagement)."""
     doc = await session.get(Document, document_id)
     if doc is None:
         raise HTTPException(status_code=404, detail="document not found")
     src = await session.get(Source, doc.source_id)
     if src is None:
+        raise HTTPException(status_code=404, detail="document not found")
+    if not include_inactive and not doc.is_active:
         raise HTTPException(status_code=404, detail="document not found")
     await assert_owner(session, src.engagement_id, user)
     return doc
@@ -115,6 +117,8 @@ async def delete_document(
     session: AsyncSession = Depends(get_session),
     user: AuthUser = Depends(get_current_user),
 ) -> None:
-    doc = await _owned_document(session, document_id, user)
-    await session.delete(doc)
+    doc = await _owned_document(session, document_id, user, include_inactive=True)
+    doc.is_active = False
+    doc.deleted_at = datetime.now(timezone.utc)
+    doc.deleted_by = user.id
     await session.commit()

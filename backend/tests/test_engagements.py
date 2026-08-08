@@ -12,6 +12,7 @@ async def test_patch_stores_entity_and_jurisdictions(client):
         json={
             "entity_name": "GlobalTech Netherlands BV",
             "jurisdictions": ["Netherlands", "Germany", "Netherlands"],
+            "fiscal_year": "FY2025",
             "website_url": "https://globaltech.example",
             "selected_source_kinds": ["public", "interview"],
         },
@@ -20,12 +21,14 @@ async def test_patch_stores_entity_and_jurisdictions(client):
     body = r.json()
     assert body["entity_name"] == "GlobalTech Netherlands BV"
     assert sorted(body["jurisdictions"]) == ["Germany", "Netherlands"]  # de-duped
+    assert body["fiscal_year"] == "FY2025"
     assert body["website_url"] == "https://globaltech.example"
     assert body["selected_source_kinds"] == ["public", "interview"]
 
     got = (await client.get(f"/engagements/{eid}")).json()
     assert got["entity_name"] == "GlobalTech Netherlands BV"
     assert sorted(got["jurisdictions"]) == ["Germany", "Netherlands"]
+    assert got["fiscal_year"] == "FY2025"
     assert got["website_url"] == "https://globaltech.example"
     assert got["selected_source_kinds"] == ["public", "interview"]
 
@@ -75,5 +78,6 @@ async def test_list_returns_named_engagements_newest_first(client):
     beta = next(f for f in files if f["id"] == b)
     assert beta["entity_name"] == "Beta Co"
     assert beta["jurisdictions"] == []
+    assert beta["fiscal_year"] is None
     alpha = next(f for f in files if f["id"] == a)
     assert alpha["jurisdictions"] == ["Netherlands"]

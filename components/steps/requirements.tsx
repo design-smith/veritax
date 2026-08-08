@@ -138,7 +138,14 @@ export default function RequirementsStep({ engagementId, jurisdictions, onContin
   const [indexPollNonce, setIndexPollNonce] = useState(0)
   // Documents index HERE (not on the Planning screen). Assessment waits until they're all embedded.
   const [docReady, setDocReady] = useState(false)
-  const [indexStatus, setIndexStatus] = useState<{ done: number; total: number; failed: number }>({ done: 0, total: 0, failed: 0 })
+  const [indexStatus, setIndexStatus] = useState<{ done: number; total: number; failed: number; extracting: number; extracted: number; needsAttention: number }>({
+    done: 0,
+    total: 0,
+    failed: 0,
+    extracting: 0,
+    extracted: 0,
+    needsAttention: 0,
+  })
 
   const coverageRef = useRef(coverageByJuris); coverageRef.current = coverageByJuris
   const startedRef = useRef(started); startedRef.current = started
@@ -219,25 +226,31 @@ export default function RequirementsStep({ engagementId, jurisdictions, onContin
     }
   }, [engagementId, poll])
 
-  // Index-first: poll the engagement's document statuses until every uploaded file is embedded
-  // (or failed) before any assessment starts, so no requirement is assessed on empty context.
+  // Requirements startup now kicks off indexing; this poll is only a progress signal.
   useEffect(() => {
     if (!engagementId) return
     let cancelled = false
     let timer: ReturnType<typeof setTimeout> | null = null
     let failures = 0
     setDocReady(false)
-    setIndexStatus({ done: 0, total: 0, failed: 0 })
+    setIndexStatus({ done: 0, total: 0, failed: 0, extracting: 0, extracted: 0, needsAttention: 0 })
     const check = async () => {
       try {
         const eng = await api.getEngagement(engagementId)
-        const docs = eng.sources.flatMap(sc => sc.documents)
+        const skipped = new Set(
+          Object.values(coverageRef.current)
+            .flatMap(c => c.skipped_documents.map(doc => doc.document_id))
+        )
+        const docs = eng.sources.flatMap(sc => sc.documents).filter(doc => !skipped.has(doc.id))
         const total = docs.length
         const done = docs.filter(d => d.status === "embedded" || d.status === "failed").length
         const failed = docs.filter(d => d.status === "failed").length
+        const extracting = docs.filter(d => d.extraction_status === "pending" || d.extraction_status === "extracting").length
+        const extracted = docs.filter(d => d.extraction_status === "extracted" || d.extraction_status === "partially_extracted").length
+        const needsAttention = docs.filter(d => d.extraction_status === "failed" || d.extraction_status === "needs_review").length
         if (cancelled) return
-        setIndexStatus({ done, total, failed })
-        if (total === 0 || done >= total) setDocReady(true)
+        setIndexStatus({ done, total, failed, extracting, extracted, needsAttention })
+        if (total === 0 || (done >= total && extracting === 0)) setDocReady(true)
         else timer = setTimeout(check, 1500)
       } catch (e) {
         console.error("[veritax] index status poll failed:", e)
@@ -258,19 +271,19 @@ export default function RequirementsStep({ engagementId, jurisdictions, onContin
     return () => { cancelled = true; if (timer) clearTimeout(timer) }
   }, [engagementId, indexPollNonce])
 
-  // Once documents are indexed, start assessing the FIRST jurisdiction. The rest stay grey until selected.
+  // Start assessing the FIRST jurisdiction; the backend indexes uploaded docs before matching.
   useEffect(() => {
-    if (!engagementId || jurisdictions.length === 0 || !docReady) return
+    if (!engagementId || jurisdictions.length === 0) return
     setActive(prev => (jurisdictions.includes(prev) ? prev : jurisdictions[0]))
     startJurisdiction(jurisdictions[0])
     return () => { if (pollRef.current) { clearTimeout(pollRef.current); pollRef.current = null } }
-  }, [engagementId, jurisdictions, startJurisdiction, docReady])
+  }, [engagementId, jurisdictions, startJurisdiction])
 
   function selectJurisdiction(j: string) {
     setActive(j)
     setOpenReqId(null)
     setFilters(new Set())
-    if (docReady) startJurisdiction(j)  // begins processing if it hasn't been yet
+    startJurisdiction(j)  // begins processing if it hasn't been yet
   }
 
   const coverage = coverageByJuris[activeJurisdiction] ?? null
@@ -281,7 +294,7 @@ export default function RequirementsStep({ engagementId, jurisdictions, onContin
   const coverageFailed = (s?.failed ?? 0) > 0
   const readinessMessage = coverageReady ? null : (
     s?.draft_blocker ??
-    (!docReady ? "documents are still indexing" : coverage ? "requirements are not ready for drafting" : "requirements have not been assessed")
+    (coverage ? "requirements are not ready for drafting" : !docReady ? "documents are still indexing" : "requirements have not been assessed")
   )
   const readinessAction = coverageFailed
     ? "Retry failed requirements before drafting."
@@ -601,14 +614,38 @@ export default function RequirementsStep({ engagementId, jurisdictions, onContin
             </div>
             <CoverageDonut present={s?.present ?? 0} partial={s?.partial ?? 0} missing={s?.missing ?? 0} active={filters} onToggle={toggleFilter} size={52} />
           </div>
+          {coverage?.skipped_documents.length ? (
+            <Animate enter="slide-up" duration={140}>
+              <div style={{
+                margin: "0 0 1rem",
+                padding: "0.75rem 0.875rem",
+                border: "1px solid var(--color-border)",
+                borderRadius: "var(--radius-md)",
+                background: "var(--color-background-secondary)",
+              }}>
+                <p style={{ fontSize: "var(--font-text-sm-size)", color: "var(--color-text)", margin: "0 0 0.375rem" }}>
+                  Some uploaded files were skipped because they appear outside this engagement scope.
+                </p>
+                <div style={{ display: "flex", flexDirection: "column", gap: "0.25rem" }}>
+                  {coverage.skipped_documents.map(doc => (
+                    <p key={doc.document_id} style={{ fontSize: "var(--font-text-xs-size)", color: "var(--color-text-secondary)", margin: 0 }}>
+                      {doc.filename} - {doc.reason}
+                    </p>
+                  ))}
+                </div>
+              </div>
+            </Animate>
+          ) : null}
           {!docReady ? (
             <div style={{ display: "flex", flexDirection: "column", gap: "0.5rem" }}>
               <p style={{ display: "flex", alignItems: "center", gap: "0.5rem", fontSize: "var(--font-text-sm-size)", color: "var(--color-text-secondary)", margin: 0 }}>
                 <Loader2 size={14} className="animate-spin" />
-                Indexing documents{indexStatus.total > 0 ? ` — ${indexStatus.done} of ${indexStatus.total}` : "…"}
+                Preparing documents{indexStatus.total > 0 ? ` — ${indexStatus.done} of ${indexStatus.total} indexed` : "…"}
+                {indexStatus.extracting > 0 ? ` · ${indexStatus.extracting} extracting evidence` : ""}
+                {indexStatus.extracted > 0 ? ` · ${indexStatus.extracted} extracted` : ""}
               </p>
               <p style={{ fontSize: "var(--font-text-xs-size)", color: "var(--color-text-tertiary)", margin: 0 }}>
-                Requirements are assessed once the documents finish indexing.
+                Requirements are assessed once documents finish indexing; structured evidence appears as extraction settles.
               </p>
               {indexStatus.failed > 0 && (
                 <div style={{ display: "flex", alignItems: "center", gap: "0.5rem", flexWrap: "wrap" }}>
@@ -619,6 +656,11 @@ export default function RequirementsStep({ engagementId, jurisdictions, onContin
                     {recovering ? "Retrying..." : "Retry"}
                   </button>
                 </div>
+              )}
+              {indexStatus.needsAttention > 0 && (
+                <p style={{ fontSize: "var(--font-text-xs-size)", color: "var(--color-text-tertiary)", margin: 0 }}>
+                  {indexStatus.needsAttention} document{indexStatus.needsAttention === 1 ? "" : "s"} need structured-evidence attention.
+                </p>
               )}
             </div>
           ) : !coverage ? (

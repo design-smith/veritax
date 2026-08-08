@@ -134,7 +134,7 @@ function uploadErrorMessage(err: unknown): string {
 
 // uploading → sent, awaiting response; processing → backend embedding; done → embedded; error → rejected/failed
 type UploadStatus = "uploading" | "processing" | "done" | "error"
-interface UploadItem { id: string; documentId?: string; name: string; status: UploadStatus; error?: string }
+interface UploadItem { id: string; documentId?: string; name: string; status: UploadStatus; error?: string; extractionStatus?: string | null }
 
 // Backend DocumentStatus → chip status. Poll until it settles (embedded/failed).
 const DOC_STATUS: Record<string, UploadStatus> = {
@@ -142,6 +142,14 @@ const DOC_STATUS: Record<string, UploadStatus> = {
 }
 const STATUS_LABEL: Record<UploadStatus, string> = {
   uploading: "Uploading…", processing: "Processing…", done: "Processed", error: "Failed",
+}
+
+const extractionLabel = (status?: string | null) => {
+  if (!status) return null
+  if (status === "pending" || status === "extracting") return "Extracting"
+  if (status === "extracted" || status === "partially_extracted") return "Extracted"
+  if (status === "failed" || status === "needs_review") return "Needs attention"
+  return null
 }
 
 const EMPTY_DOCUMENTS: DocumentRead[] = []
@@ -152,6 +160,7 @@ const uploadItemFromDocument = (doc: DocumentRead): UploadItem => ({
   name: doc.original_filename,
   status: DOC_STATUS[doc.status] ?? "processing",
   error: doc.error ?? undefined,
+  extractionStatus: doc.extraction_status,
 })
 
 function UploadZone({ kind, accept = "*", hint }: { kind: SourceId; accept?: string; hint?: string }) {
@@ -187,7 +196,7 @@ function UploadZone({ kind, accept = "*", hint }: { kind: SourceId; accept?: str
         try {
           const doc = await api.getDocument(documentId)
           const status = DOC_STATUS[doc.status] ?? "processing"
-          setItems(p => p.map(x => (x.documentId === documentId ? { ...x, status, error: doc.error ?? undefined } : x)))
+          setItems(p => p.map(x => (x.documentId === documentId ? { ...x, status, error: doc.error ?? undefined, extractionStatus: doc.extraction_status } : x)))
           updateDocuments(kind, docs => docs.map(existing => (existing.id === documentId ? doc : existing)))
           if (status === "done" || status === "error") return
         } catch (err) {
@@ -350,6 +359,17 @@ function UploadZone({ kind, accept = "*", hint }: { kind: SourceId; accept?: str
                 {f.status === "done" && <Check size={11} style={{ color: "var(--color-text-success-soft)", flexShrink: 0 }} />}
                 {f.status === "error" && <span style={{ color: "var(--color-text-danger-soft)" }}>!</span>}
                 <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{f.name}</span>
+                {extractionLabel(f.extractionStatus) && (
+                  <span style={{
+                    color: f.extractionStatus === "failed" || f.extractionStatus === "needs_review"
+                      ? "var(--color-text-caution-soft)"
+                      : "var(--color-text-tertiary)",
+                    flexShrink: 0,
+                    fontSize: "10px",
+                  }}>
+                    {extractionLabel(f.extractionStatus)}
+                  </span>
+                )}
                 {f.status === "error" && f.documentId && (
                   <button type="button" onClick={e => { e.stopPropagation(); void retryFile(f) }}
                     style={{ background: "none", border: "none", cursor: "pointer", color: "var(--color-text-info-soft)", lineHeight: 1, padding: 0, flexShrink: 0, fontSize: "10px" }}>
@@ -568,6 +588,7 @@ export default function PlanningStep({
   engagementId,
   jurisdictions, onJurisdictionsChange,
   entity, onEntityChange,
+  fiscalYear, onFiscalYearChange,
   documentsByKind, updateDocuments,
   sourceRows, rememberSourceRow,
   websiteUrl, onWebsiteUrlChange,
@@ -578,6 +599,8 @@ export default function PlanningStep({
   onJurisdictionsChange: (v: string[]) => void
   entity: string
   onEntityChange: (v: string) => void
+  fiscalYear: string
+  onFiscalYearChange: (v: string) => void
   documentsByKind: PlanningDocumentMap
   updateDocuments: (kind: SourceId, updater: (docs: DocumentRead[]) => DocumentRead[]) => void
   sourceRows: PlanningSourceRow[]
@@ -668,6 +691,13 @@ export default function PlanningStep({
         <div style={{ flex: 1 }}>
           <label style={FIELD_LABEL}>Entity</label>
           <input type="text" placeholder="Entity name" value={entity} onChange={e => onEntityChange(e.target.value)}
+            onFocus={e => { e.currentTarget.style.borderColor = "var(--input-outline-border-color-focus)" }}
+            onBlur={e => { e.currentTarget.style.borderColor = "var(--input-outline-border-color)" }}
+            style={OUTLINE_INPUT} />
+        </div>
+        <div style={{ flex: "0 0 120px" }}>
+          <label style={FIELD_LABEL}>Fiscal year</label>
+          <input type="text" placeholder="FY2025" value={fiscalYear} onChange={e => onFiscalYearChange(e.target.value)}
             onFocus={e => { e.currentTarget.style.borderColor = "var(--input-outline-border-color-focus)" }}
             onBlur={e => { e.currentTarget.style.borderColor = "var(--input-outline-border-color)" }}
             style={OUTLINE_INPUT} />

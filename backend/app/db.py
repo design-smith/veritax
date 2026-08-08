@@ -56,16 +56,27 @@ async def init_db(eng=engine) -> None:
             await conn.run_sync(Base.metadata.create_all)
             log.info("db init: metadata schema ready")
             # No Alembic: add newer columns idempotently so an already-created prod table gets them too.
+            await conn.execute(text(
+                "DO $$ BEGIN "
+                "IF EXISTS (SELECT 1 FROM pg_type WHERE typname = 'pipeline_job_kind') THEN "
+                "ALTER TYPE pipeline_job_kind ADD VALUE IF NOT EXISTS 'extract_document'; "
+                "END IF; END $$;"
+            ))
             await conn.execute(text("ALTER TABLE engagements ADD COLUMN IF NOT EXISTS user_id uuid"))
             await conn.execute(text("CREATE INDEX IF NOT EXISTS ix_engagements_user_id ON engagements (user_id)"))
             await conn.execute(text(
                 "ALTER TABLE engagements ADD COLUMN IF NOT EXISTS selected_source_kinds "
                 "jsonb NOT NULL DEFAULT '[]'::jsonb"
             ))
+            await conn.execute(text("ALTER TABLE engagements ADD COLUMN IF NOT EXISTS fiscal_year text"))
             await conn.execute(text(
                 "ALTER TABLE documents ADD COLUMN IF NOT EXISTS status_updated_at "
                 "timestamp with time zone DEFAULT now()"
             ))
+            await conn.execute(text("ALTER TABLE documents ADD COLUMN IF NOT EXISTS extraction_status text"))
+            await conn.execute(text("ALTER TABLE documents ADD COLUMN IF NOT EXISTS is_active boolean NOT NULL DEFAULT true"))
+            await conn.execute(text("ALTER TABLE documents ADD COLUMN IF NOT EXISTS deleted_at timestamp with time zone"))
+            await conn.execute(text("ALTER TABLE documents ADD COLUMN IF NOT EXISTS deleted_by uuid"))
             await conn.execute(text(
                 "ALTER TABLE requirement_coverage ADD COLUMN IF NOT EXISTS status_updated_at "
                 "timestamp with time zone DEFAULT now()"
@@ -89,6 +100,17 @@ async def init_db(eng=engine) -> None:
             ))
             await conn.execute(text(
                 "ALTER TABLE risk_evidence ADD COLUMN IF NOT EXISTS verified boolean NOT NULL DEFAULT false"
+            ))
+            await conn.execute(text(
+                "ALTER TABLE coverage_supplements ADD COLUMN IF NOT EXISTS source_context "
+                "text NOT NULL DEFAULT 'supplement'"
+            ))
+            await conn.execute(text(
+                "ALTER TABLE coverage_supplements ADD COLUMN IF NOT EXISTS target_requirement_id uuid"
+            ))
+            await conn.execute(text(
+                "CREATE INDEX IF NOT EXISTS ix_coverage_supplements_target_requirement_id "
+                "ON coverage_supplements (target_requirement_id)"
             ))
             log.info("db init: idempotent column updates ready")
 

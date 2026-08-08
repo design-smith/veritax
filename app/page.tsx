@@ -242,6 +242,7 @@ export default function Page() {
   const [visited, setVisited] = useState<Set<Step>>(new Set([1]))
   const [jurisdictions, setJ] = useState<string[]>([])
   const [entity, setEntity]   = useState("")
+  const [fiscalYear, setFiscalYear] = useState("")
   const [sources, setSources] = useState<Set<SourceId>>(new Set())
   const [websiteUrl, setWebsiteUrl] = useState("")
   const [planningSourceRows, setPlanningSourceRows] = useState<PlanningSourceRow[]>([])
@@ -305,6 +306,7 @@ export default function Page() {
       if (seq !== undefined && seq !== engagementLoadSeq.current) return false
       setEntity(eng.entity_name ?? "")
       setJ(eng.jurisdictions)
+      setFiscalYear(eng.fiscal_year ?? "")
       setSources(planningSourcesFromEngagement(eng))
       setWebsiteUrl(eng.website_url ?? "")
       setPlanningSourceRows(planningSourceRowsFromEngagement(eng))
@@ -439,7 +441,7 @@ export default function Page() {
   function newFile() {
     // Start a fresh Local File pipeline: jump into Planning immediately, then create the engagement
     // in the background so the pipeline shows instantly even if the create call is slow.
-    setEntity(""); setJ([]); setSources(new Set()); setDraftJump(null); setDraftReady(false)
+    setEntity(""); setJ([]); setFiscalYear(""); setSources(new Set()); setDraftJump(null); setDraftReady(false)
     setWebsiteUrl("")
     setPlanningSourceRows([])
     setPlanningDocuments(EMPTY_PLANNING_DOCUMENTS)
@@ -461,6 +463,7 @@ export default function Page() {
     engagementLoadSeq.current = seq
     setEntity(file.entity_name ?? "")
     setJ(file.jurisdictions)
+    setFiscalYear(file.fiscal_year ?? "")
     setSources(new Set())
     setWebsiteUrl("")
     setPlanningSourceRows([])
@@ -499,6 +502,7 @@ export default function Page() {
       api.patchEngagement(engagementId, {
         entity_name: entity,
         jurisdictions,
+        fiscal_year: fiscalYear,
         website_url: websiteUrl.trim(),
         selected_source_kinds: Array.from(sources),
       })
@@ -781,6 +785,7 @@ export default function Page() {
                 engagementId={engagementId}
                 jurisdictions={jurisdictions} onJurisdictionsChange={setJ}
                 entity={entity}              onEntityChange={setEntity}
+                fiscalYear={fiscalYear}      onFiscalYearChange={setFiscalYear}
                 documentsByKind={planningDocuments}
                 updateDocuments={updatePlanningDocuments}
                 sourceRows={planningSourceRows}

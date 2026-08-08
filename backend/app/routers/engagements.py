@@ -40,6 +40,7 @@ async def _to_read(
     session: AsyncSession,
     engagement_id: uuid.UUID,
     entity_id: uuid.UUID | None,
+    fiscal_year: str | None,
     website_url: str | None,
     selected_source_kinds: list[str] | None,
 ) -> EngagementRead:
@@ -82,10 +83,12 @@ async def _to_read(
                     Document.size_bytes,
                     Document.content_hash,
                     Document.status,
+                    Document.extraction_status,
                     Document.error,
                     Document.created_at,
                 )
                 .where(Document.source_id.in_(source_ids))
+                .where(Document.is_active.is_(True))
                 .order_by(Document.created_at)
             )
         ).all()
@@ -98,6 +101,7 @@ async def _to_read(
                     size_bytes=doc.size_bytes,
                     content_hash=doc.content_hash,
                     status=doc.status,
+                    extraction_status=doc.extraction_status,
                     error=doc.error,
                     created_at=doc.created_at,
                 )
@@ -115,6 +119,7 @@ async def _to_read(
         id=engagement_id,
         entity_name=entity_name,
         jurisdictions=sorted(jurisdictions),
+        fiscal_year=fiscal_year,
         website_url=website_url,
         selected_source_kinds=selected,
         sources=[
@@ -150,7 +155,7 @@ async def list_engagements(
     """The caller's files, newest first. Only named engagements — unnamed shells stay hidden."""
     rows = (
         await session.execute(
-            select(Engagement.id, Entity.name, Engagement.updated_at)
+            select(Engagement.id, Entity.name, Engagement.fiscal_year, Engagement.updated_at)
             .join(Entity, Entity.id == Engagement.entity_id)
             .where(Engagement.user_id == user.id, Engagement.entity_id.is_not(None))
             .order_by(Engagement.updated_at.desc())
@@ -172,6 +177,7 @@ async def list_engagements(
             id=e.id,
             entity_name=e.name,
             jurisdictions=sorted(jurisdictions_by_engagement.get(e.id, [])),
+            fiscal_year=e.fiscal_year,
             updated_at=e.updated_at,
         )
         for e in rows
@@ -186,13 +192,20 @@ async def get_engagement(
 ) -> EngagementRead:
     row = (
         await session.execute(
-            select(Engagement.id, Engagement.entity_id, Engagement.website_url, Engagement.selected_source_kinds, Engagement.user_id)
+            select(
+                Engagement.id,
+                Engagement.entity_id,
+                Engagement.fiscal_year,
+                Engagement.website_url,
+                Engagement.selected_source_kinds,
+                Engagement.user_id,
+            )
             .where(Engagement.id == engagement_id)
         )
     ).one_or_none()
     if row is None or row.user_id != user.id:
         raise HTTPException(status_code=404, detail="engagement not found")
-    return await _to_read(session, row.id, row.entity_id, row.website_url, row.selected_source_kinds)
+    return await _to_read(session, row.id, row.entity_id, row.fiscal_year, row.website_url, row.selected_source_kinds)
 
 
 @router.patch("/{engagement_id}", response_model=EngagementRead)
@@ -227,6 +240,9 @@ async def patch_engagement(
                 seen.add(val)
                 eng.jurisdictions.append(EngagementJurisdiction(jurisdiction=val))
 
+    if body.fiscal_year is not None:
+        eng.fiscal_year = body.fiscal_year.strip() or None
+
     if body.website_url is not None:
         eng.website_url = body.website_url.strip() or None
         if eng.website_url:
@@ -239,4 +255,4 @@ async def patch_engagement(
         eng.selected_source_kinds = [kind.value for kind in _normalize_selected_source_kinds(body.selected_source_kinds)]
 
     await session.commit()
-    return await _to_read(session, eng.id, eng.entity_id, eng.website_url, eng.selected_source_kinds)
+    return await _to_read(session, eng.id, eng.entity_id, eng.fiscal_year, eng.website_url, eng.selected_source_kinds)

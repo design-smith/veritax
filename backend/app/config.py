@@ -19,6 +19,14 @@ class Settings(BaseSettings):
     s3_region: str = "us-east-1"
     storage_dir: str = "_storage"  # used by LocalStorage when S3 is not configured
 
+    # OCR fallback for scanned PDFs. Normal PDF text extraction is tried first; OCR only runs
+    # when the PDF text layer is effectively empty.
+    ocr_enabled: bool = True
+    ocr_command: str = "ocrmypdf"
+    ocr_language: str = "eng"
+    ocr_timeout_seconds: int = 600
+    ocr_min_text_chars: int = 200
+
     voyage_api_key: str = ""
     embedding_model: str = "voyage-law-2"
     embedding_dim: int = 1024
@@ -32,6 +40,9 @@ class Settings(BaseSettings):
     # one-call-per-element (today's behaviour) — the instant rollback if batching ever regresses quality.
     assess_batch_size: int = 1
     draft_batch_size: int = 1
+    # Optional extraction overrides. Blank means use the assessment provider/model.
+    extraction_provider: str = ""
+    extraction_model: str = ""
 
     # Anthropic — ASSESSMENT_MODEL (fast, per-requirement) + DRAFT_MODEL (quality, draft & risks).
     anthropic_api_key: str = ""
@@ -62,6 +73,40 @@ class Settings(BaseSettings):
     @property
     def cors_origin_list(self) -> list[str]:
         return [o.strip() for o in self.cors_origins.split(",") if o.strip()]
+
+    def resolved_llm_provider(self) -> str:
+        provider = self.llm_provider.strip().lower()
+        if provider:
+            return provider
+        if self.deepseek_api_key:
+            return "deepseek"
+        if self.anthropic_api_key:
+            return "anthropic"
+        return "fake"
+
+    def resolved_assessment_model(self) -> str:
+        provider = self.resolved_llm_provider()
+        if provider == "deepseek":
+            return self.deepseek_model
+        if provider == "anthropic":
+            return self.assessment_model
+        return "fake"
+
+    def resolved_extraction_provider(self) -> str:
+        return self.extraction_provider.strip().lower() or self.resolved_llm_provider()
+
+    def resolved_extraction_model(self) -> str:
+        model = self.extraction_model.strip()
+        if model:
+            return model
+        provider = self.resolved_extraction_provider()
+        if provider == self.resolved_llm_provider():
+            return self.resolved_assessment_model()
+        if provider == "deepseek":
+            return self.deepseek_model
+        if provider == "anthropic":
+            return self.assessment_model
+        return "fake"
 
 
 settings = Settings()

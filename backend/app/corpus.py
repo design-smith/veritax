@@ -15,12 +15,12 @@ import uuid
 from dataclasses import dataclass
 from collections.abc import Iterable
 
-from sqlalchemy import select
+from sqlalchemy import and_, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from .diagnostics import rss_mb
 from .embeddings import Embedder
-from .models import Document, DocumentChunk, DocumentStatus, Source
+from .models import Document, DocumentChunk, DocumentClassification, DocumentRelevance, DocumentStatus, Source
 
 log = logging.getLogger("veritax")
 
@@ -41,6 +41,21 @@ class DocContext:
 
 
 _CHUNK_SEP = "\n…\n"  # how _search_chunks joins a document's matched passages
+
+
+def usable_source_filter():
+    """Shared SQL guard for retrieval and future graph ingestion.
+
+    Documents classified as Out of Scope stay stored but never become model or graph context.
+    Supplements are eligible only when they pass the same normal scope rules.
+    """
+    return and_(
+        Document.is_active.is_(True),
+        or_(
+            DocumentClassification.document_id.is_(None),
+            DocumentClassification.relevance != DocumentRelevance.out_of_scope,
+        ),
+    )
 
 
 def context_chars(documents: Iterable[DocContext]) -> int:
@@ -89,7 +104,8 @@ async def document_filename_map(session: AsyncSession, engagement_id: uuid.UUID)
         await session.execute(
             select(Document.original_filename, Document.id)
             .join(Source, Source.id == Document.source_id)
-            .where(Source.engagement_id == engagement_id)
+            .outerjoin(DocumentClassification, DocumentClassification.document_id == Document.id)
+            .where(Source.engagement_id == engagement_id, usable_source_filter())
         )
     ).all()
     return {fn: str(did) for fn, did in rows}
@@ -121,9 +137,11 @@ async def document_contexts_by_id(
             )
             .join(Document, Document.id == DocumentChunk.document_id)
             .join(Source, Source.id == Document.source_id)
+            .outerjoin(DocumentClassification, DocumentClassification.document_id == Document.id)
             .where(
                 Document.id.in_(ids),
                 Document.status == DocumentStatus.embedded,
+                usable_source_filter(),
             )
             .order_by(DocumentChunk.document_id, DocumentChunk.chunk_index)
         )
@@ -225,9 +243,11 @@ async def _search_chunks(
             )
             .join(Document, Document.id == DocumentChunk.document_id)
             .join(Source, Source.id == Document.source_id)
+            .outerjoin(DocumentClassification, DocumentClassification.document_id == Document.id)
             .where(
                 Source.engagement_id == engagement_id,
                 Document.status == DocumentStatus.embedded,
+                usable_source_filter(),
             )
             .order_by(DocumentChunk.embedding.cosine_distance(qvec))
             .limit(k)
