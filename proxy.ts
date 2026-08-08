@@ -25,7 +25,9 @@ export async function proxy(request: NextRequest) {
   )
 
   const path = request.nextUrl.pathname
+  // Public routes: the login page and the no-login demo. Everything else requires auth.
   const isAuthRoute = path.startsWith("/login")
+  const isPublic = isAuthRoute || path.startsWith("/demo")
   let user = null
   try {
     const result = await supabase.auth.getUser()
@@ -43,7 +45,7 @@ export async function proxy(request: NextRequest) {
       name: error instanceof Error ? error.name : "UnknownError",
       message: error instanceof Error ? error.message : String(error),
     })
-    if (!isAuthRoute) {
+    if (!isPublic) {
       const url = request.nextUrl.clone()
       url.pathname = "/login"
       url.searchParams.set("reason", "auth-unavailable")
@@ -52,7 +54,7 @@ export async function proxy(request: NextRequest) {
     return response
   }
 
-  if (!user && !isAuthRoute) {
+  if (!user && !isPublic) {
     const url = request.nextUrl.clone()
     url.pathname = "/login"
     return NextResponse.redirect(url)
