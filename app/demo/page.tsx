@@ -6,6 +6,7 @@
 
 import { useState } from "react"
 import { Activity, CalendarDays, ChevronDown, FileText, ShieldCheck } from "lucide-react"
+import DemoDraft from "@/components/demo/DemoDraft"
 
 type Step = 1 | 2 | 3 | 4
 
@@ -15,6 +16,13 @@ const NAV: { step: Step; label: string }[] = [
   { step: 3, label: "Draft" },
   { step: 4, label: "Risks" },
 ]
+
+// Steps 1/2/4 are empty in the demo — a visitor passes through them before reaching the prefilled Draft.
+const EMPTY_STATE: Record<Exclude<Step, 3>, { title: string; detail: string }> = {
+  1: { title: "Add your sources", detail: "Upload financials, agreements, and interview notes to begin." },
+  2: { title: "No requirements assessed yet", detail: "Requirement coverage appears once your sources are analysed." },
+  4: { title: "No risk analysis yet", detail: "Risk analysis runs after the Local File draft is complete." },
+}
 
 const DISABLED_PAGE = {
   display: "flex", alignItems: "center", gap: "0.5rem", marginTop: "0.25rem",
@@ -119,16 +127,22 @@ export default function DemoPage() {
           })}
         </nav>
 
-        {/* Section content — placeholder, to be prefilled with canned content later. */}
-        <div style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", padding: "3rem" }}>
-          <div style={{ textAlign: "center", color: "var(--color-text-tertiary, #999)" }}>
-            <p style={{ margin: 0, fontSize: "15px", fontWeight: 500, color: "#555" }}>
-              {NAV.find(n => n.step === step)?.label} — demo preview
-            </p>
-            <p style={{ margin: "0.5rem 0 0", fontSize: "13px", color: "#999" }}>
-              Content coming soon.
-            </p>
-          </div>
+        {/* Section content — Draft is prefilled; the other steps show empty states. */}
+        <div style={{ flex: 1, display: "flex", overflow: "hidden" }}>
+          {step === 3 ? (
+            <DemoDraft />
+          ) : (
+            <div style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", padding: "3rem" }}>
+              <div style={{ textAlign: "center", maxWidth: 360 }}>
+                <p style={{ margin: 0, fontSize: "15px", fontWeight: 500, color: "#555" }}>
+                  {EMPTY_STATE[step as Exclude<Step, 3>].title}
+                </p>
+                <p style={{ margin: "0.5rem 0 0", fontSize: "13px", color: "#999", lineHeight: 1.5 }}>
+                  {EMPTY_STATE[step as Exclude<Step, 3>].detail}
+                </p>
+              </div>
+            </div>
+          )}
         </div>
       </div>
     </div>
