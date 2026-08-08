@@ -6,7 +6,10 @@
 
 import { useState } from "react"
 import { Activity, CalendarDays, ChevronDown, FileText, ShieldCheck } from "lucide-react"
+import DemoPlanning from "@/components/demo/DemoPlanning"
+import DemoRequirements from "@/components/demo/DemoRequirements"
 import DemoDraft from "@/components/demo/DemoDraft"
+import DemoRisks from "@/components/demo/DemoRisks"
 
 type Step = 1 | 2 | 3 | 4
 
@@ -16,13 +19,6 @@ const NAV: { step: Step; label: string }[] = [
   { step: 3, label: "Draft" },
   { step: 4, label: "Risks" },
 ]
-
-// Steps 1/2/4 are empty in the demo — a visitor passes through them before reaching the prefilled Draft.
-const EMPTY_STATE: Record<Exclude<Step, 3>, { title: string; detail: string }> = {
-  1: { title: "Add your sources", detail: "Upload financials, agreements, and interview notes to begin." },
-  2: { title: "No requirements assessed yet", detail: "Requirement coverage appears once your sources are analysed." },
-  4: { title: "No risk analysis yet", detail: "Risk analysis runs after the Local File draft is complete." },
-}
 
 const DISABLED_PAGE = {
   display: "flex", alignItems: "center", gap: "0.5rem", marginTop: "0.25rem",
@@ -127,22 +123,12 @@ export default function DemoPage() {
           })}
         </nav>
 
-        {/* Section content — Draft is prefilled; the other steps show empty states. */}
+        {/* Section content — every step is a prefilled static replica of the Fusion (Qatar) engagement. */}
         <div style={{ flex: 1, display: "flex", overflow: "hidden" }}>
-          {step === 3 ? (
-            <DemoDraft />
-          ) : (
-            <div style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", padding: "3rem" }}>
-              <div style={{ textAlign: "center", maxWidth: 360 }}>
-                <p style={{ margin: 0, fontSize: "15px", fontWeight: 500, color: "#555" }}>
-                  {EMPTY_STATE[step as Exclude<Step, 3>].title}
-                </p>
-                <p style={{ margin: "0.5rem 0 0", fontSize: "13px", color: "#999", lineHeight: 1.5 }}>
-                  {EMPTY_STATE[step as Exclude<Step, 3>].detail}
-                </p>
-              </div>
-            </div>
-          )}
+          {step === 1 && <DemoPlanning />}
+          {step === 2 && <DemoRequirements />}
+          {step === 3 && <DemoDraft />}
+          {step === 4 && <DemoRisks />}
         </div>
       </div>
     </div>
