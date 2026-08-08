@@ -2,6 +2,7 @@
 // Base URL from env; falls back to local dev. All calls throw on non-2xx so callers can log.
 
 import { createClient } from "@/lib/supabase/client"
+import { demoApi, inDemo } from "@/lib/demo-api"
 
 export const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:8000"
 const BASE = API_BASE
@@ -348,7 +349,7 @@ async function fetchCurrentHealth(): Promise<HealthResponse> {
   return { ...basic, db: undefined, source: "health" }
 }
 
-export const api = {
+const realApi = {
   health: async (): Promise<HealthResponse> => {
     let lastError: unknown = null
     for (let attempt = 0; attempt < HEALTH_RETRY_DELAYS_MS.length; attempt += 1) {
@@ -500,3 +501,15 @@ export const api = {
     })
       .then(r => parse<RiskResponse>(r)),
 }
+
+// On the public /demo route, serve canned data from lib/demo-api instead of the network so the real
+// app + step components run unchanged with nothing actually executing. Every other route is untouched.
+export const api: typeof realApi = new Proxy(realApi, {
+  get(target, prop, receiver) {
+    if (inDemo()) {
+      const override = (demoApi as Record<PropertyKey, unknown>)[prop]
+      if (typeof override === "function") return override
+    }
+    return Reflect.get(target, prop, receiver)
+  },
+})

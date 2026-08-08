@@ -1,5 +1,5 @@
 // Prefilled demo content — the Veritax Outsourcing & Services (Qatar) Local File, FY2024.
-// Rendered by the public /demo Draft tab (components/demo/DemoDraft.tsx). Static, display-only.
+// Consumed by lib/demo-api.ts, which serves it to the real Draft step on the public /demo route.
 
 export interface DemoTable {
   title?: string
