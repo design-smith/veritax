@@ -1,6 +1,6 @@
 "use client"
 
-// Static demo of the Planning step — the intake view, prefilled for the Fusion (Qatar) engagement.
+// Static demo of the Planning step — the intake view, prefilled for the Veritax (Qatar) engagement.
 // Display-only: inputs are read-only, sources are pre-selected, files show as processed. No api/auth.
 
 import { Check, ChevronDown, Globe, Upload, X } from "lucide-react"
@@ -94,7 +94,7 @@ const SOURCES: { label: string; primary?: boolean; content: () => React.ReactNod
     label: "Financial statements",
     content: () => (
       <div style={{ paddingLeft: "2rem", display: "flex", flexDirection: "column", gap: "0.75rem" }}>
-        <DropZone hint="PDF, Excel, CSV · up to 50 MB each" files={["FOS Audited Financial Statements FY2024.pdf", "Trial Balance FY2024.xlsx"]} />
+        <DropZone hint="PDF, Excel, CSV · up to 50 MB each" files={["VOS Audited Financial Statements FY2024.pdf", "Trial Balance FY2024.xlsx"]} />
         <ConnectorGrid which="erp" />
       </div>
     ),
@@ -103,7 +103,7 @@ const SOURCES: { label: string; primary?: boolean; content: () => React.ReactNod
     label: "Agreements, prior files, questionnaires",
     content: () => (
       <div style={{ paddingLeft: "2rem" }}>
-        <DropZone hint="PDF, Word, Excel · up to 50 MB each" files={["Prior Local File FY2023.pdf", "TP Questionnaire — FOS.docx"]} />
+        <DropZone hint="PDF, Word, Excel · up to 50 MB each" files={["Prior Local File FY2023.pdf", "TP Questionnaire - VOS.docx"]} />
       </div>
     ),
   },
@@ -111,7 +111,7 @@ const SOURCES: { label: string; primary?: boolean; content: () => React.ReactNod
     label: "Website / public info",
     content: () => (
       <div style={{ paddingLeft: "2rem", display: "flex", flexDirection: "column", gap: "0.5rem" }}>
-        <input readOnly value="https://fusionoutsourcing.qa" style={OUTLINE_INPUT} />
+        <input readOnly value="https://veritaxoutsourcing.qa" style={OUTLINE_INPUT} />
         <span style={{ display: "flex", alignItems: "center", gap: "0.3rem", fontSize: "var(--font-text-xs-size)", color: "var(--color-text-tertiary)" }}>
           <Globe size={11} /> The tool will pull publicly available information from this URL.
         </span>
@@ -123,7 +123,7 @@ const SOURCES: { label: string; primary?: boolean; content: () => React.ReactNod
     primary: true,
     content: () => (
       <div style={{ paddingLeft: "2rem", display: "flex", flexDirection: "column", gap: "0.75rem" }}>
-        <DropZone hint="TXT, PDF, Word, VTT, SRT · up to 50 MB each" files={["Management interview — Liam Trump.vtt"]} />
+        <DropZone hint="TXT, PDF, Word, VTT, SRT · up to 50 MB each" files={["Management interview - Karim Haddad.vtt"]} />
         <ConnectorGrid which="notetaker" />
       </div>
     ),
@@ -143,7 +143,7 @@ export default function DemoPlanning() {
         </div>
         <div style={{ flex: 1 }}>
           <label style={FIELD_LABEL}>Entity</label>
-          <input readOnly value="Fusion Outsourcing & Services W.L.L." style={OUTLINE_INPUT} />
+          <input readOnly value="Veritax Outsourcing & Services W.L.L." style={OUTLINE_INPUT} />
         </div>
         <div style={{ flex: "0 0 120px" }}>
           <label style={FIELD_LABEL}>Fiscal year</label>

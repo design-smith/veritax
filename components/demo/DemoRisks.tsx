@@ -1,6 +1,6 @@
 "use client"
 
-// Static demo of the Risks step — findings register, prefilled for the Fusion (Qatar) file.
+// Static demo of the Risks step — findings register, prefilled for the Veritax (Qatar) file.
 // Display-only: findings/evidence are illustrative and coherent with the drafted Local File. No api/auth.
 
 import { useState } from "react"
@@ -33,18 +33,18 @@ const FINDINGS: Finding[] = [
     description: "QAR 5.2m of related-party fund transfers were made interest-free with no loan agreements, repayment schedules, or terms. A tax authority may recharacterise these as financing and impute interest.",
     exposureLabel: "Imputed-interest / recharacterisation", estimated: true, confidence: "medium",
     evidence: [
-      { kind: "section", reference: "Draft §3.1.1", detail: "No formal loan agreements were executed; no repayment schedules or interest were imposed.", verified: true, source_label: "Local File draft" },
-      { kind: "figure", reference: "Transaction One total", detail: "TOTAL in QAR 5,235,268.87", verified: true, source_label: "FOS Trial Balance FY2024.xlsx" },
+      { kind: "section", reference: "Draft §3.1.1", detail: "No loan agreements were signed, no repayment or maturity dates were set, and no interest or financing margin was charged.", verified: true, source_label: "Local File draft" },
+      { kind: "figure", reference: "Transaction One total", detail: "TOTAL in QAR 5,235,268.87", verified: true, source_label: "VOS Trial Balance FY2024.xlsx" },
     ],
     recommendations: ["Execute intercompany loan or cash-pooling agreements with defined terms.", "Document the liquidity-management rationale and reciprocal nature contemporaneously."],
   },
   {
     id: "f2", severity: "high", kind: "discrepancy",
     title: "No signed intercompany agreements on file",
-    description: "The file states there are no signed transfer pricing agreements between FOS and related entities, yet material controlled transactions occurred. This is a documentation gap the arm's-length analysis relies on.",
+    description: "The file states there are no signed transfer pricing agreements between VOS and related entities, yet material controlled transactions occurred. This is a documentation gap the arm's-length analysis relies on.",
     exposureLabel: "Documentation gap", estimated: true, confidence: "high",
     evidence: [
-      { kind: "section", reference: "Draft §3.2", detail: "There are no intra-group transfer pricing agreements signed between FOS and other related entities.", verified: true, source_label: "Local File draft" },
+      { kind: "section", reference: "Draft §3.2", detail: "VOS has not signed any intragroup transfer pricing agreements with its related entities.", verified: true, source_label: "Local File draft" },
     ],
     recommendations: ["Put executed agreements in place for the recurring controlled transactions.", "Where none exist, deduce and document the terms from the parties' conduct."],
   },

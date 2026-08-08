@@ -1,6 +1,6 @@
 "use client"
 
-// Static demo of the Requirements step — deterministic coverage view, prefilled for the Fusion (Qatar) file.
+// Static demo of the Requirements step — deterministic coverage view, prefilled for the Veritax (Qatar) file.
 // Display-only: no api/auth. Statuses/evidence are illustrative and coherent with the drafted Local File.
 
 import { RefreshCw } from "lucide-react"
