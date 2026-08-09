@@ -30,7 +30,61 @@ export const inDemo = () =>
   typeof window !== "undefined" && window.location.pathname.startsWith("/demo")
 
 export const DEMO_ENGAGEMENT_ID = "demo-vos-qatar-fy2024"
-const JURISDICTION = "Qatar"
+
+// The file is prepared for four jurisdictions. Qatar is the home/base; the other three are slight
+// variations — local applicable-law framing in the draft plus one jurisdiction-specific risk finding.
+// Qatar stays first because the app drives draft-unlock off jurisdictions[0]. Entity, figures, and
+// coverage (all-present, draft-ready) are shared so every tab behaves the same.
+const JURISDICTIONS_COVERED = ["Qatar", "United Arab Emirates", "Singapore", "South Africa"]
+
+interface Variant { taxRegs: string; taxLaw: string; extraRisk?: RiskFinding }
+
+function mkExtraRisk(id: string, title: string, description: string, exposure_label: string, quote: string, recs: string[]): RiskFinding {
+  return {
+    id, kind: "exposure", severity: "medium", title, description,
+    exposure_label, exposure_estimated: true, exposure_amount: null, exposure_currency: null, confidence: "medium",
+    evidence: [{ kind: "section", reference: "Draft §3.1.1", detail: quote, source_label: "Local File draft", verified: true, document_id: null }],
+    recommendations: recs,
+  }
+}
+
+const VARIANTS: Record<string, Variant> = {
+  "Qatar": { taxRegs: "Qatari Tax Regulations", taxLaw: "Qatari tax law" },
+  "United Arab Emirates": {
+    taxRegs: "UAE Transfer Pricing Regulations", taxLaw: "UAE Corporate Tax law",
+    extraRisk: mkExtraRisk(
+      "f-uae", "Interest-free related-party funding under UAE Corporate Tax",
+      "The UAE Corporate Tax regime expects related-party financing to carry an arm's-length interest rate. The interest-free fund transfers may attract a transfer pricing adjustment and a disclosure-form entry.",
+      "Arm's-length interest",
+      "They carried no interest, ran in both directions, and were meant only to keep the Group's operations steady.",
+      ["Benchmark an arm's-length interest rate for the related-party balances.", "Document the position and complete the UAE Corporate Tax TP disclosure form."],
+    ),
+  },
+  "Singapore": {
+    taxRegs: "IRAS Transfer Pricing Guidelines", taxLaw: "Singapore Income Tax law",
+    extraRisk: mkExtraRisk(
+      "f-sg", "Cost pass-throughs charged without a markup (IRAS)",
+      "IRAS expects routine intra-group services to earn an arm's-length markup. Settling supplier payments at cost, with no markup, may be challenged for the Singapore file.",
+      "Routine-service markup",
+      "They are straight cost pass-throughs, so no markup or further remuneration was applied.",
+      ["Assess whether a routine-service markup applies under the IRAS guidance.", "Confirm the SGD documentation thresholds and retain contemporaneous support."],
+    ),
+  },
+  "South Africa": {
+    taxRegs: "South African Transfer Pricing rules", taxLaw: "South African tax law",
+    extraRisk: mkExtraRisk(
+      "f-za", "Related-party funding and potential thin-capitalisation (SARS)",
+      "SARS scrutinises interest-free related-party funding and thin-capitalisation. The undocumented fund transfers may be adjusted and should be cross-referenced to the group Master File.",
+      "Thin-capitalisation / funding",
+      "No loan agreements were signed, no repayment or maturity dates were set, and no interest or financing margin was charged.",
+      ["Set an arm's-length rate and terms for the related-party funding.", "Cross-reference the position to the group Master File retained for SARS."],
+    ),
+  },
+}
+
+const variantFor = (jur: string): Variant => VARIANTS[jur] ?? VARIANTS["Qatar"]
+const localize = (text: string, v: Variant): string =>
+  text.replaceAll("Qatari Tax Regulations", v.taxRegs).replaceAll("Qatari tax law", v.taxLaw)
 
 const DOC_FIN = "demo-doc-financials"
 const DOC_TB = "demo-doc-trialbalance"
@@ -65,7 +119,7 @@ const DOCS: Record<string, DocumentRead> = {
 const ENGAGEMENT: Engagement = {
   id: DEMO_ENGAGEMENT_ID,
   entity_name: "Veritax Outsourcing & Services W.L.L.",
-  jurisdictions: [JURISDICTION],
+  jurisdictions: JURISDICTIONS_COVERED,
   fiscal_year: "FY2024",
   website_url: "https://veritaxoutsourcing.qa",
   selected_source_kinds: ["financials", "agreements", "public", "interview"],
@@ -133,10 +187,10 @@ const COVERAGE_ROWS: CoverageRow[] = [
   row(11, "Arm's-length conclusion", "Explanation of why the results support an arm's-length outcome.", "The arm's-length conclusion is stated at the end of §5.", "Local File draft", "The result is therefore consistent with the arm's length principle.", "sec-5"),
 ]
 
-function coverage(): CoverageResponse {
+function coverage(jur: string): CoverageResponse {
   const required_total = COVERAGE_ROWS.length
   return {
-    jurisdiction: JURISDICTION,
+    jurisdiction: jur,
     summary: {
       total: COVERAGE_ROWS.length,
       required_total,
@@ -159,32 +213,38 @@ function coverage(): CoverageResponse {
 
 // ── Draft ─────────────────────────────────────────────────────────────────────
 
-const DRAFT_SECTIONS: DraftSection[] = DEMO_SECTIONS.map(s => ({
-  id: `sec-${s.order}`,
-  requirement_key: `req-${s.order}`,
-  element_order: s.order,
-  element_name: s.title,
-  status: "drafted",
-  // Prefix the element heading so DraftDocument's leading-heading strip leaves the body intact.
-  content: `## ${s.order}. ${s.title}\n\n${s.body}`,
-  tables: (s.tables ?? []).map((t, i) => ({ id: `tbl-${s.order}-${i}`, title: t.title ?? "", columns: t.columns, rows: t.rows })),
-  charts: [],
-  error: null,
-  citations: [],
-}))
+function buildSections(v: Variant): DraftSection[] {
+  return DEMO_SECTIONS.map(s => ({
+    id: `sec-${s.order}`,
+    requirement_key: `req-${s.order}`,
+    element_order: s.order,
+    element_name: s.title,
+    status: "drafted",
+    // Prefix the element heading so DraftDocument's leading-heading strip leaves the body intact.
+    content: `## ${s.order}. ${s.title}\n\n${localize(s.body, v)}`,
+    tables: (s.tables ?? []).map((t, i) => ({ id: `tbl-${s.order}-${i}`, title: t.title ?? "", columns: t.columns, rows: t.rows })),
+    charts: [],
+    error: null,
+    citations: [],
+  }))
+}
 
-function draft(): DraftResponse {
+// Base (Qatar) sections, reused by the section-level helpers (regenerate/update by id).
+const DRAFT_SECTIONS: DraftSection[] = buildSections(variantFor("Qatar"))
+
+function draftFor(jur: string): DraftResponse {
+  const sections = buildSections(variantFor(jur))
   return {
-    jurisdiction: JURISDICTION,
+    jurisdiction: jur,
     draft_mode: "real",
-    summary: { total: DRAFT_SECTIONS.length, drafted: DRAFT_SECTIONS.length, pending: 0, failed: 0 },
-    sections: DRAFT_SECTIONS.map(s => ({ ...s })),
+    summary: { total: sections.length, drafted: sections.length, pending: 0, failed: 0 },
+    sections,
   }
 }
 
 // ── Risks ─────────────────────────────────────────────────────────────────────
 
-const FINDINGS: RiskFinding[] = [
+const BASE_FINDINGS: RiskFinding[] = [
   {
     id: "f1", kind: "exposure", severity: "high",
     title: "Intercompany fund transfers lack loan documentation",
@@ -228,21 +288,23 @@ const FINDINGS: RiskFinding[] = [
   },
 ]
 
-function risks(): RiskResponse {
+function risksFor(jur: string): RiskResponse {
+  const extra = variantFor(jur).extraRisk
+  const findings = extra ? [...BASE_FINDINGS, extra] : BASE_FINDINGS
   const by_severity: Record<string, number> = {}
   const by_kind: Record<string, number> = {}
-  for (const f of FINDINGS) {
+  for (const f of findings) {
     by_severity[f.severity] = (by_severity[f.severity] ?? 0) + 1
     by_kind[f.kind] = (by_kind[f.kind] ?? 0) + 1
   }
   return {
-    jurisdiction: JURISDICTION,
+    jurisdiction: jur,
     status: "done",
     error: null,
     analysis_mode: "real",
     stale: false,
-    summary: { total: FINDINGS.length, by_severity, by_kind },
-    findings: FINDINGS,
+    summary: { total: findings.length, by_severity, by_kind },
+    findings,
   }
 }
 
@@ -299,8 +361,8 @@ export const demoApi = {
   deleteDocument: async (): Promise<void> => {},
   createSource: async (): Promise<{ id: string }> => ({ id: rid() }),
 
-  startCoverage: async (): Promise<CoverageResponse> => coverage(),
-  getCoverage: async (): Promise<CoverageResponse> => coverage(),
+  startCoverage: async (_id: string, jurisdiction: string): Promise<CoverageResponse> => coverage(jurisdiction),
+  getCoverage: async (_id: string, jurisdiction: string): Promise<CoverageResponse> => coverage(jurisdiction),
   supplementCoverage: async (coverageId: string): Promise<CoverageRow> => {
     const found = COVERAGE_ROWS.find(r => r.id === coverageId)
     return found ?? COVERAGE_ROWS[0]
@@ -310,8 +372,8 @@ export const demoApi = {
     return found ?? COVERAGE_ROWS[0]
   },
 
-  startDraft: async (): Promise<DraftResponse> => draft(),
-  getDraft: async (): Promise<DraftResponse> => draft(),
+  startDraft: async (_id: string, jurisdiction: string): Promise<DraftResponse> => draftFor(jurisdiction),
+  getDraft: async (_id: string, jurisdiction: string): Promise<DraftResponse> => draftFor(jurisdiction),
   regenerateSection: async (sectionId: string): Promise<DraftSection> => {
     const found = DRAFT_SECTIONS.find(s => s.id === sectionId)
     return found ? { ...found } : DRAFT_SECTIONS[0]
@@ -320,13 +382,13 @@ export const demoApi = {
     const found = DRAFT_SECTIONS.find(s => s.id === sectionId) ?? DRAFT_SECTIONS[0]
     return { ...found, content: body.content }
   },
-  downloadDraftDocx: async (): Promise<Blob> => {
-    const text = DRAFT_SECTIONS.map(s => `${s.element_order}. ${s.element_name}\n\n${s.content}`).join("\n\n")
+  downloadDraftDocx: async (_id: string, jurisdiction: string): Promise<Blob> => {
+    const text = buildSections(variantFor(jurisdiction)).map(s => `${s.element_order}. ${s.element_name}\n\n${s.content}`).join("\n\n")
     return new Blob([text], { type: "application/vnd.openxmlformats-officedocument.wordprocessingml.document" })
   },
 
-  startRisks: async (): Promise<RiskResponse> => risks(),
-  getRisks: async (): Promise<RiskResponse> => risks(),
+  startRisks: async (_id: string, jurisdiction: string): Promise<RiskResponse> => risksFor(jurisdiction),
+  getRisks: async (_id: string, jurisdiction: string): Promise<RiskResponse> => risksFor(jurisdiction),
 
   getDocumentText: async (documentId: string): Promise<DocumentTextRead> => ({
     id: documentId,
