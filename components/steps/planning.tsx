@@ -28,6 +28,7 @@ export type PlanningSourceRow = {
 // Provides the persisted engagement id to nested source inputs (upload zones, connector grid).
 const PlanningCtx = createContext<{
   engagementId: string | null
+  jurisdictions: string[]
   documentsByKind: PlanningDocumentMap
   updateDocuments: (kind: SourceId, updater: (docs: DocumentRead[]) => DocumentRead[]) => void
   sourceRows: PlanningSourceRow[]
@@ -39,6 +40,7 @@ const PlanningCtx = createContext<{
   showIssue: (base: ActionableIssueBase, primaryAction: ActionableIssue["primaryAction"], secondaryAction?: ActionableIssue["secondaryAction"]) => void
 }>({
   engagementId: null,
+  jurisdictions: [],
   documentsByKind: {},
   updateDocuments: () => {},
   sourceRows: [],
@@ -88,7 +90,9 @@ function MultiSelect({ options, value, onChange, placeholder }: {
   }, [])
   const toggle = (opt: string) =>
     onChange(value.includes(opt) ? value.filter(v => v !== opt) : [...value, opt])
-  const label = value.length === 0 ? null : value.length === 1 ? value[0] : `${value.length} jurisdictions`
+  // List the selected jurisdictions (not "3 jurisdictions"), and float the selected ones to the top.
+  const label = value.length === 0 ? null : options.filter(o => value.includes(o)).join(", ")
+  const sorted = [...options.filter(o => value.includes(o)), ...options.filter(o => !value.includes(o))]
   return (
     <div ref={ref} style={{ position: "relative" }}>
       <button type="button" onClick={() => setOpen(o => !o)} style={{
@@ -107,7 +111,7 @@ function MultiSelect({ options, value, onChange, placeholder }: {
           borderRadius: "var(--radius-md)", boxShadow: "var(--shadow-300)",
           padding: "0.25rem", zIndex: 50, maxHeight: 220, overflowY: "auto",
         }}>
-          {options.map(opt => (
+          {sorted.map(opt => (
             <label key={opt} className="hover:bg-[var(--color-background-primary-ghost-hover)]" style={{
               display: "flex", alignItems: "center", gap: "0.625rem",
               padding: "0.375rem 0.5rem", borderRadius: "var(--radius-sm)",
@@ -118,6 +122,68 @@ function MultiSelect({ options, value, onChange, placeholder }: {
               {opt}
             </label>
           ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
+// Per-file jurisdiction scope. Same look as the jurisdiction MultiSelect. Empty value = "Global" (applies
+// to all picked jurisdictions, which then show greyed). Selecting jurisdictions narrows the scope. UI only.
+function AssignDropdown({ jurisdictions, value, onChange }: {
+  jurisdictions: string[]; value: string[]; onChange: (v: string[]) => void
+}) {
+  const [open, setOpen] = useState(false)
+  const ref = useRef<HTMLDivElement>(null)
+  useEffect(() => {
+    const h = (e: MouseEvent) => { if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false) }
+    document.addEventListener("mousedown", h)
+    return () => document.removeEventListener("mousedown", h)
+  }, [])
+  const global = value.length === 0
+  const toggle = (j: string) => onChange(value.includes(j) ? value.filter(x => x !== j) : [...value, j])
+  const label = global ? "Global" : jurisdictions.filter(j => value.includes(j)).join(", ")
+  const sorted = [...jurisdictions.filter(j => value.includes(j)), ...jurisdictions.filter(j => !value.includes(j))]
+  const row: CSSProperties = {
+    display: "flex", alignItems: "center", gap: "0.625rem", padding: "0.375rem 0.5rem",
+    borderRadius: "var(--radius-sm)", cursor: "pointer", fontSize: "var(--font-text-sm-size)",
+    color: "var(--color-text)", userSelect: "none",
+  }
+  return (
+    <div ref={ref} style={{ position: "relative" }}>
+      <button type="button" onClick={() => setOpen(o => !o)} style={{
+        ...OUTLINE_INPUT, display: "flex", alignItems: "center", justifyContent: "space-between",
+        color: "var(--color-text)", cursor: "pointer", textAlign: "left",
+        borderColor: open ? "var(--input-outline-border-color-focus)" : undefined,
+      }}>
+        <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{label}</span>
+        <ChevronDown size={14} style={{ color: "var(--color-text-tertiary)", flexShrink: 0, marginLeft: "0.5rem" }} />
+      </button>
+      {open && (
+        <div style={{
+          position: "absolute", top: "calc(100% + 4px)", left: 0, right: 0,
+          background: "var(--color-surface-elevated)", border: "1px solid var(--color-border)",
+          borderRadius: "var(--radius-md)", boxShadow: "var(--shadow-300)",
+          padding: "0.25rem", zIndex: 60, maxHeight: 220, overflowY: "auto",
+        }}>
+          <label className="hover:bg-[var(--color-background-primary-ghost-hover)]" style={row}>
+            <input type="checkbox" checked={global} onChange={() => onChange([])}
+              style={{ accentColor: "var(--color-background-primary-solid)", flexShrink: 0 }} />
+            Global
+          </label>
+          {jurisdictions.length > 0 && <div style={{ height: 1, background: "var(--color-border)", margin: "0.25rem 0.25rem" }} />}
+          {sorted.map(j => (
+            <label key={j} className="hover:bg-[var(--color-background-primary-ghost-hover)]" style={{ ...row, opacity: global ? 0.5 : 1 }}>
+              <input type="checkbox" checked={value.includes(j)} onChange={() => toggle(j)}
+                style={{ accentColor: "var(--color-background-primary-solid)", flexShrink: 0 }} />
+              {j}
+            </label>
+          ))}
+          {jurisdictions.length === 0 && (
+            <p style={{ padding: "0.375rem 0.5rem", margin: 0, fontSize: "var(--font-text-xs-size)", color: "var(--color-text-tertiary)" }}>
+              Pick jurisdictions above first.
+            </p>
+          )}
         </div>
       )}
     </div>
@@ -163,14 +229,18 @@ const uploadItemFromDocument = (doc: DocumentRead): UploadItem => ({
   extractionStatus: doc.extraction_status,
 })
 
-function UploadZone({ kind, accept = "*", hint }: { kind: SourceId; accept?: string; hint?: string }) {
-  const { engagementId, documentsByKind, updateDocuments, showIssue } = useContext(PlanningCtx)
+function UploadZone({ kind, accept = "*", hint, connectors }: { kind: SourceId; accept?: string; hint?: string; connectors?: Connector[] }) {
+  const { engagementId, jurisdictions, documentsByKind, updateDocuments, showIssue, sourceRows } = useContext(PlanningCtx)
   const documents = documentsByKind[kind] ?? EMPTY_DOCUMENTS
   const [dragging, setDragging] = useState(false)
   const [items, setItems] = useState<UploadItem[]>([])
+  const [assign, setAssign] = useState<Record<string, string[]>>({})  // per-file jurisdiction scope; [] = Global (UI only)
   const inputRef = useRef<HTMLInputElement>(null)
   const nextId = useRef(0)
   const pollingDocIds = useRef<Set<string>>(new Set())
+  const hasConnection = sourceRows.some(s => s.kind === kind && s.origin === "connected")
+  const gridMode = items.length > 0 || hasConnection
+  const browse = () => inputRef.current?.click()
 
   useEffect(() => {
     if (!engagementId) {
@@ -317,76 +387,89 @@ function UploadZone({ kind, accept = "*", hint }: { kind: SourceId; accept?: str
   }
 
   return (
-    <div>
-      <div role="button" tabIndex={0}
-        onClick={() => inputRef.current?.click()}
-        onKeyDown={e => e.key === "Enter" && inputRef.current?.click()}
-        onDragOver={e => { e.preventDefault(); setDragging(true) }}
-        onDragLeave={() => setDragging(false)}
-        onDrop={e => { e.preventDefault(); setDragging(false); void addFiles(e.dataTransfer.files) }}
-        style={{
-          border: `1.5px dashed ${dragging ? "var(--color-border-primary-outline)" : "var(--color-border)"}`,
-          borderRadius: "var(--radius-md)", padding: "1rem 1.25rem", textAlign: "center",
-          cursor: "pointer", outline: "none",
-          background: dragging ? "var(--color-background-primary-soft)" : "transparent",
-          transition: "border-color var(--transition-duration-basic), background var(--transition-duration-basic)",
-        }}>
-        <input ref={inputRef} type="file" multiple accept={accept}
-          style={{ display: "none" }} onChange={e => void addFiles(e.target.files)} />
-        <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: "0.375rem" }}>
-          <Upload size={16} style={{ color: "var(--color-text-tertiary)" }} />
-          <span style={{ fontSize: "var(--font-text-sm-size)", color: "var(--color-text-secondary)" }}>
-            Drop files here &middot; or{" "}
-            <span style={{ color: "var(--color-text)", textDecoration: "underline", textUnderlineOffset: "2px" }}>browse</span>
-          </span>
-          {hint && <span style={{ fontSize: "var(--font-text-xs-size)", color: "var(--color-text-tertiary)" }}>{hint}</span>}
-        </div>
-      </div>
-      {items.length > 0 && (
-        <div style={{ display: "flex", flexDirection: "column", gap: "0.375rem", marginTop: "0.5rem" }}>
-          <div style={{ display: "flex", flexWrap: "wrap", gap: "0.375rem" }}>
-            {items.map((f, idx) => (
-              <Animate key={f.id} as="span" enter="slide-up" duration={130} delay={Math.min(idx, 6) * 16}>
-              <span title={f.status === "error" ? f.error : STATUS_LABEL[f.status]} onClick={e => { if (f.status === "error") { e.stopPropagation(); openFailedFile(f) } }} style={{
-                display: "inline-flex", alignItems: "center", gap: "0.375rem",
-                padding: "0.125rem 0.375rem 0.125rem 0.5rem", borderRadius: "var(--radius-xs)",
-                background: f.status === "error" ? "var(--color-background-danger-soft)" : "var(--color-background-primary-soft)",
-                fontSize: "var(--font-text-xs-size)", color: "var(--color-text)", maxWidth: 220,
-              }}>
-                {(f.status === "uploading" || f.status === "processing") && (
-                  <span style={{ color: "var(--color-text-tertiary)" }}>{f.status === "uploading" ? "↑" : "…"}</span>
-                )}
-                {f.status === "done" && <Check size={11} style={{ color: "var(--color-text-success-soft)", flexShrink: 0 }} />}
-                {f.status === "error" && <span style={{ color: "var(--color-text-danger-soft)" }}>!</span>}
-                <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{f.name}</span>
-                {extractionLabel(f.extractionStatus) && (
-                  <span style={{
-                    color: f.extractionStatus === "failed" || f.extractionStatus === "needs_review"
-                      ? "var(--color-text-caution-soft)"
-                      : "var(--color-text-tertiary)",
-                    flexShrink: 0,
-                    fontSize: "10px",
-                  }}>
-                    {extractionLabel(f.extractionStatus)}
-                  </span>
-                )}
-                {f.status === "error" && f.documentId && (
-                  <button type="button" onClick={e => { e.stopPropagation(); void retryFile(f) }}
-                    style={{ background: "none", border: "none", cursor: "pointer", color: "var(--color-text-info-soft)", lineHeight: 1, padding: 0, flexShrink: 0, fontSize: "10px" }}>
-                    Retry indexing
-                  </button>
-                )}
-                <button type="button" onClick={e => { e.stopPropagation(); removeFile(f) }}
-                  style={{ background: "none", border: "none", cursor: "pointer", color: "var(--color-text-tertiary)", lineHeight: 1, padding: 0, flexShrink: 0 }}>
-                  <X size={10} />
-                </button>
-              </span>
-              </Animate>
-            ))}
+    <>
+      <input ref={inputRef} type="file" multiple accept={accept} style={{ display: "none" }} onChange={e => void addFiles(e.target.files)} />
+
+      {!gridMode ? (
+        // Nothing added yet: the drop target is the upload affordance.
+        <div role="button" tabIndex={0}
+          onClick={browse}
+          onKeyDown={e => e.key === "Enter" && browse()}
+          onDragOver={e => { e.preventDefault(); setDragging(true) }}
+          onDragLeave={() => setDragging(false)}
+          onDrop={e => { e.preventDefault(); setDragging(false); void addFiles(e.dataTransfer.files) }}
+          style={{
+            border: `1.5px dashed ${dragging ? "var(--color-border-primary-outline)" : "var(--color-border)"}`,
+            borderRadius: "var(--radius-md)", padding: "1rem 1.25rem", textAlign: "center",
+            cursor: "pointer", outline: "none",
+            background: dragging ? "var(--color-background-primary-soft)" : "transparent",
+            transition: "border-color var(--transition-duration-basic), background var(--transition-duration-basic)",
+          }}>
+          <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: "0.375rem" }}>
+            <Upload size={16} style={{ color: "var(--color-text-tertiary)" }} />
+            <span style={{ fontSize: "var(--font-text-sm-size)", color: "var(--color-text-secondary)" }}>
+              Drop files here &middot; or <span style={{ color: "var(--color-text)", textDecoration: "underline", textUnderlineOffset: "2px" }}>browse</span>
+            </span>
+            {hint && <span style={{ fontSize: "var(--font-text-xs-size)", color: "var(--color-text-tertiary)" }}>{hint}</span>}
           </div>
         </div>
-      )}
-    </div>
+      ) : items.length > 0 ? (
+        // Uploaded files as equal-width cards (2 per row), each with a jurisdiction-scope dropdown.
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: "0.5rem" }}>
+          {items.map((f, idx) => (
+            <Animate key={f.id} enter="slide-up" duration={130} delay={Math.min(idx, 6) * 16}>
+              <div style={{
+                border: "1px solid var(--color-border)", borderRadius: "var(--radius-md)",
+                padding: "0.5rem 0.625rem", display: "flex", flexDirection: "column", gap: "0.5rem", minWidth: 0,
+                background: f.status === "error" ? "var(--color-background-danger-soft)" : "transparent",
+              }}>
+                <div
+                  title={f.status === "error" ? f.error : STATUS_LABEL[f.status]}
+                  onClick={() => { if (f.status === "error") openFailedFile(f) }}
+                  style={{ display: "flex", alignItems: "center", gap: "0.375rem", minWidth: 0, cursor: f.status === "error" ? "pointer" : "default" }}>
+                  {(f.status === "uploading" || f.status === "processing") && <span style={{ color: "var(--color-text-tertiary)", flexShrink: 0, fontSize: 11 }}>{f.status === "uploading" ? "↑" : "…"}</span>}
+                  {f.status === "done" && <Check size={12} style={{ color: "var(--color-text-success-soft)", flexShrink: 0 }} />}
+                  {f.status === "error" && <span style={{ color: "var(--color-text-danger-soft)", flexShrink: 0 }}>!</span>}
+                  <span style={{ flex: 1, minWidth: 0, fontSize: "var(--font-text-xs-size)", color: "var(--color-text)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{f.name}</span>
+                  {extractionLabel(f.extractionStatus) && (
+                    <span style={{ flexShrink: 0, fontSize: 10, color: f.extractionStatus === "failed" || f.extractionStatus === "needs_review" ? "var(--color-text-caution-soft)" : "var(--color-text-tertiary)" }}>{extractionLabel(f.extractionStatus)}</span>
+                  )}
+                </div>
+                <div style={{ display: "flex", alignItems: "center", gap: "0.375rem" }}>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <AssignDropdown jurisdictions={jurisdictions} value={assign[f.id] ?? []} onChange={v => setAssign(a => ({ ...a, [f.id]: v }))} />
+                  </div>
+                  {f.status === "error" && f.documentId && (
+                    <button type="button" onClick={() => void retryFile(f)} title="Retry indexing"
+                      style={{ background: "none", border: "none", cursor: "pointer", color: "var(--color-text-info-soft)", padding: 0, flexShrink: 0, fontSize: 10 }}>Retry</button>
+                  )}
+                  <button type="button" onClick={() => removeFile(f)} aria-label="Remove file"
+                    style={{ background: "none", border: "none", cursor: "pointer", color: "var(--color-text-tertiary)", lineHeight: 1, padding: 2, flexShrink: 0 }}>
+                    <X size={12} />
+                  </button>
+                </div>
+              </div>
+            </Animate>
+          ))}
+        </div>
+      ) : null}
+
+      {connectors ? (
+        <>
+          {(items.length > 0 || !gridMode) && <OrDivider />}
+          <ConnectorGrid kind={kind} connectors={connectors} onUpload={gridMode ? browse : undefined} />
+        </>
+      ) : gridMode ? (
+        <button type="button" onClick={browse} style={{
+          alignSelf: "flex-start", display: "inline-flex", alignItems: "center", gap: "0.375rem",
+          height: "var(--control-size-sm)", padding: "0 var(--control-gutter-sm)", borderRadius: "var(--control-radius-md)",
+          border: "1px solid var(--color-border)", background: "transparent", color: "var(--color-text-secondary)",
+          fontSize: "var(--control-font-size-md)", fontWeight: "var(--font-weight-medium)", cursor: "pointer",
+        }}>
+          <Upload size={14} /> Upload
+        </button>
+      ) : null}
+    </>
   )
 }
 
@@ -418,7 +501,7 @@ function OrDivider() {
   )
 }
 
-function ConnectorGrid({ kind, connectors }: { kind: SourceId; connectors: Connector[] }) {
+function ConnectorGrid({ kind, connectors, onUpload }: { kind: SourceId; connectors: Connector[]; onUpload?: () => void }) {
   const { engagementId, sourceRows, rememberSourceRow, selectedSources, persistSelectedSources, showIssue } = useContext(PlanningCtx)
   const [connected, setConnected] = useState<Set<string>>(new Set())
   const [statusByProvider, setStatusByProvider] = useState<Record<string, string>>({})
@@ -478,6 +561,23 @@ function ConnectorGrid({ kind, connectors }: { kind: SourceId; connectors: Conne
 
   return (
     <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(92px, 1fr))", gap: "0.5rem" }}>
+      {onUpload && (
+        <button
+          type="button"
+          onClick={onUpload}
+          className="hover:bg-[var(--color-background-primary-ghost-hover)]"
+          style={{
+            display: "flex", flexDirection: "column", alignItems: "center", gap: "0.5rem",
+            padding: "0.75rem 0.5rem", borderRadius: "var(--radius-md)", cursor: "pointer",
+            border: "1px dashed var(--color-border)", background: "transparent",
+          }}
+        >
+          <span style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", width: 30, height: 30 }}>
+            <Upload size={18} style={{ color: "var(--color-text-secondary)" }} />
+          </span>
+          <span style={{ fontSize: "var(--font-text-xs-size)", color: "var(--color-text-secondary)", fontWeight: "var(--font-weight-medium)" }}>Upload</span>
+        </button>
+      )}
       {connectors.map(c => {
         const on = connected.has(c.name)
         const providerStatus = statusByProvider[c.name.toLowerCase()]
@@ -523,16 +623,14 @@ function ConnectorGrid({ kind, connectors }: { kind: SourceId; connectors: Conne
 function FinancialsInput() {
   return (
     <div style={{ paddingLeft: "2rem", display: "flex", flexDirection: "column", gap: "0.75rem" }}>
-      <UploadZone kind="financials" accept=".pdf,.xlsx,.xls,.csv" hint="PDF, Excel, CSV · up to 50 MB each" />
-      <OrDivider />
-      <ConnectorGrid kind="financials" connectors={ERP_CONNECTORS} />
+      <UploadZone kind="financials" accept=".pdf,.xlsx,.xls,.csv" hint="PDF, Excel, CSV · up to 50 MB each" connectors={ERP_CONNECTORS} />
     </div>
   )
 }
 
 function AgreementsInput() {
   return (
-    <div style={{ paddingLeft: "2rem" }}>
+    <div style={{ paddingLeft: "2rem", display: "flex", flexDirection: "column", gap: "0.75rem" }}>
       <UploadZone kind="agreements" accept=".pdf,.doc,.docx,.xlsx,.xls" hint="PDF, Word, Excel · up to 50 MB each" />
     </div>
   )
@@ -566,9 +664,7 @@ function WebsiteInput() {
 function InterviewInput() {
   return (
     <div style={{ paddingLeft: "2rem", display: "flex", flexDirection: "column", gap: "0.75rem" }}>
-      <UploadZone kind="interview" accept=".txt,.pdf,.docx,.vtt,.srt" hint="TXT, PDF, Word, VTT, SRT · up to 50 MB each" />
-      <OrDivider />
-      <ConnectorGrid kind="interview" connectors={NOTETAKER_CONNECTORS} />
+      <UploadZone kind="interview" accept=".txt,.pdf,.docx,.vtt,.srt" hint="TXT, PDF, Word, VTT, SRT · up to 50 MB each" connectors={NOTETAKER_CONNECTORS} />
     </div>
   )
 }
@@ -672,6 +768,7 @@ export default function PlanningStep({
   return (
     <PlanningCtx.Provider value={{
       engagementId,
+      jurisdictions,
       documentsByKind,
       updateDocuments,
       sourceRows,

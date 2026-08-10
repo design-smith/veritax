@@ -13,6 +13,7 @@ export interface TourStep {
   title: string
   text: string
   appStep?: 1 | 2 | 3 | 4  // switch to this workflow tab before locating the target
+  placement?: "auto" | "top" | "bottom-end"  // where the text box sits relative to the highlight
 }
 
 const PAD = 8
@@ -77,12 +78,16 @@ export default function DemoTour({ steps, initialStep = 0, goToStep, onStepChang
   const vw = window.innerWidth
   const vh = window.innerHeight
 
-  // Tooltip placement: below the target if it fits, else above; clamped to the viewport.
+  // Tooltip placement: below the target if it fits (or above), clamped to the viewport. A step can force
+  // "top" or "bottom-end" (below, right-aligned) to stay clear of things like an open dropdown.
   let tip: CSSProperties
   if (rect) {
-    const below = rect.bottom + 12 + 150 < vh
-    const top = below ? rect.bottom + 14 : Math.max(12, rect.top - 172)
-    const left = Math.min(Math.max(12, rect.left), vw - TIP_W - 12)
+    const place = step.placement ?? "auto"
+    const above = place === "top" || (place === "auto" && rect.bottom + 12 + 150 >= vh)
+    const top = above ? Math.max(12, rect.top - 172) : rect.bottom + 14
+    const left = place === "bottom-end"
+      ? Math.min(Math.max(12, rect.right - TIP_W), vw - TIP_W - 12)
+      : Math.min(Math.max(12, rect.left), vw - TIP_W - 12)
     tip = { position: "fixed", top, left, width: TIP_W }
   } else {
     tip = { position: "fixed", top: "50%", left: "50%", transform: "translate(-50%,-50%)", width: TIP_W }

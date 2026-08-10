@@ -6,6 +6,7 @@ import dynamic from "next/dynamic"
 import { Activity, CalendarDays, ChevronDown, FileText, GraduationCap, PanelLeftClose, PanelLeftOpen, ShieldCheck } from "lucide-react"
 import PlanningStep, { type PlanningDocumentMap, type PlanningSourceRow, type SourceId } from "@/components/steps/planning"
 import DemoTour, { type TourStep } from "@/components/DemoTour"
+import Confetti from "@/components/Confetti"
 import RequirementsStep from "@/components/steps/requirements"
 import DraftStep from "@/components/steps/draft"
 import RisksStep from "@/components/steps/risks"
@@ -33,7 +34,7 @@ const NAV: { step: Step; label: string }[] = [
 // Guided walkthrough for the public /demo (enableTour). Each step switches to its tab, then spotlights
 // the element carrying the matching data-tour attribute.
 const TOUR_STEPS: TourStep[] = [
-  { appStep: 1, target: "planning-scope", title: "Set the scope", text: "Choose the jurisdictions, the entity, and the fiscal year. This frames the whole Local File." },
+  { appStep: 1, target: "planning-scope", title: "Set the scope", text: "Choose the jurisdictions, the entity, and the fiscal year. This frames the whole Local File.", placement: "bottom-end" },
   { appStep: 1, target: "planning-sources", title: "Bring your sources", text: "Upload or connect financials, agreements, the website, and interviews — Veritax reads them for you." },
   { appStep: 2, target: "req-jurisdictions", title: "Every jurisdiction at once", text: "Veritax checks the file against each jurisdiction's real requirements in parallel. Click a tab to see its results." },
   { appStep: 3, target: "draft-sections", title: "The draft writes itself", text: "Every section that jurisdiction requires is generated for you, in order." },
@@ -275,6 +276,7 @@ export default function Page({ enableTour = false }: { enableTour?: boolean } = 
   const [actionIssue, setActionIssue] = useState<ActionableIssue | null>(null)
   const [tourOpen, setTourOpen] = useState(false)
   const [tourStep, setTourStep] = useState(0)   // remembered walkthrough position (resume from the cap icon)
+  const [confetti, setConfetti] = useState(false)
   const engagementLoadSeq = useRef(0)
 
   const openIssue = useCallback((
@@ -902,9 +904,10 @@ export default function Page({ enableTour = false }: { enableTour?: boolean } = 
           goToStep={tourGoToStep}
           onStepChange={(i) => { setTourStep(i); if (typeof window !== "undefined") window.localStorage.setItem("veritax.demoTourStep", String(i)) }}
           onExit={() => setTourOpen(false)}
-          onFinish={() => { setTourStep(0); if (typeof window !== "undefined") window.localStorage.setItem("veritax.demoTourStep", "0"); setTourOpen(false) }}
+          onFinish={() => { setTourStep(0); if (typeof window !== "undefined") window.localStorage.setItem("veritax.demoTourStep", "0"); setTourOpen(false); setConfetti(true) }}
         />
       )}
+      {confetti && <Confetti onDone={() => setConfetti(false)} />}
     </div>
   )
 }
