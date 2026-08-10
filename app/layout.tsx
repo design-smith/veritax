@@ -7,7 +7,7 @@ const wordmark = Manrope({ subsets: ["latin"], weight: ["300"], variable: "--fon
 
 export const metadata: Metadata = {
   title: "Veritax UI",
-  description: "Design system based on OpenAI apps-sdk-ui",
+  description: "Local file generator."
 }
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
