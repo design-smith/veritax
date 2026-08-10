@@ -733,3 +733,14 @@
 .veritax-fc .fc-col-header-cell-cushion,
 .veritax-fc .fc-daygrid-day-number { color: var(--color-text-secondary); text-decoration: none; }
 .veritax-fc .fc-event { cursor: pointer; }
+
+/* Guided demo tour: spotlight ring pulse over the dimmed page. */
+@keyframes vt-tour-pulse {
+  0%   { box-shadow: 0 0 0 0 rgb(255 255 255 / 55%); }
+  70%  { box-shadow: 0 0 0 12px rgb(255 255 255 / 0%); }
+  100% { box-shadow: 0 0 0 0 rgb(255 255 255 / 0%); }
+}
+.vt-tour-ring { animation: vt-tour-pulse 1.8s ease-out infinite; }
+@media (prefers-reduced-motion: reduce) {
+  .vt-tour-ring { animation: none; }
+}

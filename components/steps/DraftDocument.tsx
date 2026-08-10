@@ -163,7 +163,7 @@ export function DraftSectionSidebar({ sections, activeSectionId, onSelect, onSel
 }) {
   const ordered = [...sections].sort((a, b) => a.element_order - b.element_order)
   return (
-    <nav style={{ width: 224, flexShrink: 0, borderRight: "1px solid var(--color-border)", background: "var(--color-surface)", overflowY: "auto", padding: "1rem 0.5rem" }}>
+    <nav data-tour="draft-sections" style={{ width: 224, flexShrink: 0, borderRight: "1px solid var(--color-border)", background: "var(--color-surface)", overflowY: "auto", padding: "1rem 0.5rem" }}>
       <p style={{ fontSize: "var(--font-text-xs-size)", color: "var(--color-text-tertiary)", textTransform: "uppercase", letterSpacing: "0.04em", fontWeight: "var(--font-weight-medium)", padding: "0 0.5rem", marginBottom: "0.375rem" }}>Sections</p>
       {includeCover && (
         <button

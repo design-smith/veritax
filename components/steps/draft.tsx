@@ -566,7 +566,7 @@ export default function DraftStep({ engagementId, jurisdictions, entity, onConti
         </div>
         <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: "0.375rem", flexShrink: 0 }}>
           {showDraftActions && (
-            <>
+            <div data-tour="draft-actions" style={{ display: "inline-flex", alignItems: "center", gap: "0.375rem" }}>
               <button type="button" onClick={() => setEditing(v => !v)} aria-label={editing ? "Preview draft" : "Edit draft"} title={editing ? "Preview" : "Edit draft"} style={{
                 display: "inline-flex", alignItems: "center", justifyContent: "center", height: "var(--control-size-md)", width: "var(--control-size-md)",
                 padding: 0, borderRadius: "var(--control-radius-md)", border: "none",
@@ -596,7 +596,7 @@ export default function DraftStep({ engagementId, jurisdictions, entity, onConti
                   </span>
                 )}
               </div>
-            </>
+            </div>
           )}
           <button type="button" disabled={!complete} onClick={onContinue} style={{
             display: "inline-flex", alignItems: "center", gap: "0.25rem", height: "var(--control-size-md)", padding: "0 0.25rem",

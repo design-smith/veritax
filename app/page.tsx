@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation"
 import dynamic from "next/dynamic"
 import { Activity, CalendarDays, ChevronDown, FileText, PanelLeftClose, PanelLeftOpen, ShieldCheck } from "lucide-react"
 import PlanningStep, { type PlanningDocumentMap, type PlanningSourceRow, type SourceId } from "@/components/steps/planning"
+import DemoTour, { type TourStep } from "@/components/DemoTour"
 import RequirementsStep from "@/components/steps/requirements"
 import DraftStep from "@/components/steps/draft"
 import RisksStep from "@/components/steps/risks"
@@ -27,6 +28,17 @@ const NAV: { step: Step; label: string }[] = [
   { step: 2, label: "Requirements" },
   { step: 3, label: "Draft" },
   { step: 4, label: "Risks" },
+]
+
+// Guided walkthrough for the public /demo (enableTour). Each step switches to its tab, then spotlights
+// the element carrying the matching data-tour attribute.
+const TOUR_STEPS: TourStep[] = [
+  { appStep: 1, target: "planning-scope", title: "Set the scope", text: "Choose the jurisdictions, the entity, and the fiscal year. This frames the whole Local File." },
+  { appStep: 1, target: "planning-sources", title: "Bring your sources", text: "Upload or connect financials, agreements, the website, and interviews — Veritax reads them for you." },
+  { appStep: 2, target: "req-jurisdictions", title: "Every jurisdiction at once", text: "Veritax checks the file against each jurisdiction's real requirements in parallel. Click a tab to see its results." },
+  { appStep: 3, target: "draft-sections", title: "The draft writes itself", text: "Every section that jurisdiction requires is generated for you, in order." },
+  { appStep: 3, target: "draft-actions", title: "Edit or export", text: "Edit any section inline, or download the finished Local File as a Word document." },
+  { appStep: 4, target: "risks-rollup", title: "Exposures & contradictions", text: "Veritax flags financial exposures and contradictions in the file, each with evidence you can open." },
 ]
 
 const LS_ID = "veritax.engagementId"     // resume the file being worked on across refreshes
@@ -236,7 +248,7 @@ function BootSkeleton({ offline = false, onRetry }: { offline?: boolean; onRetry
   )
 }
 
-export default function Page() {
+export default function Page({ enableTour = false }: { enableTour?: boolean } = {}) {
   const router = useRouter()
   const [step, setStep]       = useState<Step>(1)
   const [visited, setVisited] = useState<Set<Step>>(new Set([1]))
@@ -261,6 +273,7 @@ export default function Page() {
   const [bootStatus, setBootStatus] = useState<BootStatus>("loading")
   const [libraryLoading, setLibraryLoading] = useState(true)
   const [actionIssue, setActionIssue] = useState<ActionableIssue | null>(null)
+  const [tourOpen, setTourOpen] = useState(false)
   const engagementLoadSeq = useRef(0)
 
   const openIssue = useCallback((
@@ -437,6 +450,22 @@ export default function Page() {
     setStep(3)
     setVisited(prev => new Set(prev).add(3))
   }
+
+  // Tour navigation: jump straight to a tab (bypassing the draft lock) so the walkthrough can show every step.
+  const tourGoToStep = useCallback((s: Step) => {
+    setPage("workflow")
+    setDraftReady(true)
+    setStep(s)
+    setVisited(prev => new Set(prev).add(s))
+    setMounted(prev => (prev.has(s) ? prev : new Set([...prev, s])))
+  }, [])
+
+  // Auto-open the walkthrough once per browser on the demo.
+  useEffect(() => {
+    if (!enableTour || bootStatus !== "ready") return
+    if (typeof window !== "undefined" && window.localStorage.getItem("veritax.demoTourDone")) return
+    setTourOpen(true)
+  }, [enableTour, bootStatus])
 
   function newFile() {
     // Start a fresh Local File pipeline: jump into Planning immediately, then create the engagement
@@ -651,7 +680,9 @@ export default function Page() {
           </>
         )}
 
-        {/* Demo-only pages stay visible, but disabled on the live app until backend support exists. */}
+        {/* Compliance / Monitoring / Defense hidden for now — flip `false` to restore the three pages. */}
+        {false && (
+        <>
         <button
           type="button"
           disabled
@@ -702,6 +733,8 @@ export default function Page() {
           <ShieldCheck size={16} strokeWidth={1.5} style={{ flexShrink: 0, color: "#aaa" }} />
           <span style={{ flex: 1, textAlign: "left" }}>Defense</span>
         </button>
+        </>
+        )}
 
         <button
           type="button"
@@ -838,6 +871,30 @@ export default function Page() {
       </div>
 
       <ActionModal issue={actionIssue} onClose={() => setActionIssue(null)} />
+
+      {enableTour && (
+        tourOpen ? (
+          <DemoTour
+            steps={TOUR_STEPS}
+            goToStep={tourGoToStep}
+            onClose={() => { setTourOpen(false); if (typeof window !== "undefined") window.localStorage.setItem("veritax.demoTourDone", "1") }}
+          />
+        ) : (
+          <button
+            type="button"
+            onClick={() => setTourOpen(true)}
+            style={{
+              position: "fixed", right: 16, bottom: 16, zIndex: 60,
+              height: 34, padding: "0 0.875rem", borderRadius: 9999,
+              border: "none", background: "#000", color: "#fff",
+              fontSize: 13, fontWeight: 500, cursor: "pointer",
+              boxShadow: "0 6px 20px rgb(0 0 0 / 25%)",
+            }}
+          >
+            Take a tour
+          </button>
+        )
+      )}
     </div>
   )
 }

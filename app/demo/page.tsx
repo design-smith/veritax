@@ -14,5 +14,5 @@ if (typeof window !== "undefined") {
 }
 
 export default function DemoPage() {
-  return <RealApp />
+  return <RealApp enableTour />
 }

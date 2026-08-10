@@ -533,7 +533,7 @@ export default function RequirementsStep({ engagementId, jurisdictions, onContin
 
         {/* Jurisdiction tabs — all picked jurisdictions (like Draft) */}
         <div style={{ position: "sticky", top: 0, zIndex: 10, background: "var(--color-surface)", padding: "1rem 3.5rem 0.75rem", display: "flex", alignItems: "center", gap: "0.75rem" }}>
-          <div style={{ flex: 1, minWidth: 0, display: "flex", gap: "0.375rem", flexWrap: "wrap" }}>
+          <div data-tour="req-jurisdictions" style={{ flex: 1, minWidth: 0, display: "flex", gap: "0.375rem", flexWrap: "wrap" }}>
             {jurisdictions.map(j => {
               const isActive = j === activeJurisdiction
               const cov = coverageByJuris[j]

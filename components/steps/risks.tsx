@@ -507,7 +507,7 @@ export default function RisksStep({ engagementId, jurisdictions, entity, onOpenD
               </div>
 
               {/* Rollup header */}
-              <div style={{ display: "flex", alignItems: "center", gap: "1.5rem", border: "1px solid #e5e5e5", borderRadius: 8, padding: "0.875rem 1.25rem", marginBottom: "1rem", flexWrap: "wrap" }}>
+              <div data-tour="risks-rollup" style={{ display: "flex", alignItems: "center", gap: "1.5rem", border: "1px solid #e5e5e5", borderRadius: 8, padding: "0.875rem 1.25rem", marginBottom: "1rem", flexWrap: "wrap" }}>
                 <Stat label="Findings" value={findings.length} />
                 <Divider />
                 <Stat label="Exposure" value={exposureCount} />

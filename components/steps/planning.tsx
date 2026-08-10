@@ -683,7 +683,7 @@ export default function PlanningStep({
       showIssue,
     }}>
     <main style={{ flex: 1, display: "flex", flexDirection: "column", padding: "3rem 3.5rem", maxWidth: 760, overflowY: "auto" }}>
-      <div style={{ display: "flex", alignItems: "flex-end", gap: "0.75rem", marginBottom: "2.5rem" }}>
+      <div data-tour="planning-scope" style={{ display: "flex", alignItems: "flex-end", gap: "0.75rem", marginBottom: "2.5rem" }}>
         <div style={{ flex: "0 0 240px" }}>
           <label style={FIELD_LABEL}>Jurisdiction</label>
           <MultiSelect options={jurisdictionOptions} value={jurisdictions} onChange={onJurisdictionsChange} placeholder="Select jurisdiction" />
@@ -717,7 +717,7 @@ export default function PlanningStep({
         What do you have to work with?
       </p>
 
-      <ul style={{ listStyle: "none", padding: 0, margin: 0, display: "flex", flexDirection: "column", gap: "0.25rem" }}>
+      <ul data-tour="planning-sources" style={{ listStyle: "none", padding: 0, margin: 0, display: "flex", flexDirection: "column", gap: "0.25rem" }}>
         {SOURCES.map(({ id, label, primary, render }) => {
           const on = sources.has(id)
           return (
