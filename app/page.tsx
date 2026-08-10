@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useRef, useState, type CSSProperties } from "react"
 import { useRouter } from "next/navigation"
 import dynamic from "next/dynamic"
-import { Activity, CalendarDays, ChevronDown, FileText, PanelLeftClose, PanelLeftOpen, ShieldCheck } from "lucide-react"
+import { Activity, CalendarDays, ChevronDown, FileText, GraduationCap, PanelLeftClose, PanelLeftOpen, ShieldCheck } from "lucide-react"
 import PlanningStep, { type PlanningDocumentMap, type PlanningSourceRow, type SourceId } from "@/components/steps/planning"
 import DemoTour, { type TourStep } from "@/components/DemoTour"
 import RequirementsStep from "@/components/steps/requirements"
@@ -274,6 +274,7 @@ export default function Page({ enableTour = false }: { enableTour?: boolean } = 
   const [libraryLoading, setLibraryLoading] = useState(true)
   const [actionIssue, setActionIssue] = useState<ActionableIssue | null>(null)
   const [tourOpen, setTourOpen] = useState(false)
+  const [tourStep, setTourStep] = useState(0)   // remembered walkthrough position (resume from the cap icon)
   const engagementLoadSeq = useRef(0)
 
   const openIssue = useCallback((
@@ -460,11 +461,16 @@ export default function Page({ enableTour = false }: { enableTour?: boolean } = 
     setMounted(prev => (prev.has(s) ? prev : new Set([...prev, s])))
   }, [])
 
-  // Auto-open the walkthrough once per browser on the demo.
+  // Restore the saved walkthrough position, and auto-open it once per browser on the demo.
   useEffect(() => {
-    if (!enableTour || bootStatus !== "ready") return
-    if (typeof window !== "undefined" && window.localStorage.getItem("veritax.demoTourDone")) return
-    setTourOpen(true)
+    if (!enableTour || bootStatus !== "ready" || typeof window === "undefined") return
+    const saved = parseInt(window.localStorage.getItem("veritax.demoTourStep") || "0", 10)
+    if (Number.isFinite(saved) && saved > 0) setTourStep(saved)
+    if (!window.localStorage.getItem("veritax.demoTourSeen")) {
+      window.localStorage.setItem("veritax.demoTourSeen", "1")
+      setTourStep(0)
+      setTourOpen(true)
+    }
   }, [enableTour, bootStatus])
 
   function newFile() {
@@ -806,6 +812,23 @@ export default function Page({ enableTour = false }: { enableTour?: boolean } = 
               </button>
             )
           })}
+          {enableTour && (
+            <button
+              type="button"
+              onClick={() => setTourOpen(true)}
+              title="Tutorial"
+              aria-label="Open tutorial"
+              style={{
+                marginLeft: "auto", alignSelf: "center",
+                display: "inline-flex", alignItems: "center", justifyContent: "center",
+                width: 30, height: 30, borderRadius: 8, border: "none",
+                background: tourOpen ? "#000" : "transparent", color: tourOpen ? "#fff" : "#666",
+                cursor: "pointer",
+              }}
+            >
+              <GraduationCap size={18} strokeWidth={1.5} />
+            </button>
+          )}
         </nav>
 
         {/* Section content — each step stays mounted once visited (hidden when inactive), so its
@@ -872,28 +895,15 @@ export default function Page({ enableTour = false }: { enableTour?: boolean } = 
 
       <ActionModal issue={actionIssue} onClose={() => setActionIssue(null)} />
 
-      {enableTour && (
-        tourOpen ? (
-          <DemoTour
-            steps={TOUR_STEPS}
-            goToStep={tourGoToStep}
-            onClose={() => { setTourOpen(false); if (typeof window !== "undefined") window.localStorage.setItem("veritax.demoTourDone", "1") }}
-          />
-        ) : (
-          <button
-            type="button"
-            onClick={() => setTourOpen(true)}
-            style={{
-              position: "fixed", right: 16, bottom: 16, zIndex: 60,
-              height: 34, padding: "0 0.875rem", borderRadius: 9999,
-              border: "none", background: "#000", color: "#fff",
-              fontSize: 13, fontWeight: 500, cursor: "pointer",
-              boxShadow: "0 6px 20px rgb(0 0 0 / 25%)",
-            }}
-          >
-            Take a tour
-          </button>
-        )
+      {enableTour && tourOpen && (
+        <DemoTour
+          steps={TOUR_STEPS}
+          initialStep={tourStep}
+          goToStep={tourGoToStep}
+          onStepChange={(i) => { setTourStep(i); if (typeof window !== "undefined") window.localStorage.setItem("veritax.demoTourStep", String(i)) }}
+          onExit={() => setTourOpen(false)}
+          onFinish={() => { setTourStep(0); if (typeof window !== "undefined") window.localStorage.setItem("veritax.demoTourStep", "0"); setTourOpen(false) }}
+        />
       )}
     </div>
   )

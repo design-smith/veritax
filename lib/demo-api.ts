@@ -43,8 +43,9 @@ const tick = (key: string): number => { const n = (polls.get(key) ?? 0) + 1; pol
 const resetPoll = (key: string) => { polls.delete(key) }
 
 const REVEAL_PER_POLL = 3   // requirement rows revealed per assessment poll
-const DRAFT_POLLS = 2       // draft "generating" polls before sections land
-const RISK_POLLS = 2        // "analysing" polls before findings land
+const RISK_POLLS = 1        // "analysing" polls before findings land
+const DRAFT_MS = 550        // brief "generating" beat before the draft lands — short so the tour never stalls
+const sleep = (ms: number) => new Promise(r => setTimeout(r, ms))
 
 // Document indexing runs off wall-clock from first fetch, so Planning shows chips settle and Requirements
 // shows "Preparing documents — X of Y indexed" if the visitor gets there quickly.
@@ -528,14 +529,12 @@ export const demoApi = {
     coverage(JURISDICTIONS_COVERED[0], elementsFor(JURISDICTIONS_COVERED[0]).length).requirements.find(r => r.id === coverageId)
       ?? coverage(JURISDICTIONS_COVERED[0], 1).requirements[0],
 
+  // A short generating beat, then the finished draft — no long type-out, so the walkthrough never waits.
   startDraft: async (_id: string, jurisdiction: string): Promise<DraftResponse> => {
-    resetPoll(`draft:${jurisdiction}`)
-    return draftFor(jurisdiction, false)
+    await sleep(DRAFT_MS)
+    return draftFor(jurisdiction, true)
   },
-  getDraft: async (_id: string, jurisdiction: string): Promise<DraftResponse> => {
-    const n = tick(`draft:${jurisdiction}`)
-    return draftFor(jurisdiction, n >= DRAFT_POLLS)
-  },
+  getDraft: async (_id: string, jurisdiction: string): Promise<DraftResponse> => draftFor(jurisdiction, true),
   regenerateSection: async (sectionId: string): Promise<DraftSection> => {
     for (const jur of JURISDICTIONS_COVERED) {
       const found = sections(jur, true).find(s => s.id === sectionId)
