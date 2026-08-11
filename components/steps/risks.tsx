@@ -21,6 +21,7 @@ import {
   type ActionableIssue,
   type ActionableIssueBase,
 } from "@/lib/actionable-errors"
+import { evidenceDocumentOpened, evidenceSourceViewed, evidenceFactInspected, documentType, documentCategory } from "@/lib/analytics"
 
 // ── Original "Findings" appearance (grayscale), now driven by the real pipeline ──────────────
 type Severity = RiskSeverityValue
@@ -354,6 +355,7 @@ export default function RisksStep({ engagementId, jurisdictions, entity, onOpenD
     setCopiedEvidence(false)
     if (!evidence.document_id) {
       logRisk("source:copy-only", { reference: evidence.reference, kind: evidence.kind })
+      evidenceSourceViewed({ document_type: documentType(evidence.source_label), locator_type: documentCategory(evidence.kind) })
       await navigator.clipboard?.writeText(evidence.detail).catch(() => undefined)
       setCopiedEvidence(true)
       setTimeout(() => setCopiedEvidence(false), 1200)
@@ -385,6 +387,8 @@ export default function RisksStep({ engagementId, jurisdictions, entity, onOpenD
         facts: factsPayload.facts.length,
       })
       setSourcePreview({ doc, evidence, facts: factsPayload.facts, highlightQuote: evidence.detail })
+      evidenceDocumentOpened({ document_id: evidence.document_id, document_type: documentType(evidence.source_label), document_category: documentCategory(evidence.kind) })
+      evidenceSourceViewed({ document_type: documentType(evidence.source_label), locator_type: documentCategory(evidence.kind) })
     } catch (e) {
       console.error("[veritax:risks] source:open:failed", {
         documentId: `${evidence.document_id.slice(0, 8)}...`,
@@ -427,6 +431,7 @@ export default function RisksStep({ engagementId, jurisdictions, entity, onOpenD
   function selectSourceFact(fact: FactRead) {
     const quote = fact.sources[0]?.quote
     if (!sourcePreview || !quote) return
+    evidenceFactInspected({ fact_type: fact.fact_type, scope_level: fact.scope_level, document_type: documentType(sourcePreview.doc.original_filename) })
     setSourcePreview({ ...sourcePreview, highlightedFactId: fact.id, highlightQuote: quote })
   }
 

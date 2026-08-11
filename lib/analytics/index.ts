@@ -173,3 +173,23 @@ export function stageCompleted(stage: string): void {
     interaction_count: timer.interactions(stage),
   })
 }
+
+// ── Evidence interactions (PRD §10). Category props only — never document content (PRD §30). ──
+export { documentType, documentCategory, scopeFilterValue } from "./events"
+
+export function evidenceDocumentOpened(p: { document_id: string | null; document_type: string; document_category: string }): void {
+  timer.note()
+  analytics.capture("evidence_document_opened", p)
+}
+export function evidenceSourceViewed(p: { document_type: string; fact_type?: string; locator_type: string }): void {
+  timer.note()
+  analytics.capture("evidence_source_viewed", p)
+}
+export function evidenceFactInspected(p: { fact_type: string; scope_level: string; document_type: string }): void {
+  timer.note()
+  analytics.capture("evidence_fact_inspected", p)
+}
+export function evidenceFilterUsed(p: { filter_type: string; filter_value: string }): void {
+  timer.note()
+  analytics.capture("evidence_filter_used", p)
+}

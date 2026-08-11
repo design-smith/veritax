@@ -4,6 +4,7 @@ import { createContext, useContext, useEffect, useRef, useState, type CSSPropert
 import { Check, ChevronDown, Globe, Upload, X } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { api, type DocumentRead } from "@/lib/api"
+import { evidenceFilterUsed, scopeFilterValue } from "@/lib/analytics"
 import { ActionModal } from "@/components/ui/action-modal"
 import {
   diagnoseApiFailure,
@@ -474,7 +475,7 @@ function UploadZone({ kind, accept = "*", hint, connectors }: { kind: SourceId; 
               </div>
               <div style={{ display: "flex", alignItems: "center", gap: "0.375rem" }}>
                 <div style={{ flex: 1, minWidth: 0 }}>
-                  <AssignDropdown jurisdictions={jurisdictions} value={assign[f.id] ?? []} onChange={v => setAssign(a => ({ ...a, [f.id]: v }))} />
+                  <AssignDropdown jurisdictions={jurisdictions} value={assign[f.id] ?? []} onChange={v => { evidenceFilterUsed({ filter_type: "document_scope", filter_value: scopeFilterValue(v) }); setAssign(a => ({ ...a, [f.id]: v })) }} />
                 </div>
                 {f.status === "error" && f.documentId && (
                   <button type="button" onClick={() => void retryFile(f)} title="Retry indexing"
@@ -499,7 +500,7 @@ function UploadZone({ kind, accept = "*", hint, connectors }: { kind: SourceId; 
               </div>
               <div style={{ display: "flex", alignItems: "center", gap: "0.375rem" }}>
                 <div style={{ flex: 1, minWidth: 0 }}>
-                  <AssignDropdown jurisdictions={jurisdictions} value={connAssign[c.name.toLowerCase()] ?? []} onChange={v => setConnAssign(a => ({ ...a, [c.name.toLowerCase()]: v }))} />
+                  <AssignDropdown jurisdictions={jurisdictions} value={connAssign[c.name.toLowerCase()] ?? []} onChange={v => { evidenceFilterUsed({ filter_type: "connection_scope", filter_value: scopeFilterValue(v) }); setConnAssign(a => ({ ...a, [c.name.toLowerCase()]: v })) }} />
                 </div>
                 <button type="button" onClick={() => disconnect(c)} aria-label="Disconnect"
                   style={{ background: "none", border: "none", cursor: "pointer", color: "var(--color-text-tertiary)", lineHeight: 1, padding: 2, flexShrink: 0 }}>
