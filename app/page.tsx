@@ -7,6 +7,7 @@ import { Activity, CalendarDays, ChevronDown, FileText, GraduationCap, PanelLeft
 import PlanningStep, { type PlanningDocumentMap, type PlanningSourceRow, type SourceId } from "@/components/steps/planning"
 import DemoTour, { type TourStep } from "@/components/DemoTour"
 import Confetti from "@/components/Confetti"
+import { stageEntered, stageCompleted } from "@/lib/analytics"
 import RequirementsStep from "@/components/steps/requirements"
 import DraftStep from "@/components/steps/draft"
 import RisksStep from "@/components/steps/risks"
@@ -44,6 +45,8 @@ const TOUR_STEPS: TourStep[] = [
 
 const LS_ID = "veritax.engagementId"     // resume the file being worked on across refreshes
 const LS_STEP = "veritax.step"
+// Workflow tab → canonical analytics stage (Planning is the "evidence" stage; Draft is "local_file").
+const STEP_TO_STAGE: Record<Step, string> = { 1: "evidence", 2: "requirements", 3: "local_file", 4: "risks" }
 const PLANNING_SOURCES = new Set<SourceId>(["financials", "agreements", "public", "interview"])
 const EMPTY_PLANNING_DOCUMENTS: PlanningDocumentMap = {}
 const STEP_URL: Record<Step, string> = {
@@ -278,6 +281,7 @@ export default function Page({ enableTour = false }: { enableTour?: boolean } = 
   const [tourStep, setTourStep] = useState(0)   // remembered walkthrough position (resume from the cap icon)
   const [confetti, setConfetti] = useState(false)
   const engagementLoadSeq = useRef(0)
+  const trackedStageRef = useRef<string | null>(null)   // last analytics stage fired (guards rerender/StrictMode)
 
   const openIssue = useCallback((
     base: ActionableIssueBase,
@@ -428,6 +432,16 @@ export default function Page({ enableTour = false }: { enableTour?: boolean } = 
   }, [loadEngagement, refreshFiles])
 
   useEffect(() => { localStorage.setItem(LS_STEP, String(step)) }, [step])
+  // Demo-only stage lifecycle: fire completed(prev) + entered(next) on each real transition (backtracking re-fires).
+  useEffect(() => {
+    if (!enableTour || bootStatus !== "ready" || page !== "workflow") return
+    const stage = STEP_TO_STAGE[step]
+    if (trackedStageRef.current === stage) return
+    const prev = trackedStageRef.current
+    if (prev) stageCompleted(prev)
+    trackedStageRef.current = stage
+    stageEntered(stage)
+  }, [enableTour, bootStatus, page, step])
   useEffect(() => {
     if (bootStatus !== "ready" || page !== "workflow") return
     replaceWorkspaceUrl(engagementId, step)

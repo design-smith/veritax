@@ -65,7 +65,11 @@ built in parallel.
   - `components/AnalyticsProvider.tsx` mounted in the root layout initializes **only** on `/demo` + `/signup` (keeps the demo project clean) and fires `demo_started` once per `demo_run_id` (sessionStorage guard across reloads + in-memory dedupe across rerenders).
   - Verification: `pnpm test` **7/7 pass** (fires-once, disabled-safe, debug-logs-without-sending, error-swallow, common-prop merge, no-PII payload, demo_started once-per-run); `npx tsc --noEmit` clean; `pnpm build` clean; production `next start` serves `/demo` + `/signup` 200 (`/` still 307→login) with no runtime errors.
   - Not observed here: live event arrival in PostHog (needs a browser + the PostHog UI) — deferred to S10 (HITL).
-- [ ] S03 — Stage lifecycle + active-time + scroll depth
+- [x] **S03 — Stage lifecycle + active-time + scroll depth** — DONE.
+  - `lib/analytics/activeTime.ts`: pure `ActiveTimer` (visibility-gated total + per-stage ms + per-stage interaction counts) and `newlyCrossed` scroll-threshold helper.
+  - `lib/analytics/index.ts`: `stageEntered`/`stageCompleted` (canonical `evidence/requirements/local_file/risks`; `demo_stage_entered` gets stage/previous_stage/demo_run_id from common props; `demo_stage_completed` carries `active_time_ms`, `elapsed_time_ms`, `interaction_count`); `startEngagementTracking` wires visibility/focus (pause/resume) + one capture-phase `scroll` listener that fires `stage_scroll_depth_reached` at 25/50/75/90/100 once per stage per run; sink now self-inits so event/provider ordering can't drop events. Common props extended with `stage`/`previous_stage`.
+  - `components/AnalyticsProvider.tsx` starts engagement tracking on demo surfaces; `app/page.tsx` fires stage transitions (demo-only, ref-guarded so rerenders/StrictMode don't duplicate; re-entry re-fires → backtracking derivable).
+  - Verification: `pnpm test` **11/11 pass** (added ActiveTimer hidden-time-excluded, per-stage buckets, interaction counts, scroll thresholds); `tsc` clean; `pnpm build` clean; `/demo` + `/signup` serve 200.
 - [ ] S04 — Evidence interactions
 - [ ] S05 — Requirements + jurisdiction comparison
 - [ ] S06 — Local File generation + sections + citations

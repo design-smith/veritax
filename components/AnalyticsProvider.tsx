@@ -5,13 +5,14 @@
 
 import { useEffect } from "react"
 import { usePathname } from "next/navigation"
-import { initAnalytics, isDemoSurface, trackDemoStarted } from "@/lib/analytics"
+import { initAnalytics, isDemoSurface, startEngagementTracking, trackDemoStarted } from "@/lib/analytics"
 
 export default function AnalyticsProvider() {
   const pathname = usePathname()
   useEffect(() => {
     if (!isDemoSurface(pathname)) return
     initAnalytics()
+    startEngagementTracking()
     if (pathname === "/demo" || pathname.startsWith("/demo/")) trackDemoStarted()
   }, [pathname])
   return null

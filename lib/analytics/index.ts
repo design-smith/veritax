@@ -3,6 +3,7 @@
 
 import posthog from "posthog-js"
 import { createAnalytics } from "./core"
+import { ActiveTimer, newlyCrossed } from "./activeTime"
 
 const KEY = process.env.NEXT_PUBLIC_POSTHOG_KEY
 const HOST = process.env.NEXT_PUBLIC_POSTHOG_HOST ?? "https://us.i.posthog.com"
@@ -16,6 +17,12 @@ export const DEMO_VERSION = "2026-08-v1"
 const DEMO_SURFACES = ["/demo", "/signup"]
 export const isDemoSurface = (path: string | null | undefined): boolean =>
   !!path && DEMO_SURFACES.some(s => path === s || path.startsWith(s + "/"))
+
+// Current stage + active-engagement accounting (PRD §16, §17, §21).
+const timer = new ActiveTimer()
+let _stage: string | undefined
+let _prevStage: string | undefined
+let _stageEnteredAt = 0
 
 function uuid(): string {
   if (typeof crypto !== "undefined" && "randomUUID" in crypto) return crypto.randomUUID()
@@ -77,6 +84,8 @@ function commonProps(): Record<string, unknown> {
     demo_version: DEMO_VERSION,
     product_surface: "demo",
     demo_run_id: getDemoRunId(),
+    stage: _stage,
+    previous_stage: _prevStage,
     is_returning_visitor: _returning,
     viewport_category: viewportCategory(),
     ...attribution(),
@@ -100,8 +109,9 @@ export function initAnalytics(): void {
 }
 
 export const analytics = createAnalytics({
-  capture: (event, props) => posthog.capture(event, props),
-  isEnabled: () => ENABLED && initialized,
+  // Ensure init before the first capture so event ordering vs the provider effect can't drop events.
+  capture: (event, props) => { initAnalytics(); posthog.capture(event, props) },
+  isEnabled: () => ENABLED,
   debug: () => DEBUG,
   commonProps,
 })
@@ -115,4 +125,51 @@ export function trackDemoStarted(entryStage = "evidence"): void {
     window.sessionStorage.setItem(guard, "1")
   }
   analytics.demoStarted({ entry_stage: entryStage })
+}
+
+// ── Stage lifecycle + active-time + scroll depth (PRD §9.2/§9.3, §16/§17, §20/§21) ──
+
+const scrollFired: Record<string, Set<number>> = {}
+
+function onScroll(e: Event): void {
+  const el = e.target as HTMLElement | null
+  if (!el || !el.scrollHeight || !_stage) return
+  const max = el.scrollHeight - el.clientHeight
+  if (max <= 40) return  // ignore non-scrollers / trivial overflow
+  const pct = Math.min(100, (el.scrollTop / max) * 100)
+  const fired = (scrollFired[_stage] ??= new Set())
+  for (const t of newlyCrossed(pct, fired)) {
+    fired.add(t)
+    analytics.capture("stage_scroll_depth_reached", { stage: _stage, depth_percent: t })
+  }
+}
+
+let engagementStarted = false
+export function startEngagementTracking(): void {
+  if (engagementStarted || typeof document === "undefined") return
+  engagementStarted = true
+  const sync = () => timer.setActive(document.visibilityState === "visible" && document.hasFocus())
+  document.addEventListener("visibilitychange", sync)
+  window.addEventListener("focus", sync)
+  window.addEventListener("blur", sync)
+  document.addEventListener("scroll", onScroll, true)  // capture phase: scroll does not bubble
+  sync()
+}
+
+// Fire once per real stage transition (call site guards against rerenders; re-entry re-fires — backtracking).
+export function stageEntered(stage: string): void {
+  _prevStage = _stage
+  _stage = stage
+  _stageEnteredAt = Date.now()
+  timer.setStage(stage)
+  analytics.capture("demo_stage_entered", {})  // stage/previous_stage/demo_run_id come from common props
+}
+
+export function stageCompleted(stage: string): void {
+  analytics.capture("demo_stage_completed", {
+    stage,
+    active_time_ms: timer.stageMs(stage),
+    elapsed_time_ms: _stageEnteredAt ? Date.now() - _stageEnteredAt : 0,
+    interaction_count: timer.interactions(stage),
+  })
 }
