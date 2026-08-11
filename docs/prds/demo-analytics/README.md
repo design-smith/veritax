@@ -88,6 +88,10 @@ built in parallel.
   - `lib/analytics/events.ts`: pure `riskProps` (risk_type=kind, risk_category=opaque finding id — good for "most opened risks", severity; never title/description/exposure text). `lib/analytics/index.ts`: reusable `firedOncePerRun` guard (also refactored `trackDemoStarted` onto it); `risksViewed` (once per run), `riskOpened`, `riskEvidenceOpened`, `riskRecommendationOpened`.
   - `risks.tsx`: `risks_viewed` fired from an IntersectionObserver on the risks root (threshold 0.25 → only when the screen is actually on-screen, not merely mounted; once per run). Finding row open → `risk_opened` + `risk_recommendation_opened` (when the finding has recommendations, which the panel shows on open). `openSource` → `risk_evidence_opened` (high-intent, on the open/copy of a finding's evidence). No narrative/exposure text in any payload.
   - Verification: `pnpm test` **19/19 pass** (added `riskProps` no-content test); `tsc` clean; `pnpm build` clean; `/demo` + `/signup` 200.
-- [ ] S08 — Waitlist backend + /signup wiring
+- [x] **S08 — Waitlist request-access backend + /signup wiring** — DONE.
+  - **No persistence decision needed:** the backend uses `Base.metadata.create_all` on startup (no Alembic — `db.py` says so), so a new model auto-creates its table.
+  - Backend: `WaitlistRequest` model (`waitlist_requests`: name/country/email/company + `lead_id` + `attribution` JSONB + `created_at`); `WaitlistRequestCreate`/`WaitlistResponse` schemas (required fields via `Field(min_length=1)`); **public** `POST /waitlist` router (`routers/waitlist.py`) registered in `main.py` **without** `get_current_user`; returns opaque `waitlist_user_id = "waitlist_<uuid>"` (never the email).
+  - Frontend: `api.submitWaitlist` in `lib/api.ts`; `/signup` now POSTs on **Access** (busy state, friendly error that preserves input, existing success screen on 2xx), sending `lead_id`/`utm_*` attribution parsed from the URL (no PII in the URL).
+  - Verification: backend `pytest tests/test_waitlist.py` **3/3 pass** (public/no-token access, opaque id ≠ email, missing+blank fields → 422) against the pgvector test DB (`:5544`); frontend `pnpm test` 19/19, `tsc` clean, `pnpm build` clean; `/demo` + `/signup` 200.
 - [ ] S09 — CTA exposure/click + waitlist analytics + identify
 - [ ] S10 — Dashboard + cohorts + KPIs + QA (HITL)

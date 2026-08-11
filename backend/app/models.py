@@ -919,6 +919,20 @@ class PipelineJob(Base):
     )
 
 
+# Public demo "Access Veritax" request-access submissions. Not tied to an account (the demo is anonymous).
+class WaitlistRequest(Base):
+    __tablename__ = "waitlist_requests"
+
+    id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
+    name: Mapped[str] = mapped_column(Text, nullable=False)
+    country: Mapped[str] = mapped_column(Text, nullable=False)
+    email: Mapped[str] = mapped_column(Text, nullable=False)
+    company: Mapped[str] = mapped_column(Text, nullable=False)
+    lead_id: Mapped[str | None] = mapped_column(Text, nullable=True)          # opaque campaign id, never PII in a URL
+    attribution: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict)  # utm_* etc.
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
 # Seed data for the connector registry (all available, none wired yet).
 CONNECTOR_SEED: list[dict] = [
     {"provider": "sap", "display_name": "SAP", "category": ConnectorCategory.accounting},

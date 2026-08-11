@@ -33,6 +33,7 @@ from .routers import (
     risks,
     search,
     sources,
+    waitlist,
 )
 from .storage import LocalStorage, S3Storage
 
@@ -165,6 +166,9 @@ for _router in (
     risks.router,
 ):
     app.include_router(_router, dependencies=[Depends(get_current_user)])
+
+# Public: the demo request-access form posts here with no account/token.
+app.include_router(waitlist.router)
 
 
 @app.get("/health", tags=["health"])

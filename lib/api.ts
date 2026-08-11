@@ -376,6 +376,14 @@ const realApi = {
   createEngagement: (): Promise<{ id: string }> =>
     afetch(`${BASE}/engagements`, { method: "POST" }).then(r => parse<{ id: string }>(r)),
 
+  // Public request-access (waitlist) submission from /signup. Returns an opaque internal id.
+  submitWaitlist: (body: { name: string; country: string; email: string; company: string; lead_id?: string; attribution?: Record<string, string> }): Promise<{ waitlist_user_id: string }> =>
+    afetch(`${BASE}/waitlist`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    }).then(r => parse<{ waitlist_user_id: string }>(r)),
+
   listEngagements: (): Promise<EngagementSummary[]> =>
     afetch(`${BASE}/engagements`).then(r => parse<EngagementSummary[]>(r)),
 

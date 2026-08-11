@@ -5,6 +5,7 @@
 
 import { useState } from "react"
 import { Check } from "lucide-react"
+import { api } from "@/lib/api"
 
 const INPUT: React.CSSProperties = {
   width: "100%", height: 42, padding: "0 0.875rem", borderRadius: 8, border: "1px solid #e5e5e5",
@@ -22,7 +23,40 @@ export default function SignupPage() {
   const [email, setEmail] = useState("")
   const [company, setCompany] = useState("")
   const [done, setDone] = useState(false)
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState("")
   const canSubmit = [name, country, email, company].every(v => v.trim().length > 0)
+
+  // Acquisition attribution from the entry URL (opaque lead id + UTMs), never PII in the URL.
+  function attributionFromUrl(): { lead_id?: string; attribution?: Record<string, string> } {
+    if (typeof window === "undefined") return {}
+    const q = new URLSearchParams(window.location.search)
+    const attribution: Record<string, string> = {}
+    for (const k of ["utm_source", "utm_medium", "utm_campaign", "utm_term", "utm_content"]) {
+      const v = q.get(k)
+      if (v) attribution[k] = v
+    }
+    const lead_id = q.get("lead_id") ?? undefined
+    return { lead_id, attribution: Object.keys(attribution).length ? attribution : undefined }
+  }
+
+  async function submit(e: React.FormEvent) {
+    e.preventDefault()
+    if (!canSubmit || busy) return
+    setBusy(true)
+    setError("")
+    try {
+      await api.submitWaitlist({
+        name: name.trim(), country: country.trim(), email: email.trim(), company: company.trim(),
+        ...attributionFromUrl(),
+      })
+      setDone(true)
+    } catch {
+      setError("Something went wrong submitting your request. Please try again.")
+    } finally {
+      setBusy(false)
+    }
+  }
 
   return (
     <div style={{ minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center", background: "#fafafa", color: "#000", padding: "1.5rem" }}>
@@ -50,13 +84,14 @@ export default function SignupPage() {
               <h1 style={{ fontSize: 18, fontWeight: 600, margin: "0 0 0.25rem" }}>Access Veritax Live</h1>
               <p style={{ fontSize: 13, color: "#888", margin: 0 }}>Request access to the live app.</p>
             </div>
-            <form onSubmit={e => { e.preventDefault(); if (canSubmit) setDone(true) }} style={{ display: "flex", flexDirection: "column", gap: "0.5rem" }}>
+            <form onSubmit={submit} style={{ display: "flex", flexDirection: "column", gap: "0.5rem" }}>
               <input style={INPUT} type="text" required autoComplete="name" placeholder="Full name" value={name} onChange={e => setName(e.target.value)} />
               <input style={INPUT} type="text" required autoComplete="country-name" placeholder="Country" value={country} onChange={e => setCountry(e.target.value)} />
               <input style={INPUT} type="email" required autoComplete="email" placeholder="you@company.com" value={email} onChange={e => setEmail(e.target.value)} />
               <input style={INPUT} type="text" required autoComplete="organization" placeholder="Company" value={company} onChange={e => setCompany(e.target.value)} />
-              <button type="submit" style={{ ...PRIMARY, opacity: canSubmit ? 1 : 0.5, cursor: canSubmit ? "pointer" : "not-allowed" }} disabled={!canSubmit}>
-                Access
+              {error && <p style={{ margin: 0, fontSize: 12, color: "#e02e2a" }}>{error}</p>}
+              <button type="submit" style={{ ...PRIMARY, opacity: canSubmit && !busy ? 1 : 0.5, cursor: canSubmit && !busy ? "pointer" : "not-allowed" }} disabled={!canSubmit || busy}>
+                {busy ? "Submitting…" : "Access"}
               </button>
             </form>
           </>

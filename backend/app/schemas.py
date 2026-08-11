@@ -3,7 +3,7 @@ from __future__ import annotations
 import uuid
 from datetime import datetime
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 from .models import (
     CitationKind,
@@ -22,6 +22,19 @@ from .models import (
 
 class IdResponse(BaseModel):
     id: uuid.UUID
+
+
+class WaitlistRequestCreate(BaseModel):
+    name: str = Field(min_length=1)
+    country: str = Field(min_length=1)
+    email: str = Field(min_length=1)
+    company: str = Field(min_length=1)
+    lead_id: str | None = None
+    attribution: dict[str, str] | None = None
+
+
+class WaitlistResponse(BaseModel):
+    waitlist_user_id: str
 
 
 class EngagementPatch(BaseModel):
