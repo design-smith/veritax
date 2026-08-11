@@ -282,6 +282,10 @@ export default function Page({ enableTour = false }: { enableTour?: boolean } = 
   const [confetti, setConfetti] = useState(false)
   const engagementLoadSeq = useRef(0)
   const trackedStageRef = useRef<string | null>(null)   // last analytics stage fired (guards rerender/StrictMode)
+  const revealEngRef = useRef<Engagement | null>(null)  // demo Planning data, revealed as the tutorial spotlights it
+  const scopeShownRef = useRef(false)
+  const sourcesShownRef = useRef(false)
+  const tourWasOpenedRef = useRef(false)
 
   const openIssue = useCallback((
     base: ActionableIssueBase,
@@ -336,35 +340,47 @@ export default function Page({ enableTour = false }: { enableTour?: boolean } = 
         setPlanningDocuments(planningDocumentsFromEngagement(eng))
         return true
       }
-      // Demo: set the scope, then check each source class and reveal its files/connections one at a time
-      // (each item fades in via .vt-reveal-in in Planning). Reads like the file is being assembled live.
-      const mySeq = engagementLoadSeq.current
-      const at = (ms: number, fn: () => void) => window.setTimeout(() => { if (engagementLoadSeq.current === mySeq) fn() }, ms)
+      // Demo: don't populate on load. Blank Planning and hold the data; the reveal effect below fills each
+      // part when the tutorial spotlight lands on it (or immediately if the tutorial is closed/skipped).
       setEntity(""); setJ([]); setFiscalYear(""); setSources(new Set())
       setWebsiteUrl(""); setPlanningSourceRows([]); setPlanningDocuments(EMPTY_PLANNING_DOCUMENTS)
-      let t = 300
-      at(t, () => { setJ(eng.jurisdictions); setEntity(eng.entity_name ?? ""); setFiscalYear(eng.fiscal_year ?? "") })
-      for (const kind of PLANNING_SOURCES) {   // insertion order: financials, agreements, public, interview
-        const kindSources = eng.sources.filter(s => (s.kind as SourceId) === kind)
-        if (kindSources.length === 0) continue
-        t += 450
-        at(t, () => setSources(prev => new Set(prev).add(kind)))   // tick the class checkbox
-        for (const src of kindSources) {
-          if (src.url) { const url = src.url; t += 300; at(t, () => setWebsiteUrl(url)) }
-          if (src.origin === "connected") {
-            const row: PlanningSourceRow = { id: src.id, kind, origin: src.origin, connector_provider: src.connector_provider, url: src.url }
-            t += 300; at(t, () => setPlanningSourceRows(prev => (prev.some(r => r.id === row.id) ? prev : [...prev, row])))
-          }
-          for (const doc of src.documents) {
-            t += 300
-            at(t, () => setPlanningDocuments(prev => ({ ...prev, [kind]: [...(prev[kind] ?? []), doc] })))
-          }
-        }
-      }
+      scopeShownRef.current = false
+      sourcesShownRef.current = false
+      revealEngRef.current = eng
       return true
     } catch (error) {
       logAppError("load engagement", error)
       return false
+    }
+  }, [])
+
+  // Demo reveal: fill the scope fields at once.
+  const revealScope = useCallback((eng: Engagement) => {
+    setJ(eng.jurisdictions); setEntity(eng.entity_name ?? ""); setFiscalYear(eng.fiscal_year ?? "")
+  }, [])
+
+  // Demo reveal: check each source class and pop its files/connectors in one at a time (each fades in
+  // via .vt-reveal-in in Planning), so the file reads like it's being assembled live.
+  const revealSources = useCallback((eng: Engagement) => {
+    const mySeq = engagementLoadSeq.current
+    const at = (ms: number, fn: () => void) => window.setTimeout(() => { if (engagementLoadSeq.current === mySeq) fn() }, ms)
+    let t = 0
+    for (const kind of PLANNING_SOURCES) {   // insertion order: financials, agreements, public, interview
+      const kindSources = eng.sources.filter(s => (s.kind as SourceId) === kind)
+      if (kindSources.length === 0) continue
+      t += 350
+      at(t, () => setSources(prev => new Set(prev).add(kind)))   // tick the class checkbox
+      for (const src of kindSources) {
+        if (src.url) { const url = src.url; t += 300; at(t, () => setWebsiteUrl(url)) }
+        if (src.origin === "connected") {
+          const row: PlanningSourceRow = { id: src.id, kind, origin: src.origin, connector_provider: src.connector_provider, url: src.url }
+          t += 300; at(t, () => setPlanningSourceRows(prev => (prev.some(r => r.id === row.id) ? prev : [...prev, row])))
+        }
+        for (const doc of src.documents) {
+          t += 300
+          at(t, () => setPlanningDocuments(prev => ({ ...prev, [kind]: [...(prev[kind] ?? []), doc] })))
+        }
+      }
     }
   }, [])
 
@@ -512,6 +528,25 @@ export default function Page({ enableTour = false }: { enableTour?: boolean } = 
     setTourStep(0)
     setTourOpen(true)
   }, [enableTour, bootStatus])
+
+  // Demo reveal: fill each Planning part when the tutorial spotlight lands on it; if the tutorial is
+  // closed/skipped, fill whatever's left immediately. (With the tutorial off entirely, loadEngagement
+  // already fills Planning on load, so this path only runs for the guided demo.)
+  useEffect(() => {
+    if (tourOpen) tourWasOpenedRef.current = true
+    const eng = revealEngRef.current
+    if (!enableTour || !eng) return
+    const target = tourOpen ? TOUR_STEPS[tourStep]?.target : undefined
+    const tutorialClosed = tourWasOpenedRef.current && !tourOpen   // opened, then skipped/closed
+    if (!scopeShownRef.current && (tutorialClosed || target === "planning-scope" || target === "planning-sources")) {
+      scopeShownRef.current = true
+      revealScope(eng)
+    }
+    if (!sourcesShownRef.current && (tutorialClosed || target === "planning-sources")) {
+      sourcesShownRef.current = true
+      revealSources(eng)
+    }
+  }, [enableTour, tourOpen, tourStep, revealScope, revealSources])
 
   function newFile() {
     // Start a fresh Local File pipeline: jump into Planning immediately, then create the engagement
