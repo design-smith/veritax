@@ -9,6 +9,7 @@ import {
 } from "recharts"
 import { Loader2, Save, X } from "lucide-react"
 import { api, type DocChart, type DocTable, type DraftSection } from "@/lib/api"
+import { localFileSectionViewed } from "@/lib/analytics"
 
 const PALETTE = ["#0285ff", "#04b84c", "#ffc300", "#e02e2a", "#8046d9", "#ff66ad", "#fb6a22"]
 const MARKER = /\[\[(table|chart):([^\]]+)\]\]/g
@@ -234,6 +235,7 @@ export default function DraftDocument({ jurisdiction, entity, sections, editing,
   const [saveError, setSaveError] = useState<Record<string, string>>({})
   const [activeSectionId, setActiveSectionId] = useState<string>("cover")
   const scrollRef = useRef<HTMLDivElement>(null)
+  const viewedRef = useRef<Set<string>>(new Set())   // local_file_section_viewed, once per jurisdiction+section
   const ordered = useMemo(() => [...docSections].sort((a, b) => a.element_order - b.element_order), [docSections])
   const orderedIds = useMemo(() => ordered.map(s => s.id).join("|"), [ordered])
 
@@ -286,15 +288,24 @@ export default function DraftDocument({ jurisdiction, entity, sections, editing,
     const nodes = Array.from(root.querySelectorAll<HTMLElement>("[data-draft-section-id]"))
     if (nodes.length === 0) return
     const observer = new IntersectionObserver((entries) => {
-      const visible = entries
-        .filter(entry => entry.isIntersecting)
-        .sort((a, b) => a.boundingClientRect.top - b.boundingClientRect.top)[0]
+      const intersecting = entries.filter(entry => entry.isIntersecting)
+      const visible = intersecting.sort((a, b) => a.boundingClientRect.top - b.boundingClientRect.top)[0]
       const id = visible?.target.getAttribute("data-draft-section-id")
       if (id) setActiveSectionId(id)
+      // Fire local_file_section_viewed once per section per run when it becomes meaningfully visible (PRD §36).
+      for (const entry of intersecting) {
+        const sid = entry.target.getAttribute("data-draft-section-id")
+        if (!sid || sid === "cover") continue
+        const key = `${jurisdiction}:${sid}`
+        if (viewedRef.current.has(key)) continue
+        viewedRef.current.add(key)
+        const sec = ordered.find(s => s.id === sid)
+        if (sec) localFileSectionViewed({ section_key: sec.requirement_key, section_index: sec.element_order })
+      }
     }, { root, threshold: 0.18, rootMargin: "-12% 0px -58% 0px" })
     nodes.forEach(node => observer.observe(node))
     return () => observer.disconnect()
-  }, [orderedIds, editing])
+  }, [orderedIds, editing, jurisdiction, ordered])
 
   return (
     <div style={{ flex: 1, display: "flex", overflow: "hidden", minWidth: 0 }}>

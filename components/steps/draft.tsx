@@ -14,6 +14,7 @@ import {
   type ActionableIssueBase,
 } from "@/lib/actionable-errors"
 import DraftDocument, { DraftCover, DraftSectionSidebar } from "./DraftDocument"
+import { localFileGenerationStarted, localFileGenerationCompleted, localFileSectionStarted, localFileSectionCompleted, sectionLifecycle } from "@/lib/analytics"
 
 const FIRST_REVEAL_SECTIONS = 5
 const TYPE_CHARS_PER_TICK = 3
@@ -264,6 +265,9 @@ export default function DraftStep({ engagementId, jurisdictions, entity, onConti
   const observedGeneratingRef = useRef<Set<string>>(new Set())
   const failedIssueKeyRef = useRef<string>("")
   const pollRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const genStartedRef = useRef<Set<string>>(new Set())        // local_file_generation_started, once per jurisdiction/run
+  const genCompletedRef = useRef<Set<string>>(new Set())      // local_file_generation_completed, once per jurisdiction/run
+  const genStartAtRef = useRef<Record<string, number>>({})
 
   const setDraft = (j: string, data: DraftResponse) => setDraftByJuris(prev => ({ ...prev, [j]: data }))
 
@@ -345,6 +349,11 @@ export default function DraftStep({ engagementId, jurisdictions, entity, onConti
     if (!engagementId || !j || startedRef.current.has(j)) return
     setStarted(prev => new Set(prev).add(j))
     startedRef.current = new Set(startedRef.current).add(j)
+    if (!genStartedRef.current.has(j)) {
+      genStartedRef.current.add(j)
+      genStartAtRef.current[j] = Date.now()
+      localFileGenerationStarted()
+    }
     try {
       const d = await runWithRetry(
         () => api.startDraft(engagementId, j),
@@ -523,6 +532,19 @@ export default function DraftStep({ engagementId, jurisdictions, entity, onConti
     setTypedDoneByJuris(prev => ({ ...prev, [activeJurisdiction]: false }))
     if (key) localStorage.removeItem(key)
   }, [activeJurisdiction, complete, draft, markTypedDone, typedDoneStorageKey])
+
+  // Emit the section + generation-completed lifecycle once per jurisdiction when the draft finishes.
+  useEffect(() => {
+    if (!complete || !draft || genCompletedRef.current.has(activeJurisdiction)) return
+    genCompletedRef.current.add(activeJurisdiction)
+    const startedAt = genStartAtRef.current[activeJurisdiction]
+    const total = startedAt ? Date.now() - startedAt : 0
+    for (const s of sectionLifecycle(draft.sections, total)) {
+      localFileSectionStarted({ section_key: s.section_key, section_index: s.section_index })
+      localFileSectionCompleted(s)
+    }
+    localFileGenerationCompleted({ section_count: draft.sections.length, generation_duration_ms: total })
+  }, [complete, draft, activeJurisdiction])
 
   useEffect(() => {
     setEditing(false)

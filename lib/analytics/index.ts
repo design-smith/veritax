@@ -213,3 +213,27 @@ export function jurisdictionComparisonUsed(p: { country_codes: string[]; country
   timer.note()
   analytics.capture("jurisdiction_comparison_used", p)
 }
+
+// ── Local File generation + sections + citations (PRD §12) ──
+export { sectionLifecycle, type DraftSectionLike } from "./events"
+
+export function localFileGenerationStarted(): void {
+  analytics.capture("local_file_generation_started", {})
+}
+export function localFileGenerationCompleted(p: { section_count: number; generation_duration_ms: number }): void {
+  analytics.capture("local_file_generation_completed", p)
+}
+export function localFileSectionStarted(p: { section_key: string; section_index: number }): void {
+  analytics.capture("local_file_section_started", p)
+}
+export function localFileSectionCompleted(p: { section_key: string; section_index: number; generation_duration_ms: number }): void {
+  analytics.capture("local_file_section_completed", p)
+}
+export function localFileSectionViewed(p: { section_key: string; section_index: number }): void {
+  timer.note()
+  analytics.capture("local_file_section_viewed", p)
+}
+export function localFileCitationOpened(p: { section_key: string; citation_source_type: string }): void {
+  timer.note()
+  analytics.capture("local_file_citation_opened", p)
+}

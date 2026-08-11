@@ -23,6 +23,15 @@ export function scopeFilterValue(scope: string[]): string {
   return scope.length === 0 ? "global" : `scoped_${scope.length}`
 }
 
+export interface DraftSectionLike { requirement_key: string; element_order: number }
+
+// Ordered per-section lifecycle payloads for a completed draft (the demo generates as a batch).
+export function sectionLifecycle(sections: DraftSectionLike[], totalMs: number): Array<{ section_key: string; section_index: number; generation_duration_ms: number }> {
+  const ordered = [...sections].sort((a, b) => a.element_order - b.element_order)
+  const per = ordered.length ? Math.round(totalMs / ordered.length) : 0
+  return ordered.map(s => ({ section_key: s.requirement_key, section_index: s.element_order, generation_duration_ms: per }))
+}
+
 export interface ComparisonState { seen: Set<string>; fired: boolean }
 
 // Track distinct jurisdictions the user has inspected. Returns the code list the first time >=2 are seen

@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest"
-import { documentType, documentCategory, scopeFilterValue, trackJurisdictionComparison, type ComparisonState } from "./events"
+import { documentType, documentCategory, scopeFilterValue, trackJurisdictionComparison, sectionLifecycle, type ComparisonState } from "./events"
 
 describe("documentType", () => {
   it("maps known source labels to categories", () => {
@@ -30,6 +30,21 @@ describe("scopeFilterValue", () => {
     expect(scopeFilterValue([])).toBe("global")
     expect(scopeFilterValue(["Germany", "France"])).toBe("scoped_2")
     expect(scopeFilterValue(["Germany"])).not.toContain("Germany")
+  })
+})
+
+describe("sectionLifecycle", () => {
+  it("returns per-section payloads in element order with an even duration split (PRD §12)", () => {
+    const out = sectionLifecycle(
+      [{ requirement_key: "req-2", element_order: 2 }, { requirement_key: "req-1", element_order: 1 }],
+      1000,
+    )
+    expect(out.map(s => s.section_index)).toEqual([1, 2])
+    expect(out.map(s => s.section_key)).toEqual(["req-1", "req-2"])
+    expect(out.every(s => s.generation_duration_ms === 500)).toBe(true)
+  })
+  it("is empty and safe for zero sections", () => {
+    expect(sectionLifecycle([], 1000)).toEqual([])
   })
 })
 
