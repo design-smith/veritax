@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest"
-import { documentType, documentCategory, scopeFilterValue } from "./events"
+import { documentType, documentCategory, scopeFilterValue, trackJurisdictionComparison, type ComparisonState } from "./events"
 
 describe("documentType", () => {
   it("maps known source labels to categories", () => {
@@ -30,5 +30,16 @@ describe("scopeFilterValue", () => {
     expect(scopeFilterValue([])).toBe("global")
     expect(scopeFilterValue(["Germany", "France"])).toBe("scoped_2")
     expect(scopeFilterValue(["Germany"])).not.toContain("Germany")
+  })
+})
+
+describe("trackJurisdictionComparison", () => {
+  it("fires once when a 2nd distinct jurisdiction is inspected, not for one (PRD §11)", () => {
+    const state: ComparisonState = { seen: new Set(), fired: false }
+    expect(trackJurisdictionComparison(state, "United Arab Emirates")).toBeNull()
+    const out = trackJurisdictionComparison(state, "Singapore")
+    expect(out).not.toBeNull()
+    expect(out).toHaveLength(2)
+    expect(trackJurisdictionComparison(state, "South Africa")).toBeNull()  // already fired
   })
 })

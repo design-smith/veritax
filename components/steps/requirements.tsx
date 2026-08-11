@@ -3,6 +3,10 @@
 import { useCallback, useEffect, useRef, useState } from "react"
 import { Upload, Check, AlertTriangle, Loader2, FileText, ArrowRight, RefreshCw } from "lucide-react"
 import { api, type CoverageResponse, type CoverageRow, type CoverageStatusValue } from "@/lib/api"
+import {
+  requirementsCountrySelected, requirementOpened, requirementEvidenceOpened, jurisdictionComparisonUsed,
+  trackJurisdictionComparison, documentType, type ComparisonState,
+} from "@/lib/analytics"
 import { Animate } from "@/components/ui/transition"
 import { ActionModal } from "@/components/ui/action-modal"
 import {
@@ -153,6 +157,7 @@ export default function RequirementsStep({ engagementId, jurisdictions, onContin
   const draftPrimedRef = useRef<Set<string>>(new Set())
   const draftPrimingRef = useRef<Set<string>>(new Set())
   const satisfyingRef = useRef<Set<string>>(new Set())
+  const comparisonRef = useRef<ComparisonState>({ seen: new Set(), fired: false })  // jurisdiction_comparison_used, once per run
 
   function openIssue(
     base: ActionableIssueBase,
@@ -280,6 +285,12 @@ export default function RequirementsStep({ engagementId, jurisdictions, onContin
   }, [engagementId, jurisdictions, startJurisdiction])
 
   function selectJurisdiction(j: string) {
+    if (j !== activeJurisdiction) {
+      requirementsCountrySelected({ country_code: j, previous_country_code: activeJurisdiction })
+      trackJurisdictionComparison(comparisonRef.current, activeJurisdiction)  // seed the one already in view
+      const codes = trackJurisdictionComparison(comparisonRef.current, j)
+      if (codes) jurisdictionComparisonUsed({ country_codes: codes, country_count: codes.length })
+    }
     setActive(j)
     setOpenReqId(null)
     setFilters(new Set())
@@ -678,7 +689,15 @@ export default function RequirementsStep({ engagementId, jurisdictions, onContin
               return (
                 <Animate key={row.id} enter="slide-up" duration={140} delay={Math.min(idx, 6) * 18}>
                 <div
-                  onClick={() => { setOpenReqId(row.id); setSupplementText("") }}
+                  onClick={() => {
+                    const category = row.requirement_key
+                    const criticality = row.is_conditional ? "conditional" : "required"
+                    requirementOpened({ country_code: activeJurisdiction, requirement_category: category, requirement_status: row.status, criticality })
+                    if (row.evidence.length > 0) {
+                      requirementEvidenceOpened({ country_code: activeJurisdiction, requirement_category: category, requirement_status: row.status, document_type: documentType(row.evidence[0]?.source_label) })
+                    }
+                    setOpenReqId(row.id); setSupplementText("")
+                  }}
                   onMouseEnter={e => { if (!selected) e.currentTarget.style.background = "var(--color-background-primary-ghost-hover)" }}
                   onMouseLeave={e => { if (!selected) e.currentTarget.style.background = "transparent" }}
                   style={{

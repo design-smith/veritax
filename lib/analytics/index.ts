@@ -193,3 +193,23 @@ export function evidenceFilterUsed(p: { filter_type: string; filter_value: strin
   timer.note()
   analytics.capture("evidence_filter_used", p)
 }
+
+// ── Requirements + jurisdiction comparison (PRD §11) ──
+export { trackJurisdictionComparison, type ComparisonState } from "./events"
+
+export function requirementsCountrySelected(p: { country_code: string; previous_country_code: string }): void {
+  timer.note()
+  analytics.capture("requirements_country_selected", p)
+}
+export function requirementOpened(p: { country_code: string; requirement_category: string; requirement_status: string; criticality: string }): void {
+  timer.note()
+  analytics.capture("requirement_opened", p)
+}
+export function requirementEvidenceOpened(p: { country_code: string; requirement_category: string; requirement_status: string; document_type: string }): void {
+  timer.note()
+  analytics.capture("requirement_evidence_opened", p)
+}
+export function jurisdictionComparisonUsed(p: { country_codes: string[]; country_count: number }): void {
+  timer.note()
+  analytics.capture("jurisdiction_comparison_used", p)
+}

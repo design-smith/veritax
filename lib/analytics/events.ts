@@ -22,3 +22,16 @@ export function documentCategory(kind: string | null | undefined): string {
 export function scopeFilterValue(scope: string[]): string {
   return scope.length === 0 ? "global" : `scoped_${scope.length}`
 }
+
+export interface ComparisonState { seen: Set<string>; fired: boolean }
+
+// Track distinct jurisdictions the user has inspected. Returns the code list the first time >=2 are seen
+// (so jurisdiction_comparison_used fires once per run), else null. Comparison = investigating, not navigating.
+export function trackJurisdictionComparison(state: ComparisonState, code: string): string[] | null {
+  state.seen.add(code)
+  if (!state.fired && state.seen.size >= 2) {
+    state.fired = true
+    return [...state.seen]
+  }
+  return null
+}

@@ -75,7 +75,10 @@ built in parallel.
   - Wired to the real inspection surfaces: Risks source preview (`openSource` → `evidence_document_opened` + `evidence_source_viewed`; copy-only path → `evidence_source_viewed`; `selectSourceFact` → `evidence_fact_inspected`) and the Planning per-file / per-connection scope dropdown (`evidence_filter_used` with `document_scope`/`connection_scope`).
   - **Mapping note (transparency, not a PRD change):** the demo has no standalone Evidence screen; the §10 evidence-depth events fire where documents/facts/quotes are actually inspected (Risks preview) and where evidence is filtered (Planning scope). These are distinct from S05 `requirement_evidence_opened` / S07 `risk_evidence_opened`, consistent with the PRD listing them as separate events (§24). Facts are `[]` in the demo dataset, so `evidence_fact_inspected` is instrumented but only fires if facts exist.
   - Verification: `pnpm test` **15/15 pass** (added builder tests incl. no-content assertions); `tsc` clean; `pnpm build` clean; `/demo` + `/signup` serve 200.
-- [ ] S05 — Requirements + jurisdiction comparison
+- [x] **S05 — Requirements + jurisdiction comparison** — DONE.
+  - `lib/analytics/events.ts`: `trackJurisdictionComparison` (pure, fires once when ≥2 distinct jurisdictions inspected). `lib/analytics/index.ts` adds `requirementsCountrySelected`, `requirementOpened`, `requirementEvidenceOpened`, `jurisdictionComparisonUsed`.
+  - Wired in `requirements.tsx`: `selectJurisdiction` → `requirements_country_selected` (+ seeds/uses the comparison tracker → `jurisdiction_comparison_used` once); opening a requirement row → `requirement_opened` (`requirement_category`=requirement_key, `criticality`=conditional/required) and, when the row has evidence, `requirement_evidence_opened` (document_type category).
+  - Verification: `pnpm test` **16/16 pass** (added comparison-threshold test: fires on 2nd distinct jurisdiction, not the 1st, once per run); `tsc` clean; `pnpm build` clean; `/demo` + `/signup` 200.
 - [ ] S06 — Local File generation + sections + citations
 - [ ] S07 — Risks interactions
 - [ ] S08 — Waitlist backend + /signup wiring
