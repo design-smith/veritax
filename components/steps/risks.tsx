@@ -97,12 +97,13 @@ const logRisk = (event: string, details: Record<string, unknown>) => {
   console.info(RISK_LOG_PREFIX, event, details)
 }
 
-export default function RisksStep({ engagementId, jurisdictions, entity, onOpenDraft, onOpenPlanning }: {
+export default function RisksStep({ engagementId, jurisdictions, entity, onOpenDraft, onOpenPlanning, accessLive }: {
   engagementId: string | null
   jurisdictions: string[]
   entity: string
   onOpenDraft?: () => void
   onOpenPlanning?: () => void
+  accessLive?: boolean
 }) {
   // ── real pipeline wiring (unchanged) ──
   const [riskByJuris, setRiskByJuris] = useState<Record<string, RiskResponse>>({})
@@ -459,11 +460,18 @@ export default function RisksStep({ engagementId, jurisdictions, entity, onOpenD
           {/* Header */}
           <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: "1rem", marginBottom: "1.25rem" }}>
             <h1 style={{ fontSize: 24, fontWeight: 600, color: "#000", margin: 0 }}>Risks</h1>
-            {hasFindings && (
-              <button type="button" onClick={exportRegister} style={{ display: "inline-flex", alignItems: "center", gap: "0.375rem", height: 30, padding: "0 0.75rem", borderRadius: 6, border: "1px solid #e5e5e5", background: "#fff", color: "#000", fontSize: 12, fontWeight: 500, cursor: "pointer", flexShrink: 0 }}>
-                <Download size={14} /> Export register
-              </button>
-            )}
+            <div style={{ display: "flex", alignItems: "center", gap: "0.5rem", flexShrink: 0 }}>
+              {hasFindings && (
+                <button type="button" onClick={exportRegister} style={{ display: "inline-flex", alignItems: "center", gap: "0.375rem", height: 30, padding: "0 0.75rem", borderRadius: 6, border: "1px solid #e5e5e5", background: "#fff", color: "#000", fontSize: 12, fontWeight: 500, cursor: "pointer" }}>
+                  <Download size={14} /> Export register
+                </button>
+              )}
+              {accessLive && (
+                <a href="/signup" style={{ display: "inline-flex", alignItems: "center", height: 30, padding: "0 0.875rem", borderRadius: 6, border: "none", background: "#000", color: "#fff", fontSize: 12, fontWeight: 600, cursor: "pointer", textDecoration: "none", whiteSpace: "nowrap" }}>
+                  Access Veritax Live
+                </a>
+              )}
+            </div>
           </div>
           {risk?.analysis_mode === "fake" && (
             <p style={{ fontSize: 12, color: "#8a5a00", background: "#fff8e5", border: "1px solid #f0d58c", borderRadius: 6, padding: "0.625rem 0.75rem", margin: "0 0 0.875rem" }}>

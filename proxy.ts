@@ -25,9 +25,9 @@ export async function proxy(request: NextRequest) {
   )
 
   const path = request.nextUrl.pathname
-  // Public routes: the login page and the no-login demo. Everything else requires auth.
+  // Public routes: the login page, the no-login demo, and the request-access page. Everything else requires auth.
   const isAuthRoute = path.startsWith("/login")
-  const isPublic = isAuthRoute || path.startsWith("/demo")
+  const isPublic = isAuthRoute || path.startsWith("/demo") || path.startsWith("/signup")
   let user = null
   try {
     const result = await supabase.auth.getUser()

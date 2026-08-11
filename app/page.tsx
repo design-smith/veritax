@@ -887,6 +887,7 @@ export default function Page({ enableTour = false }: { enableTour?: boolean } = 
                 entity={entity}
                 onOpenDraft={() => navigate(3)}
                 onOpenPlanning={() => navigate(1)}
+                accessLive={enableTour}
               />
             </div>
           )}

@@ -146,7 +146,6 @@ export default function DemoTour({ steps, initialStep = 0, goToStep, onStepChang
             <button type="button" onClick={next} style={btn(true)}>{last ? "Done" : "Next"}</button>
           </div>
         </div>
-        <p style={{ margin: "0.625rem 0 0", fontSize: 11, color: "#bbb" }}>Click outside to exit — resume later from the cap icon.</p>
       </div>
     </div>,
     document.body,

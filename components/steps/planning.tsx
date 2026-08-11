@@ -4,7 +4,6 @@ import { createContext, useContext, useEffect, useRef, useState, type CSSPropert
 import { Check, ChevronDown, Globe, Upload, X } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { api, type DocumentRead } from "@/lib/api"
-import { Animate } from "@/components/ui/transition"
 import { ActionModal } from "@/components/ui/action-modal"
 import {
   diagnoseApiFailure,
@@ -109,7 +108,7 @@ function MultiSelect({ options, value, onChange, placeholder }: {
           position: "absolute", top: "calc(100% + 4px)", left: 0, right: 0,
           background: "var(--color-surface-elevated)", border: "1px solid var(--color-border)",
           borderRadius: "var(--radius-md)", boxShadow: "var(--shadow-300)",
-          padding: "0.25rem", zIndex: 50, maxHeight: 220, overflowY: "auto",
+          padding: "0.25rem", zIndex: 300, maxHeight: 220, overflowY: "auto",
         }}>
           {sorted.map(opt => (
             <label key={opt} className="hover:bg-[var(--color-background-primary-ghost-hover)]" style={{
@@ -164,7 +163,7 @@ function AssignDropdown({ jurisdictions, value, onChange }: {
           position: "absolute", top: "calc(100% + 4px)", left: 0, right: 0,
           background: "var(--color-surface-elevated)", border: "1px solid var(--color-border)",
           borderRadius: "var(--radius-md)", boxShadow: "var(--shadow-300)",
-          padding: "0.25rem", zIndex: 60, maxHeight: 220, overflowY: "auto",
+          padding: "0.25rem", zIndex: 300, maxHeight: 220, overflowY: "auto",
         }}>
           <label className="hover:bg-[var(--color-background-primary-ghost-hover)]" style={row}>
             <input type="checkbox" checked={global} onChange={() => onChange([])}
@@ -230,17 +229,34 @@ const uploadItemFromDocument = (doc: DocumentRead): UploadItem => ({
 })
 
 function UploadZone({ kind, accept = "*", hint, connectors }: { kind: SourceId; accept?: string; hint?: string; connectors?: Connector[] }) {
-  const { engagementId, jurisdictions, documentsByKind, updateDocuments, showIssue, sourceRows } = useContext(PlanningCtx)
+  const { engagementId, jurisdictions, documentsByKind, updateDocuments, showIssue, sourceRows, rememberSourceRow, selectedSources, persistSelectedSources } = useContext(PlanningCtx)
   const documents = documentsByKind[kind] ?? EMPTY_DOCUMENTS
   const [dragging, setDragging] = useState(false)
   const [items, setItems] = useState<UploadItem[]>([])
   const [assign, setAssign] = useState<Record<string, string[]>>({})  // per-file jurisdiction scope; [] = Global (UI only)
+  const [removedConn, setRemovedConn] = useState<Set<string>>(new Set())  // locally disconnected connectors (UI)
+  const [connStatus, setConnStatus] = useState<Record<string, string>>({})
+  const [connAssign, setConnAssign] = useState<Record<string, string[]>>({})  // per-connection scope; [] = Global
   const inputRef = useRef<HTMLInputElement>(null)
   const nextId = useRef(0)
   const pollingDocIds = useRef<Set<string>>(new Set())
-  const hasConnection = sourceRows.some(s => s.kind === kind && s.origin === "connected")
-  const gridMode = items.length > 0 || hasConnection
   const browse = () => inputRef.current?.click()
+
+  useEffect(() => {
+    if (!connectors) return
+    api.getConnectors().then(list => setConnStatus(Object.fromEntries(list.map(c => [c.provider, c.status])))).catch(() => {})
+  }, [connectors])
+
+  const isConnected = (name: string) =>
+    !removedConn.has(name.toLowerCase())
+    && sourceRows.some(s => s.kind === kind && s.origin === "connected" && s.connector_provider?.toLowerCase() === name.toLowerCase())
+  const connected = (connectors ?? []).filter(c => isConnected(c.name))
+  const available = (connectors ?? []).filter(c => {
+    if (isConnected(c.name)) return false
+    const st = connStatus[c.name.toLowerCase()]
+    return st === undefined || st === "available"
+  })
+  const gridMode = items.length > 0 || connected.length > 0
 
   useEffect(() => {
     if (!engagementId) {
@@ -386,6 +402,28 @@ function UploadZone({ kind, accept = "*", hint, connectors }: { kind: SourceId; 
     )
   }
 
+  async function connect(c: Connector) {
+    setRemovedConn(prev => { const s = new Set(prev); s.delete(c.name.toLowerCase()); return s })
+    const nextSources = new Set(selectedSources); nextSources.add(kind)
+    if (!engagementId) {
+      rememberSourceRow({ id: `local-conn-${kind}-${c.name.toLowerCase()}`, kind, origin: "connected", connector_provider: c.name.toLowerCase(), url: null })
+      persistSelectedSources(nextSources)
+      return
+    }
+    try {
+      const source = await runWithRetry(() => api.createSource(engagementId, { kind, origin: "connected", connector_provider: c.name.toLowerCase() }), { retries: 1 })
+      rememberSourceRow({ id: source.id, kind, origin: "connected", connector_provider: c.name.toLowerCase(), url: null })
+      persistSelectedSources(nextSources)
+    } catch (err) {
+      console.error("[veritax] failed to record connected source:", err)
+      const base = await diagnoseApiFailure(err, { operation: "save connector source", engagementId })
+      showIssue(base, { label: "Retry", onClick: () => void connect(c) }, { label: "Cancel", onClick: () => {}, variant: "ghost" })
+    }
+  }
+
+  // UI-only disconnect: hide the connection card (does not delete the backend source).
+  const disconnect = (c: Connector) => setRemovedConn(prev => new Set(prev).add(c.name.toLowerCase()))
+
   return (
     <>
       <input ref={inputRef} type="file" multiple accept={accept} style={{ display: "none" }} onChange={e => void addFiles(e.target.files)} />
@@ -413,51 +451,70 @@ function UploadZone({ kind, accept = "*", hint, connectors }: { kind: SourceId; 
             {hint && <span style={{ fontSize: "var(--font-text-xs-size)", color: "var(--color-text-tertiary)" }}>{hint}</span>}
           </div>
         </div>
-      ) : items.length > 0 ? (
-        // Uploaded files as equal-width cards (2 per row), each with a jurisdiction-scope dropdown.
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: "0.5rem" }}>
-          {items.map((f, idx) => (
-            <Animate key={f.id} enter="slide-up" duration={130} delay={Math.min(idx, 6) * 16}>
-              <div style={{
-                border: "1px solid var(--color-border)", borderRadius: "var(--radius-md)",
-                padding: "0.5rem 0.625rem", display: "flex", flexDirection: "column", gap: "0.5rem", minWidth: 0,
-                background: f.status === "error" ? "var(--color-background-danger-soft)" : "transparent",
-              }}>
-                <div
-                  title={f.status === "error" ? f.error : STATUS_LABEL[f.status]}
-                  onClick={() => { if (f.status === "error") openFailedFile(f) }}
-                  style={{ display: "flex", alignItems: "center", gap: "0.375rem", minWidth: 0, cursor: f.status === "error" ? "pointer" : "default" }}>
-                  {(f.status === "uploading" || f.status === "processing") && <span style={{ color: "var(--color-text-tertiary)", flexShrink: 0, fontSize: 11 }}>{f.status === "uploading" ? "↑" : "…"}</span>}
-                  {f.status === "done" && <Check size={12} style={{ color: "var(--color-text-success-soft)", flexShrink: 0 }} />}
-                  {f.status === "error" && <span style={{ color: "var(--color-text-danger-soft)", flexShrink: 0 }}>!</span>}
-                  <span style={{ flex: 1, minWidth: 0, fontSize: "var(--font-text-xs-size)", color: "var(--color-text)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{f.name}</span>
-                  {extractionLabel(f.extractionStatus) && (
-                    <span style={{ flexShrink: 0, fontSize: 10, color: f.extractionStatus === "failed" || f.extractionStatus === "needs_review" ? "var(--color-text-caution-soft)" : "var(--color-text-tertiary)" }}>{extractionLabel(f.extractionStatus)}</span>
-                  )}
-                </div>
-                <div style={{ display: "flex", alignItems: "center", gap: "0.375rem" }}>
-                  <div style={{ flex: 1, minWidth: 0 }}>
-                    <AssignDropdown jurisdictions={jurisdictions} value={assign[f.id] ?? []} onChange={v => setAssign(a => ({ ...a, [f.id]: v }))} />
-                  </div>
-                  {f.status === "error" && f.documentId && (
-                    <button type="button" onClick={() => void retryFile(f)} title="Retry indexing"
-                      style={{ background: "none", border: "none", cursor: "pointer", color: "var(--color-text-info-soft)", padding: 0, flexShrink: 0, fontSize: 10 }}>Retry</button>
-                  )}
-                  <button type="button" onClick={() => removeFile(f)} aria-label="Remove file"
-                    style={{ background: "none", border: "none", cursor: "pointer", color: "var(--color-text-tertiary)", lineHeight: 1, padding: 2, flexShrink: 0 }}>
-                    <X size={12} />
-                  </button>
-                </div>
+      ) : (
+        // Uploaded files + connected connectors as equal-width cards (3 per row), each with a scope dropdown.
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(3, minmax(0, 1fr))", gap: "0.5rem" }}>
+          {items.map(f => (
+            <div key={f.id} style={{
+              border: "1px solid var(--color-border)", borderRadius: "var(--radius-md)",
+              padding: "0.5rem 0.625rem", display: "flex", flexDirection: "column", gap: "0.5rem", minWidth: 0,
+              background: f.status === "error" ? "var(--color-background-danger-soft)" : "transparent",
+            }}>
+              <div
+                title={f.status === "error" ? f.error : STATUS_LABEL[f.status]}
+                onClick={() => { if (f.status === "error") openFailedFile(f) }}
+                style={{ display: "flex", alignItems: "center", gap: "0.375rem", minWidth: 0, cursor: f.status === "error" ? "pointer" : "default" }}>
+                {(f.status === "uploading" || f.status === "processing") && <span style={{ color: "var(--color-text-tertiary)", flexShrink: 0, fontSize: 11 }}>{f.status === "uploading" ? "↑" : "…"}</span>}
+                {f.status === "done" && <Check size={12} style={{ color: "var(--color-text-success-soft)", flexShrink: 0 }} />}
+                {f.status === "error" && <span style={{ color: "var(--color-text-danger-soft)", flexShrink: 0 }}>!</span>}
+                <span style={{ flex: 1, minWidth: 0, fontSize: "var(--font-text-xs-size)", color: "var(--color-text)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{f.name}</span>
+                {extractionLabel(f.extractionStatus) && (
+                  <span style={{ flexShrink: 0, fontSize: 10, color: f.extractionStatus === "failed" || f.extractionStatus === "needs_review" ? "var(--color-text-caution-soft)" : "var(--color-text-tertiary)" }}>{extractionLabel(f.extractionStatus)}</span>
+                )}
               </div>
-            </Animate>
+              <div style={{ display: "flex", alignItems: "center", gap: "0.375rem" }}>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <AssignDropdown jurisdictions={jurisdictions} value={assign[f.id] ?? []} onChange={v => setAssign(a => ({ ...a, [f.id]: v }))} />
+                </div>
+                {f.status === "error" && f.documentId && (
+                  <button type="button" onClick={() => void retryFile(f)} title="Retry indexing"
+                    style={{ background: "none", border: "none", cursor: "pointer", color: "var(--color-text-info-soft)", padding: 0, flexShrink: 0, fontSize: 10 }}>Retry</button>
+                )}
+                <button type="button" onClick={() => removeFile(f)} aria-label="Remove file"
+                  style={{ background: "none", border: "none", cursor: "pointer", color: "var(--color-text-tertiary)", lineHeight: 1, padding: 2, flexShrink: 0 }}>
+                  <X size={12} />
+                </button>
+              </div>
+            </div>
+          ))}
+          {connected.map(c => (
+            <div key={c.name} style={{
+              border: "1px solid var(--color-border)", borderRadius: "var(--radius-md)",
+              padding: "0.5rem 0.625rem", display: "flex", flexDirection: "column", gap: "0.5rem", minWidth: 0,
+            }}>
+              <div style={{ display: "flex", alignItems: "center", gap: "0.375rem", minWidth: 0 }}>
+                <LogoBadge c={c} size={20} />
+                <span style={{ flex: 1, minWidth: 0, fontSize: "var(--font-text-xs-size)", color: "var(--color-text)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{c.name}</span>
+                <span style={{ flexShrink: 0, fontSize: 10, color: "var(--color-text-tertiary)" }}>Connected</span>
+              </div>
+              <div style={{ display: "flex", alignItems: "center", gap: "0.375rem" }}>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <AssignDropdown jurisdictions={jurisdictions} value={connAssign[c.name.toLowerCase()] ?? []} onChange={v => setConnAssign(a => ({ ...a, [c.name.toLowerCase()]: v }))} />
+                </div>
+                <button type="button" onClick={() => disconnect(c)} aria-label="Disconnect"
+                  style={{ background: "none", border: "none", cursor: "pointer", color: "var(--color-text-tertiary)", lineHeight: 1, padding: 2, flexShrink: 0 }}>
+                  <X size={12} />
+                </button>
+              </div>
+            </div>
           ))}
         </div>
-      ) : null}
+      )}
 
       {connectors ? (
         <>
-          {(items.length > 0 || !gridMode) && <OrDivider />}
-          <ConnectorGrid kind={kind} connectors={connectors} onUpload={gridMode ? browse : undefined} />
+          <OrDivider />
+          <ConnectTiles available={available} onConnect={connect} onUpload={gridMode ? browse : undefined} />
         </>
       ) : gridMode ? (
         <button type="button" onClick={browse} style={{
@@ -478,7 +535,7 @@ function UploadZone({ kind, accept = "*", hint, connectors }: { kind: SourceId; 
 type Connector = { name: string; color: string; logo?: string }
 
 const ERP_CONNECTORS: Connector[] = [
-  { name: "SAP",        color: "#0AA1DD" },
+  { name: "SAP",        color: "#0AA1DD", logo: "/SAP_logo.svg" },
   { name: "Oracle",     color: "#C74634", logo: "/oracle-6-logo-svgrepo-com.svg" },
   { name: "NetSuite",   color: "#1F5FA9", logo: "/oracle-netsuite-svgrepo-com.svg" },
   { name: "QuickBooks", color: "#2CA01C", logo: "/brand-quickbooks-svgrepo-com.svg" },
@@ -501,119 +558,44 @@ function OrDivider() {
   )
 }
 
-function ConnectorGrid({ kind, connectors, onUpload }: { kind: SourceId; connectors: Connector[]; onUpload?: () => void }) {
-  const { engagementId, sourceRows, rememberSourceRow, selectedSources, persistSelectedSources, showIssue } = useContext(PlanningCtx)
-  const [connected, setConnected] = useState<Set<string>>(new Set())
-  const [statusByProvider, setStatusByProvider] = useState<Record<string, string>>({})
-
-  // Pull the registry so tiles reflect backend availability (all "available" for now).
-  useEffect(() => {
-    api.getConnectors()
-      .then(list => setStatusByProvider(Object.fromEntries(list.map(c => [c.provider, c.status]))))
-      .catch(() => {})
-  }, [])
-
-  useEffect(() => {
-    const savedProviders = new Set(
-      sourceRows
-        .filter(source => source.kind === kind && source.origin === "connected" && source.connector_provider)
-        .map(source => source.connector_provider!.toLowerCase()),
-    )
-    setConnected(new Set(connectors.filter(c => savedProviders.has(c.name.toLowerCase())).map(c => c.name)))
-  }, [connectors, kind, sourceRows])
-
-  async function recordConnector(name: string) {
-    if (!engagementId) return
-    try {
-      const source = await runWithRetry(
-        () => api.createSource(engagementId, { kind, origin: "connected", connector_provider: name.toLowerCase() }),
-        { retries: 1 },
-      )
-      rememberSourceRow({
-        id: source.id,
-        kind,
-        origin: "connected",
-        connector_provider: name.toLowerCase(),
-        url: null,
-      })
-    } catch (err) {
-      console.error("[veritax] failed to record connected source:", err)
-      const base = await diagnoseApiFailure(err, { operation: "save connector source", engagementId })
-      showIssue(
-        base,
-        { label: "Retry save", onClick: () => void recordConnector(name) },
-        { label: "Cancel", onClick: () => setConnected(p => { const s = new Set(p); s.delete(name); return s }), variant: "ghost" },
-      )
-    }
-  }
-
-  function toggle(name: string) {
-    const on = connected.has(name)
-    setConnected(p => { const s = new Set(p); on ? s.delete(name) : s.add(name); return s })
-    if (!on && engagementId) {
-      const nextSources = new Set(selectedSources)
-      nextSources.add(kind)
-      persistSelectedSources(nextSources)
-      // Record a connected-source stub (no OAuth yet).
-      void recordConnector(name)
-    }
-  }
-
+// Small pure-white container holding a connector logo at a standard size, so all logos look uniform.
+function LogoBadge({ c, size = 44 }: { c: Connector; size?: number }) {
   return (
-    <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(92px, 1fr))", gap: "0.5rem" }}>
+    <span style={{
+      display: "inline-flex", alignItems: "center", justifyContent: "center",
+      width: size, height: size, background: "#fff", border: "1px solid var(--color-border)",
+      borderRadius: "var(--radius-md)", flexShrink: 0, overflow: "hidden",
+    }}>
+      {c.logo
+        ? <img src={c.logo} alt="" aria-hidden style={{ maxWidth: size - 12, maxHeight: size - 12, width: "auto", height: "auto", objectFit: "contain" }} />
+        : <span aria-hidden style={{ fontWeight: 700, fontSize: Math.round(size * 0.42), color: c.color }}>{c.name.charAt(0)}</span>}
+    </span>
+  )
+}
+
+// Logo-only connect tiles (no names), all the same standard size, plus an optional upload tile.
+function ConnectTiles({ available, onConnect, onUpload }: {
+  available: Connector[]; onConnect: (c: Connector) => void; onUpload?: () => void
+}) {
+  if (available.length === 0 && !onUpload) return null
+  return (
+    <div style={{ display: "flex", flexWrap: "wrap", gap: "0.5rem", alignItems: "center" }}>
+      {available.map(c => (
+        <button key={c.name} type="button" onClick={() => onConnect(c)} title={`Connect ${c.name}`}
+          style={{ border: "none", background: "transparent", padding: 0, cursor: "pointer", borderRadius: "var(--radius-md)", lineHeight: 0 }}>
+          <LogoBadge c={c} />
+        </button>
+      ))}
       {onUpload && (
-        <button
-          type="button"
-          onClick={onUpload}
-          className="hover:bg-[var(--color-background-primary-ghost-hover)]"
+        <button type="button" onClick={onUpload} title="Upload files"
           style={{
-            display: "flex", flexDirection: "column", alignItems: "center", gap: "0.5rem",
-            padding: "0.75rem 0.5rem", borderRadius: "var(--radius-md)", cursor: "pointer",
-            border: "1px dashed var(--color-border)", background: "transparent",
-          }}
-        >
-          <span style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", width: 30, height: 30 }}>
-            <Upload size={18} style={{ color: "var(--color-text-secondary)" }} />
-          </span>
-          <span style={{ fontSize: "var(--font-text-xs-size)", color: "var(--color-text-secondary)", fontWeight: "var(--font-weight-medium)" }}>Upload</span>
+            display: "inline-flex", alignItems: "center", justifyContent: "center",
+            width: 44, height: 44, background: "#fff", border: "1px dashed var(--color-border)",
+            borderRadius: "var(--radius-md)", cursor: "pointer", flexShrink: 0,
+          }}>
+          <Upload size={18} style={{ color: "var(--color-text-secondary)" }} />
         </button>
       )}
-      {connectors.map(c => {
-        const on = connected.has(c.name)
-        const providerStatus = statusByProvider[c.name.toLowerCase()]
-        const unavailable = providerStatus !== undefined && providerStatus !== "available"
-        return (
-          <button key={c.name} type="button" onClick={() => !unavailable && toggle(c.name)} disabled={unavailable}
-            className={cn(!on && !unavailable && "hover:bg-[var(--color-background-primary-ghost-hover)]")}
-            style={{
-              position: "relative", display: "flex", flexDirection: "column", alignItems: "center", gap: "0.5rem",
-              padding: "0.75rem 0.5rem", borderRadius: "var(--radius-md)", cursor: unavailable ? "not-allowed" : "pointer",
-              opacity: unavailable ? 0.45 : 1,
-              border: `1px solid ${on ? "var(--color-background-primary-solid)" : "var(--color-border)"}`,
-              background: on ? "var(--color-background-primary-soft)" : "transparent",
-              transition: "border-color var(--transition-duration-basic), background var(--transition-duration-basic)",
-            }}>
-            {on && (
-              <span style={{ position: "absolute", top: 4, right: 4, display: "inline-flex", color: "var(--color-text-success-soft)" }}>
-                <Check size={12} />
-              </span>
-            )}
-            {c.logo ? (
-              <span style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", height: 30 }}>
-                {/* definite height so SVGs without intrinsic width/height (Fireflies, Granola) still render */}
-                <img src={c.logo} alt="" aria-hidden style={{ height: 28, width: "auto", maxWidth: 72, objectFit: "contain" }} />
-              </span>
-            ) : (
-              <span aria-hidden style={{
-                display: "inline-flex", alignItems: "center", justifyContent: "center",
-                width: 30, height: 30, borderRadius: 7, background: c.color,
-                color: "#fff", fontWeight: 700, fontSize: 15, letterSpacing: "-0.02em", flexShrink: 0,
-              }}>{c.name.charAt(0)}</span>
-            )}
-            <span style={{ fontSize: "var(--font-text-xs-size)", color: on ? "var(--color-text)" : "var(--color-text-secondary)", fontWeight: "var(--font-weight-medium)", textAlign: "center" }}>{c.name}</span>
-          </button>
-        )
-      })}
     </div>
   )
 }
