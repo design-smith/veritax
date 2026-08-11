@@ -60,7 +60,11 @@ built in parallel.
   - `.env.example` created documenting `NEXT_PUBLIC_POSTHOG_KEY` / `NEXT_PUBLIC_POSTHOG_HOST` / `NEXT_PUBLIC_POSTHOG_ENABLED` / `NEXT_PUBLIC_ANALYTICS_DEBUG`, defaulting `ENABLED=false` (disabled by default in dev).
   - Replay input-masking + autocapture/heatmaps are enforced in the SDK init config in S02 (`maskAllInputs`, session recording, autocapture).
   - Verification: config-only slice (no app code); `.env.example` present and documents all four vars; existing `pnpm build` remains green (unchanged by this slice).
-- [ ] S02 — Analytics foundation + `demo_started`
+- [x] **S02 — Analytics foundation + `demo_started`** — DONE.
+  - Installed `posthog-js` + `vitest`. `lib/analytics/core.ts` = pure, injectable core (gating, dedupe, debug logging, common-prop merge, error-swallow — the only place events are shaped). `lib/analytics/index.ts` = browser singleton: env-gated `initAnalytics` (autocapture, `capture_pageview`/`pageleave`, `enable_heatmaps`, `session_recording.maskAllInputs`, `person_profiles: identified_only`), common props (`demo_version="2026-08-v1"`, `product_surface="demo"`, `demo_run_id` persisted in sessionStorage so it survives reload + /demo→/signup, UTM/referrer/lead_id attribution, `is_returning_visitor`, `viewport_category`).
+  - `components/AnalyticsProvider.tsx` mounted in the root layout initializes **only** on `/demo` + `/signup` (keeps the demo project clean) and fires `demo_started` once per `demo_run_id` (sessionStorage guard across reloads + in-memory dedupe across rerenders).
+  - Verification: `pnpm test` **7/7 pass** (fires-once, disabled-safe, debug-logs-without-sending, error-swallow, common-prop merge, no-PII payload, demo_started once-per-run); `npx tsc --noEmit` clean; `pnpm build` clean; production `next start` serves `/demo` + `/signup` 200 (`/` still 307→login) with no runtime errors.
+  - Not observed here: live event arrival in PostHog (needs a browser + the PostHog UI) — deferred to S10 (HITL).
 - [ ] S03 — Stage lifecycle + active-time + scroll depth
 - [ ] S04 — Evidence interactions
 - [ ] S05 — Requirements + jurisdiction comparison

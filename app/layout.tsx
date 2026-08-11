@@ -2,6 +2,7 @@ import type { Metadata } from "next"
 import { Manrope } from "next/font/google"
 import Script from "next/script"
 import "./globals.css"
+import AnalyticsProvider from "@/components/AnalyticsProvider"
 
 const wordmark = Manrope({ subsets: ["latin"], weight: ["300"], variable: "--font-wordmark" })
 
@@ -46,6 +47,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
             })();
           `}
         </Script>
+        <AnalyticsProvider />
         {children}
       </body>
     </html>
