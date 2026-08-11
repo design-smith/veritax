@@ -456,7 +456,7 @@ function UploadZone({ kind, accept = "*", hint, connectors }: { kind: SourceId; 
         // Uploaded files + connected connectors as equal-width cards (3 per row), each with a scope dropdown.
         <div style={{ display: "grid", gridTemplateColumns: "repeat(3, minmax(0, 1fr))", gap: "0.5rem" }}>
           {items.map(f => (
-            <div key={f.id} style={{
+            <div key={f.id} className="vt-reveal-in" style={{
               border: "1px solid var(--color-border)", borderRadius: "var(--radius-md)",
               padding: "0.5rem 0.625rem", display: "flex", flexDirection: "column", gap: "0.5rem", minWidth: 0,
               background: f.status === "error" ? "var(--color-background-danger-soft)" : "transparent",
@@ -489,7 +489,7 @@ function UploadZone({ kind, accept = "*", hint, connectors }: { kind: SourceId; 
             </div>
           ))}
           {connected.map(c => (
-            <div key={c.name} style={{
+            <div key={c.name} className="vt-reveal-in" style={{
               border: "1px solid var(--color-border)", borderRadius: "var(--radius-md)",
               padding: "0.5rem 0.625rem", display: "flex", flexDirection: "column", gap: "0.5rem", minWidth: 0,
             }}>
@@ -838,7 +838,7 @@ export default function PlanningStep({
                   <input type="checkbox" checked={on} onChange={() => toggle(id)}
                     style={{ position: "absolute", opacity: 0, pointerEvents: "none" }} aria-label={label} />
                 </label>
-                {on && render && <div style={{ marginTop: "0.75rem" }}>{render()}</div>}
+                {on && render && <div className="vt-reveal-in" style={{ marginTop: "0.75rem" }}>{render()}</div>}
               </div>
             </li>
           )

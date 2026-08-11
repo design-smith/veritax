@@ -320,19 +320,47 @@ export default function Page({ enableTour = false }: { enableTour?: boolean } = 
   }, [])
 
   // Rehydrate a file's scope from the backend (entity, jurisdictions, which source rows are on).
-  const loadEngagement = useCallback(async (id: string, seq?: number): Promise<boolean> => {
+  const loadEngagement = useCallback(async (id: string, seq?: number, reveal = false): Promise<boolean> => {
     try {
       const eng = await api.getEngagement(id)
       if (seq !== undefined && seq !== engagementLoadSeq.current) return false
-      setEntity(eng.entity_name ?? "")
-      setJ(eng.jurisdictions)
-      setFiscalYear(eng.fiscal_year ?? "")
-      setSources(planningSourcesFromEngagement(eng))
-      setWebsiteUrl(eng.website_url ?? "")
-      setPlanningSourceRows(planningSourceRowsFromEngagement(eng))
-      setPlanningDocuments(planningDocumentsFromEngagement(eng))
       setEngagementId(id)
       localStorage.setItem(LS_ID, id)
+      if (!reveal) {
+        setEntity(eng.entity_name ?? "")
+        setJ(eng.jurisdictions)
+        setFiscalYear(eng.fiscal_year ?? "")
+        setSources(planningSourcesFromEngagement(eng))
+        setWebsiteUrl(eng.website_url ?? "")
+        setPlanningSourceRows(planningSourceRowsFromEngagement(eng))
+        setPlanningDocuments(planningDocumentsFromEngagement(eng))
+        return true
+      }
+      // Demo: set the scope, then check each source class and reveal its files/connections one at a time
+      // (each item fades in via .vt-reveal-in in Planning). Reads like the file is being assembled live.
+      const mySeq = engagementLoadSeq.current
+      const at = (ms: number, fn: () => void) => window.setTimeout(() => { if (engagementLoadSeq.current === mySeq) fn() }, ms)
+      setEntity(""); setJ([]); setFiscalYear(""); setSources(new Set())
+      setWebsiteUrl(""); setPlanningSourceRows([]); setPlanningDocuments(EMPTY_PLANNING_DOCUMENTS)
+      let t = 300
+      at(t, () => { setJ(eng.jurisdictions); setEntity(eng.entity_name ?? ""); setFiscalYear(eng.fiscal_year ?? "") })
+      for (const kind of PLANNING_SOURCES) {   // insertion order: financials, agreements, public, interview
+        const kindSources = eng.sources.filter(s => (s.kind as SourceId) === kind)
+        if (kindSources.length === 0) continue
+        t += 450
+        at(t, () => setSources(prev => new Set(prev).add(kind)))   // tick the class checkbox
+        for (const src of kindSources) {
+          if (src.url) { const url = src.url; t += 300; at(t, () => setWebsiteUrl(url)) }
+          if (src.origin === "connected") {
+            const row: PlanningSourceRow = { id: src.id, kind, origin: src.origin, connector_provider: src.connector_provider, url: src.url }
+            t += 300; at(t, () => setPlanningSourceRows(prev => (prev.some(r => r.id === row.id) ? prev : [...prev, row])))
+          }
+          for (const doc of src.documents) {
+            t += 300
+            at(t, () => setPlanningDocuments(prev => ({ ...prev, [kind]: [...(prev[kind] ?? []), doc] })))
+          }
+        }
+      }
       return true
     } catch (error) {
       logAppError("load engagement", error)
@@ -378,7 +406,7 @@ export default function Page({ enableTour = false }: { enableTour?: boolean } = 
             error,
             "check backend health",
             { label: "Retry", onClick: () => window.location.reload() },
-            { label: "Sign in again", onClick: () => router.replace("/login"), variant: "ghost" },
+            { label: "Sign in again", onClick: () => router.replace("/auth"), variant: "ghost" },
           )
         }
         return
@@ -386,13 +414,14 @@ export default function Page({ enableTour = false }: { enableTour?: boolean } = 
       const fromUrl = readWorkspaceUrl()
       const stored = localStorage.getItem(LS_ID)
       const requestedId = fromUrl.projectId || stored
-      let resumed = requestedId ? await loadEngagement(requestedId) : false
+      let resumed = requestedId ? await loadEngagement(requestedId, undefined, enableTour) : false
       if (!resumed && fromUrl.projectId && stored && stored !== fromUrl.projectId) {
         resumed = await loadEngagement(stored)
       }
       if (cancelled) return
       if (resumed) {
-        const resumedStep = fromUrl.step ?? parseStepParam(localStorage.getItem(LS_STEP))
+        // The demo always opens on Planning (step 1) so the staged fill + tutorial start from the top.
+        const resumedStep = enableTour ? 1 : (fromUrl.step ?? parseStepParam(localStorage.getItem(LS_STEP)))
         if (resumedStep) {
           setStep(resumedStep)
           setVisited(new Set([1, resumedStep]))
@@ -419,7 +448,7 @@ export default function Page({ enableTour = false }: { enableTour?: boolean } = 
               error,
               "create project",
               { label: "Retry", onClick: () => window.location.reload() },
-              { label: "Sign in again", onClick: () => router.replace("/login"), variant: "ghost" },
+              { label: "Sign in again", onClick: () => router.replace("/auth"), variant: "ghost" },
             )
           }
           return
@@ -429,7 +458,7 @@ export default function Page({ enableTour = false }: { enableTour?: boolean } = 
       if (!cancelled) setBootStatus(loadedFiles ? "ready" : "offline")
     })()
     return () => { cancelled = true }
-  }, [loadEngagement, refreshFiles])
+  }, [loadEngagement, refreshFiles, enableTour])
 
   useEffect(() => { localStorage.setItem(LS_STEP, String(step)) }, [step])
   // Demo-only stage lifecycle: fire completed(prev) + entered(next) on each real transition (backtracking re-fires).
@@ -477,16 +506,11 @@ export default function Page({ enableTour = false }: { enableTour?: boolean } = 
     setMounted(prev => (prev.has(s) ? prev : new Set([...prev, s])))
   }, [])
 
-  // Restore the saved walkthrough position, and auto-open it once per browser on the demo.
+  // Tutorial is on by default: open the walkthrough from the first step on every demo load.
   useEffect(() => {
-    if (!enableTour || bootStatus !== "ready" || typeof window === "undefined") return
-    const saved = parseInt(window.localStorage.getItem("veritax.demoTourStep") || "0", 10)
-    if (Number.isFinite(saved) && saved > 0) setTourStep(saved)
-    if (!window.localStorage.getItem("veritax.demoTourSeen")) {
-      window.localStorage.setItem("veritax.demoTourSeen", "1")
-      setTourStep(0)
-      setTourOpen(true)
-    }
+    if (!enableTour || bootStatus !== "ready") return
+    setTourStep(0)
+    setTourOpen(true)
   }, [enableTour, bootStatus])
 
   function newFile() {
@@ -544,7 +568,7 @@ export default function Page({ enableTour = false }: { enableTour?: boolean } = 
         message: error instanceof Error ? error.message : String(error),
       })
     })
-    router.replace("/login")
+    router.replace("/auth")
     router.refresh()
   }
 

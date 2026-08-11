@@ -561,6 +561,15 @@
   animation: vt-step-enter 160ms var(--cubic-enter) both;
 }
 
+/* Entrance for items that appear one at a time (demo Planning reveal: source files, connectors). */
+@keyframes vt-reveal-in {
+  from { opacity: 0; transform: translateY(7px) scale(0.985); }
+  to { opacity: 1; transform: none; }
+}
+.vt-reveal-in {
+  animation: vt-reveal-in 300ms var(--cubic-enter) both;
+}
+
 .vt-skeleton {
   border-radius: var(--radius-sm);
   background:

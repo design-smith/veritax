@@ -2,8 +2,8 @@ import { createServerClient } from "@supabase/ssr"
 import { NextResponse, type NextRequest } from "next/server"
 
 // Refreshes the Supabase session cookie on every request and gates the app: unauthenticated users are
-// sent to /login; authenticated users on /login are sent home. Auth routes + static assets pass through.
-// (Next 16 "proxy" convention — formerly "middleware".)
+// sent to /auth (the real login); authenticated users on /auth are sent home. Public routes + static
+// assets pass through. (Next 16 "proxy" convention — formerly "middleware".)
 export async function proxy(request: NextRequest) {
   let response = NextResponse.next({ request })
 
@@ -25,9 +25,9 @@ export async function proxy(request: NextRequest) {
   )
 
   const path = request.nextUrl.pathname
-  // Public routes: the login page, the no-login demo, and the request-access page. Everything else requires auth.
-  const isAuthRoute = path.startsWith("/login")
-  const isPublic = isAuthRoute || path.startsWith("/demo") || path.startsWith("/signup")
+  // Public routes: the app entry + waitlist (/login, /signup), the no-login demo, and the real login (/auth).
+  // Everything else requires auth.
+  const isPublic = ["/login", "/signup", "/demo", "/auth"].some(p => path.startsWith(p))
   let user = null
   try {
     const result = await supabase.auth.getUser()
@@ -47,7 +47,7 @@ export async function proxy(request: NextRequest) {
     })
     if (!isPublic) {
       const url = request.nextUrl.clone()
-      url.pathname = "/login"
+      url.pathname = "/auth"
       url.searchParams.set("reason", "auth-unavailable")
       return NextResponse.redirect(url)
     }
@@ -56,10 +56,10 @@ export async function proxy(request: NextRequest) {
 
   if (!user && !isPublic) {
     const url = request.nextUrl.clone()
-    url.pathname = "/login"
+    url.pathname = "/auth"
     return NextResponse.redirect(url)
   }
-  if (user && path.startsWith("/login")) {
+  if (user && path.startsWith("/auth")) {
     const url = request.nextUrl.clone()
     url.pathname = "/"
     return NextResponse.redirect(url)
