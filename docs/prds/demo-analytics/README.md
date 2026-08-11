@@ -52,3 +52,20 @@ Per-slice tests (PRD §39) and privacy checks (§30) live inside each slice's ac
 slice stays a true vertical. `demo_version`, `product_surface="demo"`, and acquisition/returning/viewport
 common props are established in S02 and inherited by every later event. S04–S07 depend only on S03 and can be
 built in parallel.
+
+## Status / verification log
+
+- [x] **S01 — Provision PostHog project + env/secrets** — DONE.
+  - Dedicated demo PostHog project provided (id `551932`, US Cloud, host `https://us.i.posthog.com`); client write-token stored in gitignored `.env.local`.
+  - `.env.example` created documenting `NEXT_PUBLIC_POSTHOG_KEY` / `NEXT_PUBLIC_POSTHOG_HOST` / `NEXT_PUBLIC_POSTHOG_ENABLED` / `NEXT_PUBLIC_ANALYTICS_DEBUG`, defaulting `ENABLED=false` (disabled by default in dev).
+  - Replay input-masking + autocapture/heatmaps are enforced in the SDK init config in S02 (`maskAllInputs`, session recording, autocapture).
+  - Verification: config-only slice (no app code); `.env.example` present and documents all four vars; existing `pnpm build` remains green (unchanged by this slice).
+- [ ] S02 — Analytics foundation + `demo_started`
+- [ ] S03 — Stage lifecycle + active-time + scroll depth
+- [ ] S04 — Evidence interactions
+- [ ] S05 — Requirements + jurisdiction comparison
+- [ ] S06 — Local File generation + sections + citations
+- [ ] S07 — Risks interactions
+- [ ] S08 — Waitlist backend + /signup wiring
+- [ ] S09 — CTA exposure/click + waitlist analytics + identify
+- [ ] S10 — Dashboard + cohorts + KPIs + QA (HITL)
