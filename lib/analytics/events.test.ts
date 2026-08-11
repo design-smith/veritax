@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest"
-import { documentType, documentCategory, scopeFilterValue, trackJurisdictionComparison, sectionLifecycle, type ComparisonState } from "./events"
+import { documentType, documentCategory, scopeFilterValue, trackJurisdictionComparison, sectionLifecycle, riskProps, type ComparisonState } from "./events"
 
 describe("documentType", () => {
   it("maps known source labels to categories", () => {
@@ -45,6 +45,14 @@ describe("sectionLifecycle", () => {
   })
   it("is empty and safe for zero sections", () => {
     expect(sectionLifecycle([], 1000)).toEqual([])
+  })
+})
+
+describe("riskProps", () => {
+  it("maps kind/severity/id and never leaks risk narrative (PRD §13, §30)", () => {
+    const finding = { id: "f1", kind: "exposure", severity: "high", title: "Acme paid too much", description: "secret" }
+    expect(riskProps(finding)).toEqual({ risk_type: "exposure", severity: "high", risk_category: "f1" })
+    expect(Object.keys(riskProps(finding)).sort()).toEqual(["risk_category", "risk_type", "severity"])
   })
 })
 

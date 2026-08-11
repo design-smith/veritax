@@ -21,7 +21,10 @@ import {
   type ActionableIssue,
   type ActionableIssueBase,
 } from "@/lib/actionable-errors"
-import { evidenceDocumentOpened, evidenceSourceViewed, evidenceFactInspected, documentType, documentCategory } from "@/lib/analytics"
+import {
+  evidenceDocumentOpened, evidenceSourceViewed, evidenceFactInspected, documentType, documentCategory,
+  risksViewed, riskOpened, riskEvidenceOpened, riskRecommendationOpened, riskProps,
+} from "@/lib/analytics"
 
 // ── Original "Findings" appearance (grayscale), now driven by the real pipeline ──────────────
 type Severity = RiskSeverityValue
@@ -131,6 +134,7 @@ export default function RisksStep({ engagementId, jurisdictions, entity, onOpenD
   const failureIssueKeyRef = useRef("")
   const notReadyIssueRef = useRef<Set<string>>(new Set())
   const pollRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const rootRef = useRef<HTMLDivElement>(null)   // risks_viewed visibility target
 
   const setRisk = (j: string, d: RiskResponse) => setRiskByJuris(prev => ({ ...prev, [j]: d }))
   const analyzing = (d?: RiskResponse) => d?.status === "pending" || d?.status === "analyzing"
@@ -273,6 +277,17 @@ export default function RisksStep({ engagementId, jurisdictions, entity, onOpenD
     return () => { if (pollRef.current) { clearTimeout(pollRef.current); pollRef.current = null } }
   }, [engagementId, jurisdictions, startJurisdiction])
 
+  // risks_viewed once per run when the Risks screen is actually on-screen (not merely mounted) (PRD §13, §34).
+  useEffect(() => {
+    const el = rootRef.current
+    if (!el) return
+    const observer = new IntersectionObserver(entries => {
+      if (entries.some(e => e.isIntersecting)) risksViewed()
+    }, { threshold: 0.25 })
+    observer.observe(el)
+    return () => observer.disconnect()
+  }, [])
+
   function selectJurisdiction(j: string) {
     logRisk("jurisdiction:selected", {
       engagementId: shortEngagement(engagementId),
@@ -353,6 +368,7 @@ export default function RisksStep({ engagementId, jurisdictions, entity, onOpenD
 
   async function openSource(evidence: RiskEvidence) {
     setCopiedEvidence(false)
+    if (openFinding) riskEvidenceOpened({ ...riskProps(openFinding), evidence_type: documentCategory(evidence.kind) })
     if (!evidence.document_id) {
       logRisk("source:copy-only", { reference: evidence.reference, kind: evidence.kind })
       evidenceSourceViewed({ document_type: documentType(evidence.source_label), locator_type: documentCategory(evidence.kind) })
@@ -441,7 +457,7 @@ export default function RisksStep({ engagementId, jurisdictions, entity, onOpenD
   const hasFindings = risk?.status !== "failed" && !analyzing(risk) && findings.length > 0
 
   return (
-    <div style={{ flex: 1, display: "flex", flexDirection: "column", overflow: "hidden" }}>
+    <div ref={rootRef} style={{ flex: 1, display: "flex", flexDirection: "column", overflow: "hidden" }}>
 
       {/* Jurisdiction tabs (grayscale pills) */}
       <div style={{ background: "#fff", padding: "1rem 3rem 0.75rem", display: "flex", gap: "0.375rem", flexWrap: "wrap" }}>
@@ -550,7 +566,11 @@ export default function RisksStep({ engagementId, jurisdictions, entity, onOpenD
                 <tbody>
                   {visible.map(f => (
                     <tr key={f.id} style={{ cursor: "pointer", background: openFinding?.id === f.id ? "#f2f2f2" : "transparent" }}
-                      onClick={() => { setOpenFinding(f); setSourcePreview(null) }}
+                      onClick={() => {
+                        riskOpened(riskProps(f))
+                        if (f.recommendations.length > 0) riskRecommendationOpened(riskProps(f))
+                        setOpenFinding(f); setSourcePreview(null)
+                      }}
                       onMouseEnter={e => { if (openFinding?.id !== f.id) e.currentTarget.style.background = "#fafafa" }}
                       onMouseLeave={e => { if (openFinding?.id !== f.id) e.currentTarget.style.background = "transparent" }}>
                       <td style={TD}><Chip style={{ ...SEVERITY_STYLE[f.severity], textTransform: "capitalize", fontWeight: 600 }}>{f.severity}</Chip></td>

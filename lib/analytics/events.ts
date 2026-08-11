@@ -32,6 +32,14 @@ export function sectionLifecycle(sections: DraftSectionLike[], totalMs: number):
   return ordered.map(s => ({ section_key: s.requirement_key, section_index: s.element_order, generation_duration_ms: per }))
 }
 
+export interface RiskLike { id: string; kind: string; severity: string }
+
+// Non-content risk props: kind is the type, the opaque finding id is the category (useful for "most opened
+// risks"), severity passes through. Never the title/description/exposure narrative (PRD §13, §30).
+export function riskProps(f: RiskLike): { risk_type: string; severity: string; risk_category: string } {
+  return { risk_type: f.kind, severity: f.severity, risk_category: f.id }
+}
+
 export interface ComparisonState { seen: Set<string>; fired: boolean }
 
 // Track distinct jurisdictions the user has inspected. Returns the code list the first time >=2 are seen

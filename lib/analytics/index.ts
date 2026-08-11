@@ -118,12 +118,17 @@ export const analytics = createAnalytics({
 
 // demo_started must fire once per demo_run_id even across reloads within the run, so guard it in
 // sessionStorage (survives reload) on top of the core's in-memory dedupe (survives rerenders) (PRD §34).
+// True the first time this (run, key) is seen; guards once-per-run events across reloads (PRD §34).
+function firedOncePerRun(key: string): boolean {
+  if (typeof window === "undefined") return false
+  const k = `veritax.once:${getDemoRunId()}:${key}`
+  if (window.sessionStorage.getItem(k)) return true
+  window.sessionStorage.setItem(k, "1")
+  return false
+}
+
 export function trackDemoStarted(entryStage = "evidence"): void {
-  if (typeof window !== "undefined") {
-    const guard = `veritax.demoStarted:${getDemoRunId()}`
-    if (window.sessionStorage.getItem(guard)) return
-    window.sessionStorage.setItem(guard, "1")
-  }
+  if (firedOncePerRun("demo_started")) return
   analytics.demoStarted({ entry_stage: entryStage })
 }
 
@@ -236,4 +241,25 @@ export function localFileSectionViewed(p: { section_key: string; section_index: 
 export function localFileCitationOpened(p: { section_key: string; citation_source_type: string }): void {
   timer.note()
   analytics.capture("local_file_citation_opened", p)
+}
+
+// ── Risks interactions (PRD §13) ──
+export { riskProps, type RiskLike } from "./events"
+
+export function risksViewed(): void {
+  if (firedOncePerRun("risks_viewed")) return
+  timer.note()
+  analytics.capture("risks_viewed", {})
+}
+export function riskOpened(p: { risk_type: string; severity: string; risk_category: string }): void {
+  timer.note()
+  analytics.capture("risk_opened", p)
+}
+export function riskEvidenceOpened(p: { risk_type: string; severity: string; risk_category: string; evidence_type: string }): void {
+  timer.note()
+  analytics.capture("risk_evidence_opened", p)
+}
+export function riskRecommendationOpened(p: { risk_type: string; severity: string; risk_category: string }): void {
+  timer.note()
+  analytics.capture("risk_recommendation_opened", p)
 }
