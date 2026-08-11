@@ -4,6 +4,7 @@
 import posthog from "posthog-js"
 import { createAnalytics } from "./core"
 import { ActiveTimer, newlyCrossed } from "./activeTime"
+import { waitlistPersonProps } from "./events"
 
 const KEY = process.env.NEXT_PUBLIC_POSTHOG_KEY
 const HOST = process.env.NEXT_PUBLIC_POSTHOG_HOST ?? "https://us.i.posthog.com"
@@ -47,8 +48,15 @@ let _returning: boolean | null = null
 function isReturningVisitor(): boolean {
   if (typeof window === "undefined") return false
   const seen = window.localStorage.getItem("veritax.demoSeen") === "1"
-  if (!seen) window.localStorage.setItem("veritax.demoSeen", "1")
+  if (!seen) {
+    window.localStorage.setItem("veritax.demoSeen", "1")
+    window.localStorage.setItem("veritax.firstDemoDate", new Date().toISOString().slice(0, 10))
+  }
   return seen
+}
+function firstDemoDate(): string {
+  if (typeof window === "undefined") return ""
+  return window.localStorage.getItem("veritax.firstDemoDate") ?? new Date().toISOString().slice(0, 10)
 }
 
 function viewportCategory(): string {
@@ -129,7 +137,15 @@ function firedOncePerRun(key: string): boolean {
 
 export function trackDemoStarted(entryStage = "evidence"): void {
   if (firedOncePerRun("demo_started")) return
+  if (typeof window !== "undefined") window.sessionStorage.setItem(`veritax.demoStartAt:${getDemoRunId()}`, String(Date.now()))
   analytics.demoStarted({ entry_stage: entryStage })
+}
+
+// Wall-clock ms since demo_started for this run (survives /demo -> /signup via sessionStorage).
+function elapsedDemoMs(): number {
+  if (typeof window === "undefined") return 0
+  const raw = window.sessionStorage.getItem(`veritax.demoStartAt:${getDemoRunId()}`)
+  return raw ? Date.now() - Number(raw) : 0
 }
 
 // ── Stage lifecycle + active-time + scroll depth (PRD §9.2/§9.3, §16/§17, §20/§21) ──
@@ -262,4 +278,43 @@ export function riskEvidenceOpened(p: { risk_type: string; severity: string; ris
 export function riskRecommendationOpened(p: { risk_type: string; severity: string; risk_category: string }): void {
   timer.note()
   analytics.capture("risk_recommendation_opened", p)
+}
+
+// ── Access Veritax CTA + waitlist conversion + identify (PRD §6, §14, §15) ──
+export function accessVeritaxCtaViewed(): void {
+  if (firedOncePerRun("access_veritax_cta_viewed")) return   // real visibility gate lives at the call site (IntersectionObserver)
+  timer.note()
+  analytics.capture("access_veritax_cta_viewed", { active_demo_time_ms: timer.totalMs() })
+}
+export function accessVeritaxClicked(): void {
+  timer.note()
+  analytics.capture("access_veritax_clicked", { active_demo_time_ms: timer.totalMs(), elapsed_demo_time_ms: elapsedDemoMs() })
+}
+export function waitlistStarted(): void {
+  if (firedOncePerRun("waitlist_started")) return
+  timer.note()
+  analytics.capture("waitlist_started", {})
+}
+export function waitlistCompleted(waitlistUserId: string): void {
+  if (firedOncePerRun("waitlist_completed")) return
+  timer.note()
+  analytics.capture("waitlist_completed", {})
+  identifyWaitlistUser(waitlistUserId)
+}
+export function waitlistSubmissionFailed(): void {
+  analytics.capture("waitlist_submission_failed", {})
+}
+
+// Upgrade the anonymous visitor to an identified person by the opaque waitlist id (never the email).
+export function identifyWaitlistUser(waitlistUserId: string): void {
+  if (typeof window === "undefined" || !ENABLED) return
+  initAnalytics()
+  const attr = attribution()
+  try {
+    posthog.identify(waitlistUserId, waitlistPersonProps({
+      entry_source: attr.entry_source as string | undefined,
+      campaign: attr.campaign as string | undefined,
+      first_demo_date: firstDemoDate(),
+    }))
+  } catch { /* analytics must never break the app */ }
 }

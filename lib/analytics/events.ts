@@ -32,6 +32,16 @@ export function sectionLifecycle(sections: DraftSectionLike[], totalMs: number):
   return ordered.map(s => ({ section_key: s.requirement_key, section_index: s.element_order, generation_duration_ms: per }))
 }
 
+// Person properties attached at identify() after a waitlist submission — no email/name (PRD §6, §30).
+export function waitlistPersonProps(input: { entry_source?: string; campaign?: string; first_demo_date: string }): Record<string, string | undefined> {
+  return {
+    waitlist_status: "requested",
+    first_demo_date: input.first_demo_date,
+    acquisition_source: input.entry_source,
+    campaign: input.campaign,
+  }
+}
+
 export interface RiskLike { id: string; kind: string; severity: string }
 
 // Non-content risk props: kind is the type, the opaque finding id is the category (useful for "most opened

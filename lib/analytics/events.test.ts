@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest"
-import { documentType, documentCategory, scopeFilterValue, trackJurisdictionComparison, sectionLifecycle, riskProps, type ComparisonState } from "./events"
+import { documentType, documentCategory, scopeFilterValue, trackJurisdictionComparison, sectionLifecycle, riskProps, waitlistPersonProps, type ComparisonState } from "./events"
 
 describe("documentType", () => {
   it("maps known source labels to categories", () => {
@@ -45,6 +45,21 @@ describe("sectionLifecycle", () => {
   })
   it("is empty and safe for zero sections", () => {
     expect(sectionLifecycle([], 1000)).toEqual([])
+  })
+})
+
+describe("waitlistPersonProps", () => {
+  it("builds identify person props with no email/name (PRD §6, §30)", () => {
+    const props = waitlistPersonProps({ entry_source: "linkedin", campaign: "founder_outreach", first_demo_date: "2026-08-10" })
+    expect(props).toEqual({
+      waitlist_status: "requested",
+      first_demo_date: "2026-08-10",
+      acquisition_source: "linkedin",
+      campaign: "founder_outreach",
+    })
+    const keys = Object.keys(props)
+    expect(keys).not.toContain("email")
+    expect(keys).not.toContain("name")
   })
 })
 

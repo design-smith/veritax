@@ -24,6 +24,7 @@ import {
 import {
   evidenceDocumentOpened, evidenceSourceViewed, evidenceFactInspected, documentType, documentCategory,
   risksViewed, riskOpened, riskEvidenceOpened, riskRecommendationOpened, riskProps,
+  accessVeritaxCtaViewed, accessVeritaxClicked,
 } from "@/lib/analytics"
 
 // ── Original "Findings" appearance (grayscale), now driven by the real pipeline ──────────────
@@ -135,6 +136,7 @@ export default function RisksStep({ engagementId, jurisdictions, entity, onOpenD
   const notReadyIssueRef = useRef<Set<string>>(new Set())
   const pollRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const rootRef = useRef<HTMLDivElement>(null)   // risks_viewed visibility target
+  const ctaRef = useRef<HTMLAnchorElement>(null) // access_veritax_cta_viewed visibility target
 
   const setRisk = (j: string, d: RiskResponse) => setRiskByJuris(prev => ({ ...prev, [j]: d }))
   const analyzing = (d?: RiskResponse) => d?.status === "pending" || d?.status === "analyzing"
@@ -287,6 +289,18 @@ export default function RisksStep({ engagementId, jurisdictions, entity, onOpenD
     observer.observe(el)
     return () => observer.disconnect()
   }, [])
+
+  // access_veritax_cta_viewed only when the CTA is >=50% visible — never on mount / below the fold (PRD §14, §35).
+  useEffect(() => {
+    if (!accessLive) return
+    const el = ctaRef.current
+    if (!el) return
+    const observer = new IntersectionObserver(entries => {
+      if (entries.some(e => e.isIntersecting && e.intersectionRatio >= 0.5)) accessVeritaxCtaViewed()
+    }, { threshold: [0.5] })
+    observer.observe(el)
+    return () => observer.disconnect()
+  }, [accessLive])
 
   function selectJurisdiction(j: string) {
     logRisk("jurisdiction:selected", {
@@ -488,7 +502,7 @@ export default function RisksStep({ engagementId, jurisdictions, entity, onOpenD
                 </button>
               )}
               {accessLive && (
-                <a href="/signup" style={{ display: "inline-flex", alignItems: "center", height: 30, padding: "0 0.875rem", borderRadius: 6, border: "none", background: "#000", color: "#fff", fontSize: 12, fontWeight: 600, cursor: "pointer", textDecoration: "none", whiteSpace: "nowrap" }}>
+                <a ref={ctaRef} href="/signup" onClick={() => accessVeritaxClicked()} style={{ display: "inline-flex", alignItems: "center", height: 30, padding: "0 0.875rem", borderRadius: 6, border: "none", background: "#000", color: "#fff", fontSize: 12, fontWeight: 600, cursor: "pointer", textDecoration: "none", whiteSpace: "nowrap" }}>
                   Access Veritax Live
                 </a>
               )}

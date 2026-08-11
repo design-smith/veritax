@@ -3,9 +3,10 @@
 // Public request-access page reached from the demo's "Access Veritax Live" button. Collects a few details
 // and shows a success/waitlist screen. UI only — it does not create an account.
 
-import { useState } from "react"
+import { useState, useEffect } from "react"
 import { Check } from "lucide-react"
 import { api } from "@/lib/api"
+import { waitlistStarted, waitlistCompleted, waitlistSubmissionFailed } from "@/lib/analytics"
 
 const INPUT: React.CSSProperties = {
   width: "100%", height: 42, padding: "0 0.875rem", borderRadius: 8, border: "1px solid #e5e5e5",
@@ -27,6 +28,8 @@ export default function SignupPage() {
   const [error, setError] = useState("")
   const canSubmit = [name, country, email, company].every(v => v.trim().length > 0)
 
+  useEffect(() => { waitlistStarted() }, [])   // form opened (once per run)
+
   // Acquisition attribution from the entry URL (opaque lead id + UTMs), never PII in the URL.
   function attributionFromUrl(): { lead_id?: string; attribution?: Record<string, string> } {
     if (typeof window === "undefined") return {}
@@ -46,12 +49,14 @@ export default function SignupPage() {
     setBusy(true)
     setError("")
     try {
-      await api.submitWaitlist({
+      const res = await api.submitWaitlist({
         name: name.trim(), country: country.trim(), email: email.trim(), company: company.trim(),
         ...attributionFromUrl(),
       })
+      waitlistCompleted(res.waitlist_user_id)   // fires waitlist_completed + identify() by the opaque id
       setDone(true)
     } catch {
+      waitlistSubmissionFailed()
       setError("Something went wrong submitting your request. Please try again.")
     } finally {
       setBusy(false)
