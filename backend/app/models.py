@@ -693,6 +693,8 @@ class DraftSection(Base):
     # by [[table:id]] / [[chart:id]] markers.
     tables: Mapped[list] = mapped_column(JSONB, nullable=False, default=list)
     charts: Mapped[list] = mapped_column(JSONB, nullable=False, default=list)
+    # Structured "research result" for the web-sourced Industry Analysis section (null on statutory sections).
+    research: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
     model: Mapped[str | None] = mapped_column(Text, nullable=True)
     error: Mapped[str | None] = mapped_column(Text, nullable=True)
     status_updated_at: Mapped[datetime | None] = mapped_column(

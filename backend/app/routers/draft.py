@@ -42,7 +42,7 @@ from ..models import (
     PipelineJobKind,
     RequirementCoverage,
 )
-from ..requirements import resolve_requirements
+from ..requirements import draft_elements
 from ..schemas import DraftCitationRead, DraftResponse, DraftSectionPatch, DraftSectionRead, DraftSummary
 
 router = APIRouter(tags=["draft"])
@@ -112,6 +112,13 @@ def _validate_draft_result(result: DraftResult, documents: list[DocContext], fna
     content = result.content or ""
     if not content.strip():
         raise RuntimeError("Veritax rejected this section because the model returned no draft text.")
+    # Research (web-sourced) sections carry provenance in `research.sources`, not inline document citations.
+    # Validate any web citations' URLs, but don't demand document-grounded inline markers.
+    if result.research is not None:
+        for c in result.citations:
+            if c.kind == "web" and not c.url:
+                raise RuntimeError(f"Veritax rejected this section because web citation [{c.marker}] is missing its URL.")
+        return
     if not result.citations:
         raise RuntimeError("Veritax rejected this section because it did not include source citations. Every factual claim needs a cited source before it can be shown.")
 
@@ -176,6 +183,7 @@ def _to_read(section: DraftSection) -> DraftSectionRead:
         content=section.content,
         tables=section.tables or [],
         charts=section.charts or [],
+        research=section.research,
         error=section.error,
         citations=[DraftCitationRead.model_validate(c) for c in section.citations],
     )
@@ -255,6 +263,7 @@ async def _write_result(session: AsyncSession, section: DraftSection, result: Dr
     section.content = result.content
     section.tables = result.tables
     section.charts = result.charts
+    section.research = result.research
     section.model = settings.draft_model
     section.status = DraftStatus.drafted
     section.error = None
@@ -280,6 +289,24 @@ async def _write_result(session: AsyncSession, section: DraftSection, result: Dr
         )
 
 
+# S3 skeleton for the Industry Analysis (research) section: its position + research card, no AI. Real
+# web-sourced generation is S4. Web-sourced sections carry provenance in `research.sources`, so this stub
+# has no inline document citations (validated via the research branch of _validate_draft_result).
+def _draft_research_stub(element) -> DraftResult:
+    return DraftResult(
+        content=(
+            f"## {element.element_name}\n\n"
+            "A contemporaneous, entity-specific industry analysis is generated for this section from live "
+            "market research when the file is drafted."
+        ),
+        citations=[],
+        research={
+            "industry": "", "market": "", "period": "", "key_trend": "", "key_risk": "",
+            "competitors": [], "tested_party_impact": "", "sources": [], "status": "pending",
+        },
+    )
+
+
 async def _draft_one(session: AsyncSession, section: DraftSection, element, documents: list[DocContext],
                      coverage_note: str, scope_note: str, drafter: Drafter,
                      fname_to_docid: dict[str, str]) -> None:
@@ -290,6 +317,10 @@ async def _draft_one(session: AsyncSession, section: DraftSection, element, docu
     log.info("draft_one START section=%s '%s' docs=%d", section.id, element.element_name, len(documents))
     t0 = time.monotonic()
     try:
+        if getattr(element, "research", False):
+            await _write_result(session, section, _draft_research_stub(element), fname_to_docid, [])
+            log.info("draft_one DONE (research) section=%s '%s'", section.id, element.element_name)
+            return
         if not documents:
             raise RuntimeError("no retrieved source context for this section; add or re-index source material")
         result = await asyncio.to_thread(drafter.draft, element, REGISTER, documents, coverage_note, scope_note)
@@ -430,7 +461,7 @@ async def _copy_draft(session: AsyncSession, target: DraftSection, twin: DraftSe
 async def _run_draft_serial_unused(session_factory: async_sessionmaker, drafter: Drafter, embedder: Embedder,
                                    engagement_id: uuid.UUID, jurisdiction: str) -> None:
     async with session_factory() as session:
-        elements = {e.requirement_key: e for e in resolve_requirements(jurisdiction)}
+        elements = {e.requirement_key: e for e in draft_elements(jurisdiction)}
         fname_to_docid = await document_filename_map(session, engagement_id)
         engagement = await session.get(Engagement, engagement_id)
         entity_name = engagement.entity.name if engagement and engagement.entity else None
@@ -507,7 +538,7 @@ async def run_draft(session_factory: async_sessionmaker, drafter: Drafter, embed
                 await session.commit()
                 return
 
-            elements = {e.requirement_key: e for e in resolve_requirements(jurisdiction)}
+            elements = {e.requirement_key: e for e in draft_elements(jurisdiction)}
             fname_to_docid = await document_filename_map(session, engagement_id)
             engagement = await session.get(Engagement, engagement_id)
             entity_name = engagement.entity.name if engagement and engagement.entity else None
@@ -560,6 +591,21 @@ async def run_draft(session_factory: async_sessionmaker, drafter: Drafter, embed
                 if batch_size == 1:
                     section = group[0]
                     element = elements[section.requirement_key]
+                    if getattr(element, "research", False):
+                        # Web-sourced section: no document retrieval; draft via the research path.
+                        await _draft_one(session, section, element, [],
+                                         notes.get(section.requirement_key, ""), "", drafter, fname_to_docid)
+                        await session.commit()
+                        if section.status == DraftStatus.failed:
+                            stopped = await _mark_open_sections_failed(
+                                session, engagement_id, jurisdiction, section.error or "draft section failed"
+                            )
+                            log.info(
+                                "run_draft STOPPED engagement=%s jurisdiction=%s failed_section=%s stopped_sections=%d reason=%s",
+                                engagement_id, jurisdiction, section.id, stopped, section.error,
+                            )
+                            return
+                        continue
                     documents: list[DocContext] = []
                     try:
                         documents = await retrieve_documents(
@@ -687,7 +733,7 @@ async def start_draft(
     session: AsyncSession = Depends(get_session),
     _owner: Engagement = Depends(require_engagement_owner),
 ) -> DraftResponse:
-    elements = resolve_requirements(jurisdiction)
+    elements = draft_elements(jurisdiction)
     if not elements:
         raise HTTPException(status_code=404, detail=f"no requirements defined for '{jurisdiction}'")
     blocked = await _draft_blocked_by_coverage(session, engagement_id, jurisdiction)
@@ -752,11 +798,12 @@ async def download_draft_docx(
     if blocked:
         raise HTTPException(status_code=409, detail=blocked)
     sections = await _load_sections(session, engagement_id, jurisdiction)
-    expected = len(resolve_requirements(jurisdiction))
+    expected = len(draft_elements(jurisdiction))
     drafted = [s for s in sections if s.status == DraftStatus.drafted and s.content]
     if expected == 0 or len(sections) != expected or len(drafted) != expected:
         raise HTTPException(status_code=409, detail=f"draft not complete for '{jurisdiction}'")
-    uncited = [s.element_name for s in drafted if not s.citations]
+    # Research (web-sourced) sections carry provenance in `research.sources`, not inline document citations.
+    uncited = [s.element_name for s in drafted if not s.citations and s.research is None]
     if uncited:
         raise HTTPException(status_code=409, detail=f"draft has uncited section(s): {', '.join(uncited[:3])}")
     entity = owner.entity.name if owner.entity else "Entity"
@@ -828,7 +875,7 @@ async def regenerate_section(
         raise HTTPException(status_code=404, detail="draft section not found")
     await assert_owner(session, section.engagement_id, user)
     element = next(
-        (e for e in resolve_requirements(section.jurisdiction) if e.requirement_key == section.requirement_key),
+        (e for e in draft_elements(section.jurisdiction) if e.requirement_key == section.requirement_key),
         None,
     )
     if element is None:

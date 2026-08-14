@@ -5,7 +5,7 @@ import zipfile
 from app.drafting import SYSTEM_PROMPT, FakeDrafter
 from app.main import app
 from app.models import Document, DocumentChunk
-from app.requirements import resolve_requirements
+from app.requirements import draft_elements, resolve_requirements
 
 
 def _ready_text(jurisdiction: str, text: bytes) -> bytes:
@@ -32,8 +32,8 @@ async def test_start_draft_creates_sections_and_drafts(client):
 
     started = await client.post(f"/engagements/{eid}/draft", params={"jurisdiction": "Netherlands"})
     assert started.status_code == 201
-    # One section per resolved element; structure == requirements.
-    assert len(started.json()["sections"]) == len(resolve_requirements("Netherlands"))
+    # One section per draft element (statutory requirements + the injected Industry Analysis section).
+    assert len(started.json()["sections"]) == len(draft_elements("Netherlands"))
 
     got = (await client.get(f"/engagements/{eid}/draft", params={"jurisdiction": "Netherlands"})).json()
     assert got["summary"]["pending"] == 0
@@ -56,7 +56,7 @@ async def test_start_draft_idempotent(client):
     )
     assert r1.status_code == 201 and r2.status_code == 201
     sections = (await client.get(f"/engagements/{eid}/draft", params={"jurisdiction": "Canada"})).json()["sections"]
-    assert len(sections) == 6  # not doubled
+    assert len(sections) == len(draft_elements("Canada"))  # not doubled
 
 
 async def test_draft_stops_after_section_failure(client):
@@ -79,7 +79,7 @@ async def test_draft_stops_after_section_failure(client):
     got = (await client.get(f"/engagements/{eid}/draft", params={"jurisdiction": "Canada"})).json()
     assert app.state.drafter.calls == 1
     assert got["summary"]["pending"] == 0
-    assert got["summary"]["failed"] == len(resolve_requirements("Canada"))
+    assert got["summary"]["failed"] == len(draft_elements("Canada"))
     assert got["sections"][0]["error"] == "provider failed"
     assert all(section["status"] == "failed" for section in got["sections"])
     assert all("Draft stopped" in section["error"] for section in got["sections"][1:])
@@ -180,6 +180,28 @@ async def test_draft_retrieval_excludes_out_of_scope_documents(client):
 
     cited_labels = {citation["source_label"] for section in got["sections"] for citation in section["citations"]}
     assert "wrong-year.txt" not in cited_labels
+
+
+async def test_industry_analysis_section_is_injected_non_gating_with_research(client):
+    # Draft is ready from statutory coverage alone (Industry Analysis never gates it), and the section is drafted.
+    eid = await _engagement_ready_for_draft(client, "Netherlands", b"The entity is a limited-risk distributor.")
+    await client.post(f"/engagements/{eid}/draft", params={"jurisdiction": "Netherlands"})
+    got = (await client.get(f"/engagements/{eid}/draft", params={"jurisdiction": "Netherlands"})).json()
+    assert got["summary"]["pending"] == 0 and got["summary"]["failed"] == 0
+
+    industry = next(s for s in got["sections"] if s["element_name"] == "Industry Analysis")
+    assert industry["status"] == "drafted"
+    assert industry["research"] is not None          # the research column round-trips through the API
+    assert not industry["citations"]                 # web-sourced: no inline document citations in the S3 skeleton
+    # Positioned right after Business Strategy.
+    ordered = [s["element_name"] for s in sorted(got["sections"], key=lambda s: s["element_order"])]
+    assert "strateg" in ordered[ordered.index("Industry Analysis") - 1].lower()
+
+    # The .docx exports cleanly — the citation-less research section does not block the export.
+    docx = await client.get(f"/engagements/{eid}/draft.docx", params={"jurisdiction": "Netherlands"})
+    assert docx.status_code == 200
+    doc_xml = zipfile.ZipFile(io.BytesIO(docx.content)).read("word/document.xml").decode("utf-8")
+    assert "Industry Analysis" in doc_xml
 
 
 async def test_unknown_jurisdiction_404(client):

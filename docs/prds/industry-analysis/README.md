@@ -27,8 +27,8 @@ positioned after Business Strategy, with a structured "research result" card + e
 |---|-------|------|-----------|--------|
 | S1 | Demo Industry Analysis section + research card (frontend/demo, incl. `research` type) | AFK | — | ✅ DONE |
 | S2 | Provider decision + web-cited-paragraph spike | HITL | — | ✅ DONE |
-| S3 | Backend non-gating skeleton section injection + `research` column | AFK | S1, S2 | ▶ NEXT |
-| S4 | Real web-research generation for the section | AFK | S2, S3 | blocked by S3 |
+| S3 | Backend non-gating skeleton section injection + `research` column | AFK | S1, S2 | ✅ DONE |
+| S4 | Real web-research generation for the section | AFK | S2, S3 | ▶ NEXT |
 | S5 | Quality guardrails (contemporaneous, specific, sourced) | AFK | S4 | blocked by S4 |
 
 ## Status / verification log
@@ -52,7 +52,15 @@ positioned after Business Strategy, with a structured "research result" card + e
   - **Validated parameters for S4:** model `claude-sonnet-4-6`; tools `[{"type":"web_search_20260209","name":"web_search","max_uses":N}, write_section]`; `tool_choice:{"type":"auto"}` (forcing the custom tool skips search); loop while `stop_reason=="pause_turn"` (server-tool budget) re-sending the assistant content. No beta header. Web citations already flow through `DraftCitation(kind="web", url=...)` end to end.
   - Verification: live API call passed its asserts (non-empty content, ≥1 web citation with URL, inline markers present). Spike script kept in the session scratchpad (throwaway proof); the durable drafter path is S4.
 
-- **▶ Continuing to S3** (backend non-gating skeleton section injection + `research` column). Needs the pgvector
-  test DB (`:5544`) for verification. Architectural note: Industry Analysis will be a **research element** in
-  `resolve_requirements()` flagged so coverage/assessment skip it (not doc-gated, never blocks the draft), and
-  the draft router routes it to the web path (S4) instead of document retrieval.
+- [x] **S3 — Backend non-gating skeleton section injection + `research` column** — DONE.
+  - **Seam (contained to the draft router):** Industry Analysis is injected ONLY into a new draft-only
+    `draft_elements(country)` (statutory `resolve_requirements` + the research element), so coverage / assessment
+    / matching are **untouched** and it never creates a `RequirementCoverage` row. Since `draft_readiness_for_rows`
+    gates purely on coverage rows, a section with no coverage row **cannot block the draft**.
+  - `requirements.py`: `ResolvedElement.research: bool`; `_industry_element()` (`requirement_key=f"{c}:industry_analysis"`, distinct — no key collision) + `draft_elements()` inserting it after the business-strategy element (or after the profile where none, e.g. Singapore) and renumbering display `order` while **preserving statutory `requirement_key`s** (coverage↔draft linkage intact).
+  - `draft.py`: uses `draft_elements` at the draft-owned sites (start/run/docx/regenerate); research sections draft via `_draft_research_stub` (no document retrieval — S4 replaces it with real web research); `_validate_draft_result` validates research sections on their `research` provenance (web-citation URLs) instead of requiring inline document citations; docx export exempts citation-less research sections.
+  - `models.py` + `schemas.py` + `drafting.py`: `research` JSONB column on `DraftSection`, `research` on `DraftSectionRead` + `DraftResult` (round-trips to the frontend, which already renders the card from S1).
+  - **Migration (prod):** `create_all` won't ALTER the existing prod `draft_sections` table — run `ALTER TABLE draft_sections ADD COLUMN research JSONB;` on Supabase before deploy. The test DB is dropped+recreated per run, so tests already exercise the new column.
+  - **Verification:** backend `pytest` **full suite 228 passed** against the pgvector test DB (`:5544`), incl. 4 new pure `draft_elements` tests (`tests/test_industry_analysis.py`: position after Business Strategy, Singapore-after-profile fallback, `resolve_requirements` excludes the research element, empty for unknown jurisdiction) + a new integration test (section injected, drafted non-gating, `research` round-trips, docx exports "Industry Analysis") + updated section-count assertions in `test_draft.py`. `npx tsc --noEmit` clean; `pnpm build` clean.
+
+- **▶ Continuing to S4** (real web-research generation): wire the S2-validated Anthropic path (`web_search_20260209` + `tool_choice:auto` + `pause_turn` loop) into the drafter to replace `_draft_research_stub`, producing the structured research card + cited prose with web citations.

@@ -7,7 +7,7 @@ every time. The assessor judges *against* these; it never authors them.
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from functools import lru_cache
 from pathlib import Path
 
@@ -29,6 +29,7 @@ class ResolvedElement:
     requires_fiscal_year: bool = False   # soft scope: satisfying evidence must match the period (else invalid)
     depends_on: tuple[int, ...] = ()     # element orders that must be present, else this is blocked
     severity: str = "medium"             # how badly a gap here hurts: critical | high | medium | low
+    research: bool = False               # True = web-sourced value-add section (not doc-gated, never blocks the draft)
 
 
 @lru_cache(maxsize=1)
@@ -88,3 +89,50 @@ def resolve_requirements(country: str) -> tuple[ResolvedElement, ...]:
 
 def available_jurisdictions() -> list[str]:
     return [j["country"] for j in _data()["jurisdictions"]]
+
+
+# ── Draft-only elements ────────────────────────────────────────────────────────
+# Industry Analysis is a Veritax value-add section (not a statutory element): web-sourced, positioned after
+# Business Strategy, never doc-gated. It's injected ONLY into the draft (draft_elements), never into
+# resolve_requirements — so coverage/assessment/matching are untouched and it never creates a requirement row.
+_INDUSTRY_SUBS = (
+    "Industry definition and the tested party's products/services",
+    "Market overview (size/growth, demand drivers, competitive intensity, maturity, geographic market)",
+    "Current-year industry conditions that explain the tested party's margins",
+    "Competitive landscape and value drivers",
+    "Key industry risks that connect to the FAR/risk analysis",
+    "The tested party's position within the industry, and profitability context",
+)
+
+
+def _industry_element(country: str) -> ResolvedElement:
+    return ResolvedElement(
+        requirement_key=f"{country}:industry_analysis",   # distinct from statutory f"{country}:{order}" keys
+        order=0,                                           # display order set by draft_elements()
+        element_name="Industry Analysis",
+        description=(
+            "The commercial environment the tested party actually operates in, and the context for its "
+            "profitability — contemporaneous and specific to the entity's industry, not generic country-level filler."
+        ),
+        sub_requirements=_INDUSTRY_SUBS,
+        required=False,
+        verified=True,
+        research=True,
+        severity="low",
+    )
+
+
+@lru_cache(maxsize=32)
+def draft_elements(country: str) -> tuple[ResolvedElement, ...]:
+    """Statutory elements plus the injected Industry Analysis section, in document order.
+
+    Industry Analysis is placed right after the business-strategy element (or after the entity profile where
+    a jurisdiction has no strategy element). Statutory `requirement_key`s are preserved (so the coverage↔draft
+    linkage stays intact); only the display `order` is renumbered to make room for the inserted section.
+    """
+    base = list(resolve_requirements(country))
+    if not base:
+        return ()
+    idx = next((i for i, e in enumerate(base) if "strateg" in e.element_name.lower()), 0)
+    ordered = base[: idx + 1] + [_industry_element(country)] + base[idx + 1 :]
+    return tuple(replace(e, order=i + 1) for i, e in enumerate(ordered))

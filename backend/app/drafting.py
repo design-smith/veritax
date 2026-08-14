@@ -203,6 +203,7 @@ class DraftResult:
     citations: list[Citation]
     tables: list[dict] = field(default_factory=list)   # {id, title, columns[], rows[][]}
     charts: list[dict] = field(default_factory=list)   # {id, type, title, categories[], series[{name, values[]}]}
+    research: dict | None = None                       # Industry Analysis card (web-sourced sections only)
 
 
 class Drafter(Protocol):

@@ -190,6 +190,7 @@ class DraftSectionRead(BaseModel):
     content: str | None
     tables: list = []   # [{id, title, columns[], rows[][]}]
     charts: list = []   # [{id, type, title, categories[], series[{name, values[]}]}]
+    research: dict | None = None   # Industry Analysis research card (null on statutory sections)
     error: str | None
     citations: list[DraftCitationRead]
 
