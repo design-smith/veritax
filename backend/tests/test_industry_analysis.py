@@ -1,6 +1,16 @@
 """S3: Industry Analysis is injected into the DRAFT element list only (never into resolve_requirements),
 so coverage/assessment/matching stay untouched and it never creates a requirement row / gates the draft."""
+from app.drafting import DraftResult, FakeResearchDrafter
 from app.requirements import draft_elements, resolve_requirements
+
+
+def test_fake_research_drafter_produces_card_and_web_citation():
+    r = FakeResearchDrafter().draft_research("VOS", "Qatar", "FY2024")
+    assert isinstance(r, DraftResult)
+    assert r.content.strip() and "FY2024" in r.content
+    assert r.research and r.research["market"] == "Qatar" and r.research["period"] == "FY2024"
+    assert r.research["sources"] and r.research["sources"][0]["url"]
+    assert r.citations and r.citations[0].kind == "web" and r.citations[0].url
 
 
 def test_draft_elements_injects_industry_analysis_after_business_strategy():

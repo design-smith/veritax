@@ -272,6 +272,7 @@ async def _run_job(app: FastAPI, job: PipelineJob) -> None:
         await run_draft(
             app.state.session_factory,
             app.state.drafter,
+            app.state.research_drafter,
             app.state.embedder,
             job.engagement_id,
             str(job.payload["jurisdiction"]),

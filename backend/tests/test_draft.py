@@ -191,8 +191,12 @@ async def test_industry_analysis_section_is_injected_non_gating_with_research(cl
 
     industry = next(s for s in got["sections"] if s["element_name"] == "Industry Analysis")
     assert industry["status"] == "drafted"
-    assert industry["research"] is not None          # the research column round-trips through the API
-    assert not industry["citations"]                 # web-sourced: no inline document citations in the S3 skeleton
+    # Web-research card round-trips through the API and carries its sources.
+    assert industry["research"] is not None and industry["research"]["market"] == "Netherlands"
+    assert industry["research"]["sources"]
+    # Provenance is web citations (URL), not document citations.
+    assert industry["citations"] and industry["citations"][0]["kind"] == "web"
+    assert industry["citations"][0]["url"] and industry["citations"][0]["document_id"] is None
     # Positioned right after Business Strategy.
     ordered = [s["element_name"] for s in sorted(got["sections"], key=lambda s: s["element_order"])]
     assert "strateg" in ordered[ordered.index("Industry Analysis") - 1].lower()

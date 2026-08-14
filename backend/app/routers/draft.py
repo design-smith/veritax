@@ -26,11 +26,12 @@ from ..deps import (
     get_current_user,
     get_drafter,
     get_embedder,
+    get_research_drafter,
     get_session,
     require_engagement_owner,
 )
 from ..docx_export import build_document
-from ..drafting import Drafter, DraftResult
+from ..drafting import Drafter, DraftResult, ResearchDrafter
 from ..embeddings import Embedder
 from ..jobs import enqueue_pipeline_job, schedule_pipeline_drain
 from ..models import (
@@ -289,22 +290,29 @@ async def _write_result(session: AsyncSession, section: DraftSection, result: Dr
         )
 
 
-# S3 skeleton for the Industry Analysis (research) section: its position + research card, no AI. Real
-# web-sourced generation is S4. Web-sourced sections carry provenance in `research.sources`, so this stub
-# has no inline document citations (validated via the research branch of _validate_draft_result).
-def _draft_research_stub(element) -> DraftResult:
-    return DraftResult(
-        content=(
-            f"## {element.element_name}\n\n"
-            "A contemporaneous, entity-specific industry analysis is generated for this section from live "
-            "market research when the file is drafted."
-        ),
-        citations=[],
-        research={
-            "industry": "", "market": "", "period": "", "key_trend": "", "key_risk": "",
-            "competitors": [], "tested_party_impact": "", "sources": [], "status": "pending",
-        },
-    )
+# The Industry Analysis (research) section: web-sourced via the research drafter (Anthropic web_search),
+# with no document retrieval. Provenance is web citations + research.sources (validated by the research
+# branch of _validate_draft_result), not document-grounded inline markers.
+async def _draft_research(session: AsyncSession, section: DraftSection, research_drafter: ResearchDrafter,
+                          entity_name: str | None, jurisdiction: str, fiscal_year: str | None,
+                          fname_to_docid: dict[str, str]) -> None:
+    section.status = DraftStatus.drafting
+    section.error = None
+    section.status_updated_at = datetime.now(timezone.utc)
+    await session.commit()
+    log.info("draft_research START section=%s jurisdiction=%s", section.id, jurisdiction)
+    t0 = time.monotonic()
+    try:
+        result = await asyncio.to_thread(
+            research_drafter.draft_research, entity_name or "the local entity", jurisdiction, fiscal_year or ""
+        )
+        await _write_result(session, section, result, fname_to_docid, [])
+        log.info("draft_research DONE section=%s in %.1fs", section.id, time.monotonic() - t0)
+    except Exception as exc:  # noqa: BLE001 - record the failure; caller stops the run
+        log.exception("draft_research FAILED section=%s after %.1fs", section.id, time.monotonic() - t0)
+        section.status = DraftStatus.failed
+        section.status_updated_at = datetime.now(timezone.utc)
+        section.error = str(exc)[:1000]
 
 
 async def _draft_one(session: AsyncSession, section: DraftSection, element, documents: list[DocContext],
@@ -317,10 +325,6 @@ async def _draft_one(session: AsyncSession, section: DraftSection, element, docu
     log.info("draft_one START section=%s '%s' docs=%d", section.id, element.element_name, len(documents))
     t0 = time.monotonic()
     try:
-        if getattr(element, "research", False):
-            await _write_result(session, section, _draft_research_stub(element), fname_to_docid, [])
-            log.info("draft_one DONE (research) section=%s '%s'", section.id, element.element_name)
-            return
         if not documents:
             raise RuntimeError("no retrieved source context for this section; add or re-index source material")
         result = await asyncio.to_thread(drafter.draft, element, REGISTER, documents, coverage_note, scope_note)
@@ -511,8 +515,8 @@ async def _run_draft_serial_unused(session_factory: async_sessionmaker, drafter:
             gc.collect()
 
 
-async def run_draft(session_factory: async_sessionmaker, drafter: Drafter, embedder: Embedder,
-                    engagement_id: uuid.UUID, jurisdiction: str) -> None:
+async def run_draft(session_factory: async_sessionmaker, drafter: Drafter, research_drafter: ResearchDrafter,
+                    embedder: Embedder, engagement_id: uuid.UUID, jurisdiction: str) -> None:
     log.info("run_draft START engagement=%s jurisdiction=%s drafter=%s register=%s",
              engagement_id, jurisdiction, type(drafter).__name__, REGISTER)
     t0 = time.monotonic()
@@ -542,6 +546,7 @@ async def run_draft(session_factory: async_sessionmaker, drafter: Drafter, embed
             fname_to_docid = await document_filename_map(session, engagement_id)
             engagement = await session.get(Engagement, engagement_id)
             entity_name = engagement.entity.name if engagement and engagement.entity else None
+            fiscal_year = engagement.fiscal_year if engagement else None
             notes = await _coverage_notes(session, engagement_id, jurisdiction)
             pending = (
                 await session.execute(
@@ -592,9 +597,9 @@ async def run_draft(session_factory: async_sessionmaker, drafter: Drafter, embed
                     section = group[0]
                     element = elements[section.requirement_key]
                     if getattr(element, "research", False):
-                        # Web-sourced section: no document retrieval; draft via the research path.
-                        await _draft_one(session, section, element, [],
-                                         notes.get(section.requirement_key, ""), "", drafter, fname_to_docid)
+                        # Web-sourced section: no document retrieval; research the industry on the web.
+                        await _draft_research(session, section, research_drafter,
+                                              entity_name, jurisdiction, fiscal_year, fname_to_docid)
                         await session.commit()
                         if section.status == DraftStatus.failed:
                             stopped = await _mark_open_sections_failed(
@@ -867,6 +872,7 @@ async def regenerate_section(
     section_id: uuid.UUID,
     session: AsyncSession = Depends(get_session),
     drafter: Drafter = Depends(get_drafter),
+    research_drafter: ResearchDrafter = Depends(get_research_drafter),
     embedder: Embedder = Depends(get_embedder),
     user: AuthUser = Depends(get_current_user),
 ) -> DraftSectionRead:
@@ -887,6 +893,13 @@ async def regenerate_section(
     fname_to_docid = await document_filename_map(session, section.engagement_id)
     engagement = await session.get(Engagement, section.engagement_id)
     entity_name = engagement.entity.name if engagement and engagement.entity else None
+    fiscal_year = engagement.fiscal_year if engagement else None
+    if getattr(element, "research", False):
+        await _draft_research(session, section, research_drafter,
+                              entity_name, section.jurisdiction, fiscal_year, fname_to_docid)
+        await session.commit()
+        await session.refresh(section)
+        return _to_read(section)
     documents = await retrieve_documents(
         session,
         section.engagement_id,

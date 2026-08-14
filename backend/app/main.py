@@ -16,7 +16,13 @@ from .config import settings
 from .deps import get_current_user
 from .db import SessionFactory, init_db
 from .document_classifier import AnthropicClassificationFallback, DeepSeekClassificationFallback
-from .drafting import AnthropicDrafter, DeepSeekDrafter, FakeDrafter
+from .drafting import (
+    AnthropicDrafter,
+    AnthropicResearchDrafter,
+    DeepSeekDrafter,
+    FakeDrafter,
+    FakeResearchDrafter,
+)
 from .embeddings import FakeEmbedder, VoyageEmbedder
 from .jobs import pipeline_worker_loop
 from .risks import AnthropicRiskAnalyzer, DeepSeekRiskAnalyzer, FakeRiskAnalyzer
@@ -111,6 +117,11 @@ async def lifespan(app: FastAPI):
         app.state.drafter = FakeDrafter()
         app.state.risk_analyzer = FakeRiskAnalyzer()
         app.state.classification_fallback = None
+    # Industry Analysis is web-sourced via Anthropic web_search regardless of the general provider above;
+    # falls back to the deterministic offline drafter when no Anthropic key is configured.
+    app.state.research_drafter = (
+        AnthropicResearchDrafter() if settings.anthropic_api_key else FakeResearchDrafter()
+    )
     # Requirement matching reads classified documents from the classification store.
     app.state.classified_docs_provider = ClassificationBackedProvider()
     worker = asyncio.create_task(pipeline_worker_loop(app))

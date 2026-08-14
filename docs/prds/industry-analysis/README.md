@@ -28,8 +28,8 @@ positioned after Business Strategy, with a structured "research result" card + e
 | S1 | Demo Industry Analysis section + research card (frontend/demo, incl. `research` type) | AFK | — | ✅ DONE |
 | S2 | Provider decision + web-cited-paragraph spike | HITL | — | ✅ DONE |
 | S3 | Backend non-gating skeleton section injection + `research` column | AFK | S1, S2 | ✅ DONE |
-| S4 | Real web-research generation for the section | AFK | S2, S3 | ▶ NEXT |
-| S5 | Quality guardrails (contemporaneous, specific, sourced) | AFK | S4 | blocked by S4 |
+| S4 | Real web-research generation for the section | AFK | S2, S3 | ✅ DONE |
+| S5 | Quality guardrails (contemporaneous, specific, sourced) | AFK | S4 | ▶ NEXT |
 
 ## Status / verification log
 
@@ -63,4 +63,10 @@ positioned after Business Strategy, with a structured "research result" card + e
   - **Migration (prod):** `create_all` won't ALTER the existing prod `draft_sections` table — run `ALTER TABLE draft_sections ADD COLUMN research JSONB;` on Supabase before deploy. The test DB is dropped+recreated per run, so tests already exercise the new column.
   - **Verification:** backend `pytest` **full suite 228 passed** against the pgvector test DB (`:5544`), incl. 4 new pure `draft_elements` tests (`tests/test_industry_analysis.py`: position after Business Strategy, Singapore-after-profile fallback, `resolve_requirements` excludes the research element, empty for unknown jurisdiction) + a new integration test (section injected, drafted non-gating, `research` round-trips, docx exports "Industry Analysis") + updated section-count assertions in `test_draft.py`. `npx tsc --noEmit` clean; `pnpm build` clean.
 
-- **▶ Continuing to S4** (real web-research generation): wire the S2-validated Anthropic path (`web_search_20260209` + `tool_choice:auto` + `pause_turn` loop) into the drafter to replace `_draft_research_stub`, producing the structured research card + cited prose with web citations.
+- [x] **S4 — Real web-research generation** — DONE.
+  - `drafting.py`: `AnthropicResearchDrafter` (real, Claude Sonnet + `web_search_20260209` + `WRITE_INDUSTRY_TOOL` returning content + web citations + the structured `research` card; `tool_choice:auto`; `pause_turn` loop) and `FakeResearchDrafter` (deterministic, offline — used by tests). A `ResearchDrafter` Protocol types both.
+  - Injection mirrors the general drafter: `app.state.research_drafter` set in `main.py` (`AnthropicResearchDrafter` when an Anthropic key is present — **independent of the general provider, which stays DeepSeek** — else the offline fake), `get_research_drafter` dep, threaded through `run_draft` (via `jobs.py`) and the `regenerate` endpoint; conftest sets the fake so **CI never hits the paid API**. `_draft_research` replaces the S3 stub.
+  - **Bug found + fixed by the live smoke:** at `max_tokens=3000` the long 8-paragraph `content` exhausted the budget and the trailing `citations`/`research` tool-JSON fields were truncated (0 citations, no card). Raised to **8000** → complete output. (The offline suite couldn't catch this — it exercises the fake, not the real Anthropic call — which is exactly why the guarded live smoke matters.)
+  - **Verification:** offline **backend suite 229 passed** against the pgvector test DB (`:5544`) with `FakeResearchDrafter` (incl. a new pure `FakeResearchDrafter` test + the updated integration assertions: research section now carries a `kind="web"` citation with a URL and a populated card); `npx tsc --noEmit` clean; `pnpm build` clean. **Live smoke** (real `AnthropicResearchDrafter`, one paid call, kept out of the suite): `stop_reason=tool_use`, 7,557-char prose, **10 web citations with real URLs**, fully-populated card with contemporaneous FY2024 Qatar/GCC data (surfaced Qatar Law No. 22/2024 Pillar Two DMTT/IIR driving outsourced F&A demand; framed the tested party as limited-risk routine BPO for TNMM). **Latency:** ~7.7 min for the real call (10 searches + long generation) — acceptable but a candidate for later tuning (fewer `max_uses` / lower effort).
+
+- **▶ Continuing to S5** (quality guardrails): extend the research branch of `_validate_draft_result` to reject generic country-level filler and require fiscal-year specificity + tested-party linkage + a real cited source per market claim.

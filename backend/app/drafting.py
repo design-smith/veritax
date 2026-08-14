@@ -502,3 +502,172 @@ class FakeDrafter:
             i: self.draft(element, register, documents, coverage_notes.get(i, ""), (scope_notes or {}).get(i, ""))
             for i, element in enumerate(elements, 1)
         }
+
+
+# ── Industry Analysis: web-research-backed section ─────────────────────────────
+# A distinct path from document drafting: the tested party's INDUSTRY is researched on the web (the
+# confidential documents rarely cover market context), producing a structured research card + cited prose.
+# Web-first, web citations only. Runs on Anthropic (web_search) regardless of the general LLM provider.
+
+_WEB_SEARCH_TOOL = {"type": "web_search_20260209", "name": "web_search", "max_uses": 6}
+
+_RESEARCH_SYSTEM = (
+    "You draft the INDUSTRY ANALYSIS section of a transfer-pricing Local File. Its job: explain the "
+    "commercial environment the TESTED PARTY actually operates in and give context for its profitability.\n\n"
+    "LAWS (non-negotiable):\n"
+    "1. RESEARCH, DON'T GUESS: use web_search to gather CONTEMPORANEOUS, SPECIFIC facts about the tested "
+    "party's own industry and operating market for the stated fiscal year. Never write generic country-level "
+    "filler (e.g. 'the country has seen strong growth and digital transformation').\n"
+    "2. PROVENANCE: every market claim carries an inline [n] marker and a matching web citation to its "
+    "source URL. Numbers (market size, growth rates, wage inflation, margins) must come from a cited source.\n"
+    "3. TESTED-PARTY LINKAGE: tie the industry conditions to THIS entity — its position in the industry and "
+    "why the conditions bear on its margins. End with a profitability bridge into the TNMM analysis.\n\n"
+    "STRUCTURE the prose as eight short labelled paragraphs: **Industry definition.** **Market overview.** "
+    "**Current-year conditions.** **Competitive landscape.** **Value drivers.** **Key industry risks.** "
+    "**Tested-party position.** **Profitability context.**\n\n"
+    "When done, call write_industry_analysis with the Markdown prose (inline [n] markers), the web citation "
+    "for each marker, and the structured research summary."
+)
+
+WRITE_INDUSTRY_TOOL = {
+    "name": "write_industry_analysis",
+    "description": "Record the Industry Analysis prose, its web citations, and the structured research summary.",
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "content": {"type": "string", "description": "Section prose in Markdown with inline [n] citation markers."},
+            "citations": WRITE_SECTION_TOOL["input_schema"]["properties"]["citations"],
+            "research": {
+                "type": "object",
+                "description": "Structured research card shown above the prose.",
+                "properties": {
+                    "industry": {"type": "string"},
+                    "market": {"type": "string", "description": "Relevant market, e.g. 'Qatar / GCC'."},
+                    "period": {"type": "string", "description": "Fiscal year, e.g. 'FY2024'."},
+                    "key_trend": {"type": "string"},
+                    "key_risk": {"type": "string"},
+                    "competitors": {"type": "array", "items": {"type": "string"}},
+                    "tested_party_impact": {"type": "string"},
+                    "sources": {
+                        "type": "array",
+                        "items": {"type": "object", "properties": {
+                            "label": {"type": "string"}, "url": {"type": "string"}}, "required": ["label", "url"]},
+                    },
+                },
+                "required": ["industry", "market", "period", "key_trend", "key_risk",
+                             "competitors", "tested_party_impact", "sources"],
+            },
+        },
+        "required": ["content", "citations", "research"],
+    },
+}
+
+
+def _research_prompt(entity: str, jurisdiction: str, fiscal_year: str) -> str:
+    return (
+        f"TESTED PARTY: {entity or 'the local entity'}\n"
+        f"LOCAL FILE JURISDICTION: {jurisdiction}\n"
+        f"FISCAL YEAR: {fiscal_year or '(state the year the analysis covers)'}\n\n"
+        "Research this entity's industry and operating market for that fiscal year, then draft the Industry "
+        "Analysis and call write_industry_analysis. Prefer official statistics, industry associations, "
+        "central-bank/economic data, and reputable market studies; cite each meaningful claim to its URL."
+    )
+
+
+def _clean_research(raw) -> dict | None:
+    if not isinstance(raw, dict):
+        return None
+    return {
+        "industry": str(raw.get("industry", "")),
+        "market": str(raw.get("market", "")),
+        "period": str(raw.get("period", "")),
+        "key_trend": str(raw.get("key_trend", "")),
+        "key_risk": str(raw.get("key_risk", "")),
+        "competitors": [str(c) for c in raw.get("competitors", []) if isinstance(c, str)],
+        "tested_party_impact": str(raw.get("tested_party_impact", "")),
+        "sources": [
+            {"label": str(s.get("label", "")), "url": str(s.get("url", ""))}
+            for s in raw.get("sources", []) if isinstance(s, dict) and s.get("url")
+        ],
+    }
+
+
+def _research_result_from(payload: dict) -> DraftResult:
+    cites = [
+        Citation(marker=c["marker"], kind=c["kind"], source_label=c["source_label"],
+                 quote=c.get("quote", ""), url=c.get("url"))
+        for c in payload.get("citations", [])
+    ]
+    return DraftResult(content=payload["content"], citations=cites, research=_clean_research(payload.get("research")))
+
+
+class ResearchDrafter(Protocol):
+    def draft_research(self, entity: str, jurisdiction: str, fiscal_year: str) -> DraftResult: ...
+
+
+class AnthropicResearchDrafter:
+    """Claude (Sonnet) with native web_search — the Industry Analysis section. tool_choice=auto so the model
+    searches before calling write_industry_analysis; pause_turn (server-tool budget) is resumed in a loop."""
+
+    def __init__(self) -> None:
+        self._model = settings.draft_model
+        self._client = None
+
+    def _get_client(self):
+        if self._client is None:
+            import anthropic
+
+            self._client = anthropic.Anthropic(api_key=settings.anthropic_api_key)
+        return self._client
+
+    def draft_research(self, entity, jurisdiction, fiscal_year):
+        client = self._get_client()
+        messages = [{"role": "user", "content": _research_prompt(entity, jurisdiction, fiscal_year)}]
+        log.info("research START jurisdiction=%s entity=%r fy=%r", jurisdiction, entity, fiscal_year)
+        t0 = time.monotonic()
+        for _ in range(6):
+            resp = client.messages.create(
+                # Headroom for the 8-paragraph prose PLUS the trailing citations + research arrays: too small a
+                # budget truncates the tool JSON mid-`content`, dropping citations/research (a real bug caught in S4).
+                model=self._model, max_tokens=8000, system=_RESEARCH_SYSTEM,
+                tools=[_WEB_SEARCH_TOOL, WRITE_INDUSTRY_TOOL], tool_choice={"type": "auto"}, messages=messages,
+            )
+            log.info("research turn stop_reason=%s blocks=%d", resp.stop_reason, len(resp.content))
+            block = next((b for b in resp.content
+                          if getattr(b, "type", None) == "tool_use" and b.name == "write_industry_analysis"), None)
+            if block is not None:
+                log.info("research DONE jurisdiction=%s in %.1fs", jurisdiction, time.monotonic() - t0)
+                return _research_result_from(block.input)
+            messages.append({"role": "assistant", "content": resp.content})
+            if resp.stop_reason != "pause_turn":
+                messages.append({"role": "user",
+                                 "content": "Now call write_industry_analysis with the cited prose and research summary."})
+        raise RuntimeError("research drafter returned no write_industry_analysis block")
+
+
+class FakeResearchDrafter:
+    """Deterministic, offline Industry Analysis for tests + dev fallback. No network, no web search."""
+
+    def draft_research(self, entity, jurisdiction, fiscal_year):
+        name = entity or "the local entity"
+        fy = fiscal_year or "the fiscal year"
+        content = (
+            "## Industry Analysis\n\n"
+            f"**Industry definition.** {name} operates in the business-process outsourcing and workforce-services "
+            f"industry serving {jurisdiction}.[1]\n\n"
+            f"**Profitability context.** Industry-wide wage inflation raised operating costs during {fy}, which "
+            "bears on the tested party's cost-plus margin and bridges into the TNMM analysis.[1]"
+        )
+        return DraftResult(
+            content=content,
+            citations=[Citation(marker=1, kind="web", source_label="Industry research (offline fake)",
+                                quote="offline fake source", url="https://example.org/industry-research")],
+            research={
+                "industry": "Business Process Outsourcing & Workforce Services",
+                "market": jurisdiction, "period": fy,
+                "key_trend": "Wage inflation", "key_risk": "Labour-cost inflation",
+                "competitors": ["Regional staffing agencies", "In-house recruitment"],
+                "tested_party_impact": "Moderate margin pressure",
+                "sources": [{"label": "Industry research (offline fake)", "url": "https://example.org/industry-research"}],
+            },
+        )

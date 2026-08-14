@@ -8,7 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from .assessment import Assessor
 from .auth import AuthError, AuthUser, verify_token
-from .drafting import Drafter
+from .drafting import Drafter, ResearchDrafter
 from .embeddings import Embedder
 from .models import Engagement
 from .risks import RiskAnalyzer
@@ -68,6 +68,10 @@ def get_assessor(request: Request) -> Assessor:
 
 def get_drafter(request: Request) -> Drafter:
     return request.app.state.drafter
+
+
+def get_research_drafter(request: Request) -> ResearchDrafter:
+    return request.app.state.research_drafter
 
 
 def get_risk_analyzer(request: Request) -> RiskAnalyzer:
