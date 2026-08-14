@@ -31,7 +31,7 @@ from ..deps import (
     require_engagement_owner,
 )
 from ..docx_export import build_document
-from ..drafting import Drafter, DraftResult, ResearchDrafter
+from ..drafting import Drafter, DraftResult, ResearchDrafter, validate_research
 from ..embeddings import Embedder
 from ..jobs import enqueue_pipeline_job, schedule_pipeline_drain
 from ..models import (
@@ -306,6 +306,7 @@ async def _draft_research(session: AsyncSession, section: DraftSection, research
         result = await asyncio.to_thread(
             research_drafter.draft_research, entity_name or "the local entity", jurisdiction, fiscal_year or ""
         )
+        validate_research(result, entity_name, fiscal_year)   # reject generic filler before persisting
         await _write_result(session, section, result, fname_to_docid, [])
         log.info("draft_research DONE section=%s in %.1fs", section.id, time.monotonic() - t0)
     except Exception as exc:  # noqa: BLE001 - record the failure; caller stops the run

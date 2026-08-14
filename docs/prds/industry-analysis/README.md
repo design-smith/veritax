@@ -29,7 +29,7 @@ positioned after Business Strategy, with a structured "research result" card + e
 | S2 | Provider decision + web-cited-paragraph spike | HITL | — | ✅ DONE |
 | S3 | Backend non-gating skeleton section injection + `research` column | AFK | S1, S2 | ✅ DONE |
 | S4 | Real web-research generation for the section | AFK | S2, S3 | ✅ DONE |
-| S5 | Quality guardrails (contemporaneous, specific, sourced) | AFK | S4 | ▶ NEXT |
+| S5 | Quality guardrails (contemporaneous, specific, sourced) | AFK | S4 | ✅ DONE |
 
 ## Status / verification log
 
@@ -69,4 +69,25 @@ positioned after Business Strategy, with a structured "research result" card + e
   - **Bug found + fixed by the live smoke:** at `max_tokens=3000` the long 8-paragraph `content` exhausted the budget and the trailing `citations`/`research` tool-JSON fields were truncated (0 citations, no card). Raised to **8000** → complete output. (The offline suite couldn't catch this — it exercises the fake, not the real Anthropic call — which is exactly why the guarded live smoke matters.)
   - **Verification:** offline **backend suite 229 passed** against the pgvector test DB (`:5544`) with `FakeResearchDrafter` (incl. a new pure `FakeResearchDrafter` test + the updated integration assertions: research section now carries a `kind="web"` citation with a URL and a populated card); `npx tsc --noEmit` clean; `pnpm build` clean. **Live smoke** (real `AnthropicResearchDrafter`, one paid call, kept out of the suite): `stop_reason=tool_use`, 7,557-char prose, **10 web citations with real URLs**, fully-populated card with contemporaneous FY2024 Qatar/GCC data (surfaced Qatar Law No. 22/2024 Pillar Two DMTT/IIR driving outsourced F&A demand; framed the tested party as limited-risk routine BPO for TNMM). **Latency:** ~7.7 min for the real call (10 searches + long generation) — acceptable but a candidate for later tuning (fewer `max_uses` / lower effort).
 
-- **▶ Continuing to S5** (quality guardrails): extend the research branch of `_validate_draft_result` to reject generic country-level filler and require fiscal-year specificity + tested-party linkage + a real cited source per market claim.
+- [x] **S5 — Quality guardrails (contemporaneous, specific, sourced)** — DONE.
+  - `drafting.py`: pure `validate_research(result, entity_name, fiscal_year)` — raises `RuntimeError` (surfaced as
+    the section error) unless the analysis is **sourced** (≥2 cited web sources + `research.sources`), its claims
+    are **marked** (≥2 inline `[n]`), it states **specific figures** (a digit outside citation markers — generic
+    prose with no numbers is filler), it is **dated** (`research.period` set; and if the engagement has a fiscal
+    year, it appears in the content/period), and it is **linked to the tested party** (the entity name or "tested
+    party" in the content). Called in `_draft_research` before persisting. **Structural checks, not a keyword
+    blocklist** — the real S4 smoke output itself contained "digital transformation", so a blocklist would
+    false-positive; structural requirements are robust.
+  - `FakeResearchDrafter` made guardrail-compliant (two cited web sources, a concrete figure, a set period) so
+    the offline suite exercises a passing analysis; the gate is not weakened.
+  - **Verification:** full backend suite **235 passed** against the pgvector test DB (`:5544`), incl. 6 new pure
+    `validate_research` tests (accepts a compliant analysis + rejects: under-sourced, uncited claims, no figures,
+    missing tested-party linkage, fiscal-year mismatch). `npx tsc --noEmit` clean; `pnpm build` clean.
+
+## ✅ Loop complete — all 5 slices shipped, verified, and pushed
+Commits: S1 `0f8c412` · S2 `45df4e5` · S3 `22e9547` · S4 `b17a3b4` · S5 (this).
+**Operational follow-ups:** (1) prod migration — `ALTER TABLE draft_sections ADD COLUMN research JSONB;` on
+Supabase (`create_all` won't add the column to the existing table); (2) the real research call takes ~7.7 min
+(10 web searches + long generation) — tune later via fewer `max_uses`/effort if the drafting UX needs it.
+**Demo vs real:** `/demo` shows canned Industry Analysis content (S1); the real backend now generates it live
+via Anthropic `web_search` (S3–S5).

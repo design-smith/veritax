@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json_repair
 import logging
+import re
 import time
 from dataclasses import dataclass, field
 from typing import Protocol
@@ -650,24 +651,72 @@ class FakeResearchDrafter:
 
     def draft_research(self, entity, jurisdiction, fiscal_year):
         name = entity or "the local entity"
-        fy = fiscal_year or "the fiscal year"
+        fy = fiscal_year or "FY2024"   # deterministic period for the offline stub
         content = (
             "## Industry Analysis\n\n"
             f"**Industry definition.** {name} operates in the business-process outsourcing and workforce-services "
             f"industry serving {jurisdiction}.[1]\n\n"
+            "**Market overview.** The market is estimated at roughly USD 260 million and growing near 9% a "
+            "year.[2]\n\n"
             f"**Profitability context.** Industry-wide wage inflation raised operating costs during {fy}, which "
             "bears on the tested party's cost-plus margin and bridges into the TNMM analysis.[1]"
         )
         return DraftResult(
             content=content,
-            citations=[Citation(marker=1, kind="web", source_label="Industry research (offline fake)",
-                                quote="offline fake source", url="https://example.org/industry-research")],
+            citations=[
+                Citation(marker=1, kind="web", source_label="Industry research (offline fake)",
+                         quote="offline fake source", url="https://example.org/industry-research"),
+                Citation(marker=2, kind="web", source_label="Market sizing (offline fake)",
+                         quote="offline fake source", url="https://example.org/market-size"),
+            ],
             research={
                 "industry": "Business Process Outsourcing & Workforce Services",
                 "market": jurisdiction, "period": fy,
                 "key_trend": "Wage inflation", "key_risk": "Labour-cost inflation",
                 "competitors": ["Regional staffing agencies", "In-house recruitment"],
                 "tested_party_impact": "Moderate margin pressure",
-                "sources": [{"label": "Industry research (offline fake)", "url": "https://example.org/industry-research"}],
+                "sources": [
+                    {"label": "Industry research (offline fake)", "url": "https://example.org/industry-research"},
+                    {"label": "Market sizing (offline fake)", "url": "https://example.org/market-size"},
+                ],
             },
         )
+
+
+# ── Quality gate ───────────────────────────────────────────────────────────────
+_RESEARCH_MARKER = re.compile(r"\[(\d+)\]")
+
+
+def validate_research(result: DraftResult, entity_name: str | None, fiscal_year: str | None) -> None:
+    """Reject an Industry Analysis that is generic country-level filler. The bar (Jayesh's requirement): it
+    must be SOURCED (≥2 cited web sources), have its claims marked, state SPECIFIC figures, be tied to the
+    FISCAL PERIOD, and be linked to the TESTED PARTY. Raises RuntimeError (surfaced as the section error)."""
+    content = result.content or ""
+    research = result.research or {}
+    web = [c for c in result.citations if c.kind == "web" and c.url]
+    sources = research.get("sources") or []
+    markers = {int(m.group(1)) for m in _RESEARCH_MARKER.finditer(content)}
+
+    if len(web) < 2 or not sources:
+        raise RuntimeError("Veritax rejected the Industry Analysis: not adequately sourced — it needs at least "
+                           "two cited web sources for its market claims.")
+    if len(markers) < 2:
+        raise RuntimeError("Veritax rejected the Industry Analysis: its claims are not linked to sources with "
+                           "inline [n] citation markers.")
+    # A real analysis states figures (market size, growth, wage/margin data). Strip citation markers first so
+    # a bare '[1]' can't masquerade as data — generic prose with no numbers is filler.
+    if not re.search(r"\d", _RESEARCH_MARKER.sub("", content)):
+        raise RuntimeError("Veritax rejected the Industry Analysis: it states no specific figures — generic "
+                           "country-level prose is not acceptable.")
+    if not (research.get("period") or "").strip():
+        raise RuntimeError("Veritax rejected the Industry Analysis: it does not state the fiscal period it covers.")
+    if fiscal_year and fiscal_year.strip():
+        fy = fiscal_year.strip().lower()
+        if fy not in content.lower() and fy not in str(research.get("period", "")).lower():
+            raise RuntimeError(f"Veritax rejected the Industry Analysis: it is not tied to the engagement's "
+                               f"fiscal year ({fiscal_year}).")
+    linked = "tested party" in content.lower() or bool(
+        entity_name and entity_name.strip() and entity_name.strip().lower() in content.lower())
+    if not linked:
+        raise RuntimeError("Veritax rejected the Industry Analysis: it does not connect the industry conditions "
+                           "to the tested party.")

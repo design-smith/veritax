@@ -1,6 +1,10 @@
 """S3: Industry Analysis is injected into the DRAFT element list only (never into resolve_requirements),
 so coverage/assessment/matching stay untouched and it never creates a requirement row / gates the draft."""
-from app.drafting import DraftResult, FakeResearchDrafter
+import dataclasses
+
+import pytest
+
+from app.drafting import DraftResult, FakeResearchDrafter, validate_research
 from app.requirements import draft_elements, resolve_requirements
 
 
@@ -11,6 +15,45 @@ def test_fake_research_drafter_produces_card_and_web_citation():
     assert r.research and r.research["market"] == "Qatar" and r.research["period"] == "FY2024"
     assert r.research["sources"] and r.research["sources"][0]["url"]
     assert r.citations and r.citations[0].kind == "web" and r.citations[0].url
+
+
+# ── Quality guardrails (S5): contemporaneous, specific, sourced — not generic filler ──
+def _good() -> DraftResult:
+    return FakeResearchDrafter().draft_research("VOS", "Qatar", "FY2024")
+
+
+def test_validate_research_accepts_a_compliant_analysis():
+    validate_research(_good(), "VOS", "FY2024")   # does not raise
+    validate_research(_good(), None, None)         # tolerant of missing entity/fiscal-year context
+
+
+def test_validate_research_rejects_undersourced():
+    r = dataclasses.replace(_good(), citations=_good().citations[:1])   # only one web source
+    with pytest.raises(RuntimeError, match="sourced"):
+        validate_research(r, "VOS", "FY2024")
+
+
+def test_validate_research_rejects_uncited_claims():
+    r = dataclasses.replace(_good(), content="## Industry Analysis\n\nThe tested party grew 9% with no markers.")
+    with pytest.raises(RuntimeError, match="citation markers"):
+        validate_research(r, "VOS", "FY2024")
+
+
+def test_validate_research_rejects_no_figures():
+    r = dataclasses.replace(_good(), content="## Industry Analysis\n\nGeneric prose about the tested party.[1][2]")
+    with pytest.raises(RuntimeError, match="specific figures"):
+        validate_research(r, "VOS", "FY2024")
+
+
+def test_validate_research_rejects_missing_tested_party_linkage():
+    r = dataclasses.replace(_good(), content="## Industry Analysis\n\nThe market grew 9%[1] amid wage inflation.[2]")
+    with pytest.raises(RuntimeError, match="tested party"):
+        validate_research(r, "SomeUnmentionedEntity", "FY2024")
+
+
+def test_validate_research_rejects_fiscal_year_mismatch():
+    with pytest.raises(RuntimeError, match="fiscal year"):
+        validate_research(_good(), "VOS", "FY2019")   # engagement FY not present in the analysis
 
 
 def test_draft_elements_injects_industry_analysis_after_business_strategy():
