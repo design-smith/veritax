@@ -23,6 +23,7 @@ import type {
   EngagementSummary,
   HealthResponse,
   PipelineRecoveryResponse,
+  ResearchSummary,
   RiskFinding,
   RiskResponse,
 } from "./api"
@@ -132,7 +133,7 @@ const PROFILES: Record<string, Profile> = {
 const profileFor = (jur: string): Profile => PROFILES[jur] ?? PROFILES["United Arab Emirates"]
 
 // ── Draft content, mapped by topic onto each jurisdiction's real element list ──
-type Topic = "profile" | "strategy" | "transactions" | "far" | "method" | "benchmarking" | "yoy" | "financials" | "agreements"
+type Topic = "profile" | "strategy" | "industry" | "transactions" | "far" | "method" | "benchmarking" | "yoy" | "financials" | "agreements"
 
 const ENTITY = "Veritax Outsourcing & Services"
 
@@ -148,6 +149,22 @@ The entity runs as a single management line. Karim Haddad, General Manager, is t
 ${p.competitors}
 
 No business restructuring or transfer of intangibles took place during FY2024 or the preceding year.`
+    case "industry":
+      return `**Industry definition.** ${ENTITY} operates in the ${p.place} business-process outsourcing and workforce-services industry, supplying technical manpower, staff augmentation and personnel administration to government and quasi-government clients.
+
+**Market overview.** Demand is anchored by public-sector and government-linked programmes across ${p.place} and the wider GCC. The market is people-intensive and service-led rather than asset-led; capital barriers to entry are low, but client relationships, security clearances and the ability to mobilise cleared personnel at scale are real ones. Growth tracks government hiring and outsourcing budgets rather than any commodity cycle.
+
+**Current-year conditions (FY2024).** Through 2024 the segment combined firm public-sector demand with sustained wage inflation, as competition for cleared and skilled personnel pushed staff costs up faster than billing rates could be repriced. Elevated interest rates raised the carrying cost of the working capital tied up in paying payroll ahead of collection. For a cost-plus staffing provider these conditions compress margins even where volumes hold.
+
+**Competitive landscape.** The entity competes with regional staffing agencies, GCC facilities-management providers and clients' own in-house recruitment. Concentration is moderate and pricing is competitive; differentiation rests on execution, compliance and reliability of supply rather than proprietary technology or brand.
+
+**Value drivers.** Profitability here is driven by labour utilisation and cost efficiency, personnel procurement, compliance and clearance capability, and the stability of client relationships — not by intangibles, which the entity neither owns nor develops.
+
+**Key industry risks.** The dominant risks are labour-cost inflation, customer concentration in the public sector, FX exposure on cross-border group balances, and regulatory or labour-law change. These carry directly into the functional and risk analysis for the tested party.
+
+**Tested-party position.** ${ENTITY} performs routine workforce and outsourcing services, owns no significant unique intangibles, operates under group-developed processes, and competes largely on service execution and cost efficiency — consistent with a routine, less-complex service provider.
+
+**Profitability context.** Industry-wide wage inflation raised operating costs during FY2024. Against that backdrop the tested party earned a net cost-plus operating margin of 3.25% — inside the benchmarked arm's-length range but below the 7.3% median. That is the outcome expected of a routine provider absorbing labour-cost pressure it could not fully reprice, and it is the bridge into the TNMM economic analysis that follows.`
     case "transactions":
       return `During FY2024 the entity entered into two categories of controlled transaction with related parties above the ${p.currency} 200,000 threshold: fund transfers and supplier payments. Counterparties are Veritax group entities and connected persons, and the balances reconcile to the intercompany ledgers.
 
@@ -231,7 +248,7 @@ function tables(topic: Topic, order: number, p: Profile): DocTable[] {
 }
 
 // ── Real element lists (verbatim names + descriptions from jurisdiction_requirements.json) ──
-interface Elem { order: number; name: string; desc: string; topic: Topic; present: string; source: string; locator: string }
+interface Elem { order: number; name: string; desc: string; topic: Topic; present: string; source: string; locator: string; research?: ResearchSummary }
 
 const ELEMENTS: Record<string, Elem[]> = {
   "United Arab Emirates": [
@@ -264,7 +281,48 @@ const ELEMENTS: Record<string, Elem[]> = {
     { order: 8, name: "Intercompany Agreements and Legal Contracts", desc: "Copies of all executed legal contracts governing potentially affected transactions.", topic: "agreements", present: "The file documents that no agreements are signed and deduces the terms from conduct.", source: "Local File draft", locator: "the terms have been deduced from the conduct of the parties" },
   ],
 }
-const elementsFor = (jur: string): Elem[] => ELEMENTS[jur] ?? ELEMENTS["United Arab Emirates"]
+// Industry Analysis is a Veritax value-add section (not a statutory element), shared across jurisdictions —
+// the entity's operating market (Qatar/GCC BPO) is the same wherever it files. Web-research-backed, so it
+// carries a structured research card instead of citing an uploaded document.
+const INDUSTRY_RESEARCH: ResearchSummary = {
+  industry: "Business Process Outsourcing & Workforce Services",
+  market: "Qatar / GCC",
+  period: "FY2024",
+  key_trend: "Firm public-sector demand with sustained wage inflation",
+  key_risk: "Labour-cost inflation compressing routine-provider margins",
+  competitors: ["Regional staffing agencies", "GCC facilities-management providers", "In-house government recruitment"],
+  tested_party_impact: "Moderate margin pressure (tested 3.25% vs 7.3% median)",
+  sources: [
+    { label: "Qatar Planning & Statistics Authority — Labour Force Sample Survey 2024", url: "https://www.psa.gov.qa/en/statistics1/StatisticsSite/pages/economic.aspx" },
+    { label: "IMF — Qatar 2024 Article IV Consultation", url: "https://www.imf.org/en/Countries/QAT" },
+    { label: "Qatar Central Bank — Financial Stability Review 2024", url: "https://www.qcb.gov.qa/en" },
+    { label: "GCC Statistical Center — Labour market indicators 2024", url: "https://www.gccstat.org/en" },
+    { label: "Qatar Chamber — Economic bulletin 2024", url: "https://www.qatarchamber.com/en" },
+    { label: "World Bank — Gulf Economic Update 2024", url: "https://www.worldbank.org/en/country/gcc" },
+    { label: "Oxford Economics — GCC outsourcing & staffing outlook 2024", url: "https://www.oxfordeconomics.com" },
+  ],
+}
+
+const INDUSTRY_ELEM: Omit<Elem, "order"> = {
+  name: "Industry Analysis",
+  desc: "The commercial environment the tested party operates in and the context for its profitability — contemporaneous and specific to the entity's industry.",
+  topic: "industry",
+  present: "The industry, current-year conditions, competitive landscape, value drivers, risks and the tested-party position are set out and linked to the financial result.",
+  source: "Industry research (web)",
+  locator: "Industry-wide wage inflation raised operating costs during FY2024…",
+  research: INDUSTRY_RESEARCH,
+}
+
+// Insert Industry Analysis after Business Strategy (or after the entity profile if the list has no strategy
+// element), then renumber so orders stay contiguous. coverage() and sections() both call this, so the added
+// element stays consistent across Requirements and Draft.
+function elementsFor(jur: string): Elem[] {
+  const base = ELEMENTS[jur] ?? ELEMENTS["United Arab Emirates"]
+  const strategyIdx = base.findIndex(e => e.topic === "strategy")
+  const at = strategyIdx >= 0 ? strategyIdx + 1 : 1
+  return [...base.slice(0, at), { ...INDUSTRY_ELEM, order: 0 }, ...base.slice(at)]
+    .map((e, i) => ({ ...e, order: i + 1 }))
+}
 
 // ── Documents ─────────────────────────────────────────────────────────────────
 const DOC_FIN = "demo-doc-financials"
@@ -386,6 +444,7 @@ function sections(jur: string, done: boolean): DraftSection[] {
     charts: [] as DocChart[],
     error: null,
     citations: [],
+    research: e.research ?? null,
   }))
 }
 

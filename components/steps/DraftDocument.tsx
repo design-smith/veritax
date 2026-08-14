@@ -8,7 +8,7 @@ import {
   ResponsiveContainer, Tooltip, XAxis, YAxis,
 } from "recharts"
 import { Loader2, Save, X } from "lucide-react"
-import { api, type DocChart, type DocTable, type DraftSection } from "@/lib/api"
+import { api, type DocChart, type DocTable, type DraftSection, type ResearchSummary } from "@/lib/api"
 import { localFileSectionViewed } from "@/lib/analytics"
 
 const PALETTE = ["#0285ff", "#04b84c", "#ffc300", "#e02e2a", "#8046d9", "#ff66ad", "#fb6a22"]
@@ -130,11 +130,56 @@ export function DraftCover({ entity, jurisdiction }: { entity: string; jurisdict
   )
 }
 
+// Structured "research result" shown above the Industry Analysis prose, with an expandable source list.
+function ResearchCard({ r }: { r: ResearchSummary }) {
+  const [open, setOpen] = useState(false)
+  const Row = ({ label, value }: { label: string; value: string }) => (
+    <div style={{ display: "flex", gap: "0.75rem", fontSize: "var(--font-text-sm-size)", lineHeight: 1.5 }}>
+      <span style={{ flex: "0 0 148px", color: "var(--color-text-tertiary)" }}>{label}</span>
+      <span style={{ color: "var(--color-text)" }}>{value}</span>
+    </div>
+  )
+  return (
+    <div style={{
+      border: "1px solid var(--color-border)", borderRadius: "var(--radius-md)",
+      background: "var(--color-background-primary-soft)", padding: "0.875rem 1rem",
+      margin: "0 0 1.25rem", display: "flex", flexDirection: "column", gap: "0.375rem",
+    }}>
+      <div style={{ fontSize: "var(--font-text-xs-size)", textTransform: "uppercase", letterSpacing: "0.06em", color: "var(--color-text-tertiary)", fontWeight: "var(--font-weight-medium)", marginBottom: "0.25rem" }}>
+        Industry research
+      </div>
+      <Row label="Industry" value={r.industry} />
+      <Row label="Relevant market" value={r.market} />
+      <Row label="Period" value={r.period} />
+      <Row label="Key trend" value={r.key_trend} />
+      <Row label="Key risk" value={r.key_risk} />
+      <Row label="Major competitors" value={r.competitors.join(", ")} />
+      <Row label="Impact on tested party" value={r.tested_party_impact} />
+      <button type="button" onClick={() => setOpen(o => !o)} style={{
+        alignSelf: "flex-start", marginTop: "0.375rem", background: "none", border: "none", padding: 0,
+        cursor: "pointer", color: "var(--color-text-info-soft)", fontSize: "var(--font-text-sm-size)", fontWeight: "var(--font-weight-medium)",
+      }}>
+        {r.sources.length} verified source{r.sources.length === 1 ? "" : "s"} {open ? "▾" : "▸"}
+      </button>
+      {open && (
+        <ol style={{ margin: "0.25rem 0 0", paddingLeft: "1.25rem", display: "flex", flexDirection: "column", gap: "0.3rem" }}>
+          {r.sources.map((src, i) => (
+            <li key={i} style={{ fontSize: "var(--font-text-xs-size)", color: "var(--color-text-secondary)" }}>
+              <a href={src.url} target="_blank" rel="noopener noreferrer" style={{ color: "var(--color-text-info-soft)", textDecoration: "underline", textUnderlineOffset: 2 }}>{src.label}</a>
+            </li>
+          ))}
+        </ol>
+      )}
+    </div>
+  )
+}
+
 function renderSection(s: DraftSection): ReactNode[] {
   const tables = new Map(s.tables.map(t => [t.id, t]))
   const charts = new Map(s.charts.map(c => [c.id, c]))
   const text = stripLeadingSectionHeading(s.content ?? "")
   const parts: ReactNode[] = []
+  if (s.research) parts.push(<ResearchCard key="research" r={s.research} />)
   const used = new Set<string>()
   let last = 0, k = 0, m: RegExpExecArray | null
   MARKER.lastIndex = 0

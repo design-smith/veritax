@@ -210,6 +210,19 @@ export interface DraftCitation {
   quote: string
 }
 
+// Structured "research result" shown above the Industry Analysis prose (contemporaneous, entity-specific).
+export interface ResearchSource { label: string; url: string }
+export interface ResearchSummary {
+  industry: string
+  market: string
+  period: string
+  key_trend: string
+  key_risk: string
+  competitors: string[]
+  tested_party_impact: string
+  sources: ResearchSource[]
+}
+
 export interface DocTable { id: string; title: string; columns: string[]; rows: string[][] }
 export interface DocChart {
   id: string
@@ -230,6 +243,7 @@ export interface DraftSection {
   charts: DocChart[]
   error: string | null
   citations: DraftCitation[]
+  research?: ResearchSummary | null   // present on the Industry Analysis section; absent elsewhere
 }
 
 export interface DraftResponse {
