@@ -58,7 +58,7 @@ const PlanningCtx = createContext<{
 // This static list is only a fallback if the backend is unreachable.
 const JURISDICTIONS_FALLBACK = [
   "Australia", "Canada", "France", "Germany",
-  "Ireland", "Netherlands", "United Kingdom", "United States",
+  "Ireland", "Netherlands", "Qatar", "United Kingdom", "United States",
 ]
 
 const FIELD_LABEL: CSSProperties = {

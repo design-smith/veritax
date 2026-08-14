@@ -4,7 +4,7 @@
     "version": "0.1-seed",
     "source_note": "Derived from primary-law research (IRC 6662-6, TIOPA 2010, GAufzV, CGI/LPF, Dutch CIT Act, TCA 1997, ITAA 1997) cross-checked against OECD country profiles. Elements marked verified:false require content-ops confirmation before use as a compliance claim.",
     "regime_families": ["OECD_BEPS_Action_13", "modified_OECD_US_6662", "modified_OECD_CA_247"],
-    "jurisdictions_included": ["United States", "Canada", "United Kingdom", "Germany", "France", "Netherlands", "Ireland", "Australia", "United Arab Emirates", "South Africa", "Japan", "Singapore", "Switzerland", "Spain", "Italy", "India"],
+    "jurisdictions_included": ["United States", "Canada", "United Kingdom", "Germany", "France", "Netherlands", "Ireland", "Australia", "United Arab Emirates", "South Africa", "Japan", "Singapore", "Switzerland", "Spain", "Italy", "India", "Qatar"],
     "jurisdictions_pending": ["remaining Tier 2/3"]
   },
 
@@ -397,6 +397,34 @@
         { "order": 12, "element_name": "Financial Statements and Segmented Reconciliation", "description": "Accounting reconciliation.", "sub_requirements": ["Audited financial statements", "Segmented balance sheets and P&L statements", "Reconciliation of transfer pricing values to general ledger accounts"], "required": true, "source": "Income-tax Rules 1962 Rule 10D(1)(l)", "verified": true },
         { "order": 13, "element_name": "Intercompany Legal Contracts and Supporting Documents", "description": "Complete legal contract file.", "sub_requirements": ["Executed legal agreements, invoices, correspondence, and technical documents supporting transaction terms"], "required": true, "source": "Income-tax Rules 1962 Rule 10D(1)(m)", "verified": true }
       ]
+    },
+    {
+      "country": "Qatar",
+      "base_template": "OECD_BEPS_Action_13",
+      "regime_basis": "OECD_BEPS_Action_13",
+      "governing_authority": "General Tax Authority (GTA)",
+      "governing_law": ["Income Tax Law No. 24 of 2018", "Executive Regulations (Council of Ministers Resolution No. 39 of 2019)", "GTA Resolution No. 4 of 2020", "Dhareeba Master File / Local File Submission Manual and GTA TP Declaration/MF/LF FAQ"],
+      "source_last_verified": "2026-08",
+      "scope_thresholds": {
+        "local_file_trigger": "Qatar taxpayer with annual turnover OR total assets at or above QAR 50 million AND at least one associated/group entity resident outside Qatar. Applies to Qatar-resident associated enterprises and may apply to Qatar permanent establishments of non-resident associated enterprises.",
+        "master_file_trigger": "Same QAR 50 million turnover-or-assets test",
+        "tp_declaration_trigger": "Revenue OR total assets at or above QAR 10 million with associated entities in Qatar or abroad",
+        "transactional_materiality": "QAR 200,000 per controlled-transaction category per year (GTA guidance/FAQ); amounts reported per the taxpayer's accounts and not improperly netted between income and expenses or acquisitions and disposals."
+      },
+      "deadlines": {
+        "preparation": "Master File and Local File due no later than 30 June of the year following the relevant fiscal year (GTA Resolution No. 4 of 2020 and GTA FAQ).",
+        "production_on_request": "An older Dhareeba submission manual refers to submission within 30 days after the income-tax return.",
+        "proactively_filed": true,
+        "configurable": true,
+        "primary_rule": "30 June following the fiscal year (Resolution No. 4 of 2020 / FAQ) unless current operational guidance for the filing year says otherwise."
+      },
+      "language": ["Arabic", "English"],
+      "penalties": "Penalties under the Income Tax Law No. 24 of 2018 and its Executive Regulations for failure to prepare or submit required transfer pricing documentation.",
+      "local_specific_elements": [
+        { "order": 21, "element_name": "Transfer Pricing Declaration", "description": "Separate transfer pricing declaration filed with the income tax return where revenue or total assets are at or above QAR 10 million and the taxpayer has associated entities in Qatar or abroad. A Qatar overlay filed proactively, distinct from the audit-ready Local File.", "sub_requirements": [], "required": false, "verified": true }
+      ],
+      "element_overrides": {},
+      "notes": "Qatar TP documentation follows the OECD Annex II Local File spine under GTA Law No. 24/2018 and its Executive Regulations. Filing deadline treated as configurable due to a source conflict between GTA Resolution No. 4/2020 / FAQ (30 June) and the older Dhareeba manual (30 days after the return)."
     }
   ]
 }

@@ -483,7 +483,7 @@ const RECOVERY: PipelineRecoveryResponse = {
 
 const JURISDICTIONS = [
   "Australia", "Canada", "France", "Germany", "India", "Ireland", "Italy", "Japan",
-  "Netherlands", "Singapore", "South Africa", "Spain", "Switzerland",
+  "Netherlands", "Qatar", "Singapore", "South Africa", "Spain", "Switzerland",
   "United Arab Emirates", "United Kingdom", "United States",
 ]
 
