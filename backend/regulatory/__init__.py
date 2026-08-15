@@ -13,6 +13,7 @@ from .resolver import (
     regulatory_context,
     resolve_rules,
 )
+from .period import evaluate_period_compatibility
 from .schemas import JurisdictionProfile, RegulatoryRule, RegulatorySource
 from .scope import CategoryScope, evaluate_transaction_scope
 
@@ -20,5 +21,6 @@ __all__ = [
     "MissingInput", "evaluate",
     "RuleResult", "applicable_version", "evaluate_applicability", "regulatory_context", "resolve_rules",
     "CategoryScope", "evaluate_transaction_scope",
+    "evaluate_period_compatibility",
     "JurisdictionProfile", "RegulatoryRule", "RegulatorySource",
 ]

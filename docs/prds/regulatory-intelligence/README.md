@@ -23,8 +23,8 @@ principle: deterministic versioned rules decide; the LLM only summarizes/generat
 | S1 | Regulatory registry + engine + resolver foundation (+ Qatar applicability) | AFK | — | ✅ DONE |
 | S2 | Requirements rule-derived (subsume re-point) + plain-English/legal-basis drawer | AFK | S1 | ✅ DONE |
 | S3 | Transaction scope & materiality (jurisdiction-specific) | AFK | S1 | ✅ DONE |
-| S4 | Fiscal-year compatibility | AFK | S1 | ▶ NEXT |
-| S5 | Jurisdiction-specific benchmarking rules + statistical config | AFK | S1 | pending |
+| S4 | Fiscal-year compatibility | AFK | S1 | ✅ DONE |
+| S5 | Jurisdiction-specific benchmarking rules + statistical config | AFK | S1 | ▶ NEXT |
 | S6 | Draft: Local Regulations section + regulatory snapshot | AFK | S1 (richer w/ S2,S3,S5) | pending |
 | S7 | Risks: deterministic regulatory findings | AFK | S3, S5 | pending |
 | S8 | Practitioner overrides + audit trail | AFK | S2 | pending |
@@ -52,6 +52,19 @@ task; they are kept OUT of every regulatory commit (staged files are explicit).
   backend suite 251 passed** (246 + 5 Part B), tsc + build clean.
 
 - [x] **S3 — Transaction scope & materiality (jurisdiction-specific)** — DONE. **Full backend suite 256 passed** (251 + 5). Acceptance (Transaction Scope, §44): categories aggregated + in/out of scope by materiality with a stated summary ✓ · no-netting honoured ✓ · missing amount → unknown ✓ · jurisdiction threshold cited with source ✓ (live per-transaction feed pending a transaction data model — noted below).
+
+- [ ] **S4 — Fiscal-year compatibility** — BUILT, full-suite gate running.
+  - `backend/regulatory/period.py`: `evaluate_period_compatibility(tested_period, comparable_period, business_change)`
+    → `exact` / `acceptable_mismatch` / `review_required` / `incompatible` / `unknown`, plus a business-change
+    flag that forces `review_required` even when years align; missing/unparseable period → `unknown`. Informs,
+    does not block. Feeds the stale-benchmark risk in S7.
+  - **No fabrication:** Qatar (and the other seeds) define no comparable-contemporaneity tolerance — that's TP
+    methodology, not statute — so the tolerance bands are an explicit **Veritax methodology default**, documented
+    as such (NOT a `verified` jurisdiction rule); a jurisdiction with a statutory tolerance can override later.
+  - **Verification:** `test_regulatory.py` **21 passed** (+3: bands, business-change override, unknown). Pure
+    backend — no registry/frontend change. **Full backend suite 259 passed** (256 + 3). Acceptance (Fiscal
+    Years, §44): exact/acceptable/review/incompatible/unknown bands ✓ · business-change flag ✓ · missing period
+    → unknown ✓ · informs, does not block ✓.
   - `backend/regulatory/scope.py`: `evaluate_transaction_scope(transactions, country, fiscal_year)` — reuses the
     S1 condition engine per controlled-transaction CATEGORY. Aggregates by category (absolute-sums so
     income/expense and acquisition/disposal are NOT netted, per the GTA rule), decides

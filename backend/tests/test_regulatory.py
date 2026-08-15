@@ -9,6 +9,7 @@ from regulatory import (
     applicable_version,
     evaluate,
     evaluate_applicability,
+    evaluate_period_compatibility,
     evaluate_transaction_scope,
     regulatory_context,
     resolve_rules,
@@ -162,6 +163,25 @@ def test_regulatory_context_includes_materiality_rule():
     mat = [r for r in regulatory_context("Qatar", "2024") if r["rule_category"] == "materiality"]
     assert mat and mat[0]["threshold"] == 200000 and mat[0]["currency"] == "QAR"
     assert mat[0]["verification_status"] == "verified" and mat[0]["sources"]
+
+
+# ── Fiscal-year compatibility (S4): methodology bands, show-don't-block ──
+def test_period_compatibility_bands():
+    assert evaluate_period_compatibility("FY2024", "2024")["status"] == "exact"
+    assert evaluate_period_compatibility(2024, 2023)["status"] == "acceptable_mismatch"
+    assert evaluate_period_compatibility(2024, 2022)["status"] == "review_required"
+    inc = evaluate_period_compatibility(2024, 2020)
+    assert inc["status"] == "incompatible" and inc["gap_years"] == 4
+
+
+def test_period_compatibility_business_change_forces_review_even_when_aligned():
+    r = evaluate_period_compatibility(2024, 2024, business_change=True)
+    assert r["status"] == "review_required" and r["business_change"] is True
+
+
+def test_period_compatibility_unknown_when_period_missing():
+    assert evaluate_period_compatibility(None, 2024)["status"] == "unknown"
+    assert evaluate_period_compatibility("no-year", "also none")["status"] == "unknown"
 
 
 def test_validate_profile_flags_bad_data():
