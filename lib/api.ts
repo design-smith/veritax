@@ -197,6 +197,26 @@ export interface CoverageResponse {
   }
   requirements: CoverageRow[]
   skipped_documents: { document_id: string; filename: string; reason: string }[]
+  regulatory: RegulatoryContext[]
+}
+
+export interface RegulatorySourceRef {
+  title: string
+  issuing_authority: string
+  url: string | null
+  citation_locator: string | null
+}
+
+export interface RegulatoryContext {
+  rule_key: string
+  plain_english: string
+  status: "applied" | "unknown"
+  result: boolean | null
+  missing_input: string | null
+  effective_from: string
+  effective_to: string | null
+  verification_status: string
+  sources: RegulatorySourceRef[]
 }
 
 export type DraftStatusValue = "pending" | "drafting" | "drafted" | "failed"

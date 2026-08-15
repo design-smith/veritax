@@ -75,6 +75,7 @@ from ..models import (
     SourceOrigin,
     SupplementKind,
 )
+from regulatory import regulatory_context
 from ..requirements import available_jurisdictions, resolve_requirements
 from ..schemas import CoverageEvidenceRead, CoverageRead, CoverageResponse, CoverageSummary, SkippedDocumentRead
 from ..storage import Storage
@@ -245,11 +246,13 @@ async def _response(session: AsyncSession, engagement_id: uuid.UUID, jurisdictio
     rows = await _load_rows(session, engagement_id, jurisdiction)
     doc_kind = await _doc_kind(session, engagement_id)
     section_by_key = await _draft_section_by_key(session, engagement_id, jurisdiction)
+    _entity, _jurisdictions, fiscal_year = await _engagement_scope(session, engagement_id)
     return CoverageResponse(
         jurisdiction=jurisdiction,
         summary=_summary(rows),
         requirements=[_to_read(r, doc_kind, section_by_key) for r in rows],
         skipped_documents=await _skipped_documents(session, engagement_id),
+        regulatory=regulatory_context(jurisdiction, fiscal_year),
     )
 
 

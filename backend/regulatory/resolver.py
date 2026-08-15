@@ -75,6 +75,68 @@ def resolve_rules(jurisdiction: str, fiscal_year: str | int | None) -> list[Regu
     return applicable_version(list(_load_profiles(jurisdiction)), fiscal_year)
 
 
+@lru_cache(maxsize=1)
+def _name_to_code() -> dict[str, str]:
+    """Map a jurisdiction's country name AND ISO code → its registry directory. `resolve_requirements` keys on
+    country names ('Qatar'); the registry directories are ISO codes ('QA'), so the Requirements surface needs
+    this bridge."""
+    out: dict[str, str] = {}
+    if not _JURISDICTIONS_DIR.is_dir():
+        return out
+    for d in sorted(_JURISDICTIONS_DIR.iterdir()):
+        if not d.is_dir():
+            continue
+        for p in d.glob("*.json"):
+            prof = JurisdictionProfile.model_validate_json(p.read_text(encoding="utf-8"))
+            out[prof.name.lower()] = d.name
+            out[prof.jurisdiction.lower()] = d.name
+    return out
+
+
+@lru_cache(maxsize=64)
+def _sources_for(jurisdiction: str) -> dict[str, Any]:
+    juris_dir = _JURISDICTIONS_DIR / jurisdiction
+    out: dict[str, Any] = {}
+    if not juris_dir.is_dir():
+        return out
+    for p in sorted(juris_dir.glob("*.json")):
+        prof = JurisdictionProfile.model_validate_json(p.read_text(encoding="utf-8"))
+        for s in prof.sources:
+            out[s.source_id] = s
+    return out
+
+
+def regulatory_context(country: str, fiscal_year: str | int | None, facts: dict[str, Any] | None = None) -> list[dict]:
+    """Jurisdiction-level regulatory basis for the Requirements view: the applicability rules in force for this
+    country + fiscal year, each with plain-English text, applied/unknown determination, effective period,
+    verification status, and resolved primary sources (PRD §11-12). [] when no registry rules exist yet."""
+    code = _name_to_code().get(str(country).lower(), str(country))
+    applic = [r for r in resolve_rules(code, fiscal_year) if r.rule_category == "applicability"]
+    if not applic:
+        return []
+    sources = _sources_for(code)
+    results = {rr.rule_key: rr for rr in evaluate_applicability(applic, facts or {})}
+    out: list[dict] = []
+    for rule in applic:
+        rr = results[rule.rule_key]
+        out.append({
+            "rule_key": rule.rule_key,
+            "plain_english": rule.plain_english,
+            "status": rr.status,                 # "applied" | "unknown"
+            "result": rr.result,
+            "missing_input": rr.missing_input,
+            "effective_from": rule.effective_from,
+            "effective_to": rule.effective_to,
+            "verification_status": rule.verification_status,
+            "sources": [
+                {"title": s.title, "issuing_authority": s.issuing_authority,
+                 "url": s.url, "citation_locator": s.citation_locator}
+                for sid in rule.source_ids if (s := sources.get(sid)) is not None
+            ],
+        })
+    return out
+
+
 def evaluate_applicability(rules: list[RegulatoryRule], facts: dict[str, Any]) -> list[RuleResult]:
     """Evaluate every `applicability` rule against `facts` (PRD §5.2, §36). Missing input -> unknown, not a guess."""
     out: list[RuleResult] = []

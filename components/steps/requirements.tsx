@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react"
 import { Upload, Check, AlertTriangle, Loader2, FileText, ArrowRight, RefreshCw } from "lucide-react"
-import { api, type CoverageResponse, type CoverageRow, type CoverageStatusValue } from "@/lib/api"
+import { api, type CoverageResponse, type CoverageRow, type CoverageStatusValue, type RegulatoryContext } from "@/lib/api"
 import {
   requirementsCountrySelected, requirementOpened, requirementEvidenceOpened, jurisdictionComparisonUsed,
   trackJurisdictionComparison, documentType, type ComparisonState,
@@ -19,6 +19,17 @@ import {
 } from "@/lib/actionable-errors"
 
 type Seg = "present" | "partial" | "missing"
+
+// Regulatory basis (S2): jurisdiction rules from the registry, rendered as a compact drawer on Requirements.
+const ruleLabel = (key: string) =>
+  key.replace(/_required$/, "").replace(/_/g, " ").replace(/\b\w/g, c => c.toUpperCase())
+const humanizeField = (f: string) => f.replace(/_/g, " ")
+function determination(rc: RegulatoryContext): { label: string; text: string; bg: string } {
+  if (rc.status === "unknown") return { label: "Unknown", text: "var(--color-text-tertiary)", bg: "var(--alpha-06)" }
+  return rc.result
+    ? { label: "Required", text: "var(--color-text-caution-soft)", bg: "var(--color-background-caution-soft)" }
+    : { label: "Not required", text: "var(--color-text-tertiary)", bg: "var(--alpha-06)" }
+}
 
 const STATUS_CFG: Record<CoverageStatusValue, { label: string; bg: string; text: string; dot: string }> = {
   present:     { label: "Present",     bg: "var(--color-background-success-soft)", text: "var(--color-text-success-soft)", dot: "var(--green-400)" },
@@ -646,6 +657,49 @@ export default function RequirementsStep({ engagementId, jurisdictions, onContin
                 </div>
               </div>
             </Animate>
+          ) : null}
+          {coverage?.regulatory?.length ? (
+            <div style={{
+              margin: "0 0 1rem", padding: "0.75rem 0.875rem",
+              border: "1px solid var(--color-border)", borderRadius: "var(--radius-md)",
+              background: "var(--color-background-secondary)",
+            }}>
+              <p style={{ fontSize: "var(--font-text-xs-size)", textTransform: "uppercase", letterSpacing: "0.04em", color: "var(--color-text-tertiary)", margin: "0 0 0.5rem" }}>
+                Regulatory basis · {activeJurisdiction}
+              </p>
+              <div style={{ display: "flex", flexDirection: "column", gap: "0.375rem" }}>
+                {coverage.regulatory.map(rc => {
+                  const d = determination(rc)
+                  return (
+                    <details key={rc.rule_key} style={{ fontSize: "var(--font-text-sm-size)" }}>
+                      <summary style={{ cursor: "pointer", display: "flex", alignItems: "center", gap: "0.5rem", color: "var(--color-text)", listStyle: "none" }}>
+                        <span style={{ fontWeight: "var(--font-weight-medium)" }}>{ruleLabel(rc.rule_key)}</span>
+                        <span style={{ padding: "0.0625rem 0.4rem", borderRadius: "9999px", fontSize: "var(--font-text-xs-size)", background: d.bg, color: d.text }}>{d.label}</span>
+                      </summary>
+                      <div style={{ padding: "0.5rem 0 0.25rem", color: "var(--color-text-secondary)", display: "flex", flexDirection: "column", gap: "0.25rem" }}>
+                        <p style={{ margin: 0 }}>{rc.plain_english}</p>
+                        {rc.status === "unknown" && rc.missing_input && (
+                          <p style={{ margin: 0, fontSize: "var(--font-text-xs-size)", color: "var(--color-text-tertiary)" }}>
+                            Applicability unknown — needs {humanizeField(rc.missing_input)}.
+                          </p>
+                        )}
+                        <p style={{ margin: 0, fontSize: "var(--font-text-xs-size)", color: "var(--color-text-tertiary)" }}>
+                          Effective {rc.effective_from}{rc.effective_to ? `–${rc.effective_to}` : ""} · {rc.verification_status.replace(/_/g, " ")}
+                        </p>
+                        {rc.sources.map((src, i) => (
+                          <p key={i} style={{ margin: 0, fontSize: "var(--font-text-xs-size)" }}>
+                            {src.url
+                              ? <a href={src.url} target="_blank" rel="noopener noreferrer" style={{ color: "var(--color-text-info-soft)", textDecoration: "underline", textUnderlineOffset: 2 }}>{src.title}</a>
+                              : <span>{src.title}</span>}
+                            {src.citation_locator ? ` · ${src.citation_locator}` : ""}
+                          </p>
+                        ))}
+                      </div>
+                    </details>
+                  )
+                })}
+              </div>
+            </div>
           ) : null}
           {!docReady ? (
             <div style={{ display: "flex", flexDirection: "column", gap: "0.5rem" }}>

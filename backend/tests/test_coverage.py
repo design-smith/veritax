@@ -190,6 +190,23 @@ async def test_marking_all_requirements_satisfied_unlocks_draft(client):
     assert after["summary"]["draft_blocker"] is None
 
 
+async def test_coverage_response_carries_registry_regulatory_context(client):
+    # Qatar has registry rules (S1) → the Requirements view gets jurisdiction-level applicability + sources.
+    eid = (await client.post("/engagements")).json()["id"]
+    got = (await client.post(f"/engagements/{eid}/coverage", params={"jurisdiction": "Qatar"})).json()
+    reg = got["regulatory"]
+    assert {"local_file_required", "master_file_required"} <= {r["rule_key"] for r in reg}
+    lf = next(r for r in reg if r["rule_key"] == "local_file_required")
+    assert lf["plain_english"] and lf["verification_status"] == "verified" and lf["effective_from"]
+    assert any("Resolution" in s["title"] for s in lf["sources"])
+    # No engagement financials → applicability unknown, not guessed.
+    assert lf["status"] == "unknown" and lf["missing_input"] in {"annual_turnover_or_assets", "has_foreign_associated_enterprise"}
+
+    # A jurisdiction without registry rules yet → empty context (honest, not fabricated).
+    got_nl = (await client.post(f"/engagements/{eid}/coverage", params={"jurisdiction": "Netherlands"})).json()
+    assert got_nl["regulatory"] == []
+
+
 def test_system_prompt_refuses_correctness():
     p = SYSTEM_PROMPT.lower()
     assert "must not" in p and "arm's-length" in p and "sufficiency" in p

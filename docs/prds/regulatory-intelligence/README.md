@@ -21,8 +21,8 @@ principle: deterministic versioned rules decide; the LLM only summarizes/generat
 | # | Title | Type | Blocked by | Status |
 |---|-------|------|-----------|--------|
 | S1 | Regulatory registry + engine + resolver foundation (+ Qatar applicability) | AFK | — | ✅ DONE |
-| S2 | Requirements rule-derived (subsume re-point) + plain-English/legal-basis drawer | AFK | S1 | ▶ NEXT |
-| S3 | Transaction scope & materiality (jurisdiction-specific) | AFK | S1 | pending |
+| S2 | Requirements rule-derived (subsume re-point) + plain-English/legal-basis drawer | AFK | S1 | ✅ DONE |
+| S3 | Transaction scope & materiality (jurisdiction-specific) | AFK | S1 | ▶ NEXT |
 | S4 | Fiscal-year compatibility | AFK | S1 | pending |
 | S5 | Jurisdiction-specific benchmarking rules + statistical config | AFK | S1 | pending |
 | S6 | Draft: Local Regulations section + regulatory snapshot | AFK | S1 (richer w/ S2,S3,S5) | pending |
@@ -45,7 +45,11 @@ task; they are kept OUT of every regulatory commit (staged files are explicit).
   - **Verification:** `pytest tests/test_regulatory.py` **9 passed** (comparators/membership; `exists` never raises; AND/OR/NOT three-valued incl. decisive-branch short-circuit and `unknown` propagation; fiscal-year version selection incl. future-rule-never-applies; Qatar applicability true/false/**unknown+missing_input**; provenance + `validate_profile` clean; bad-data flagged). `app + regulatory` import clean; existing `tests/test_requirements.py` **5 passed** (no regression). No existing file modified → the 235-suite is unaffected; no frontend change (backend-only slice).
   - Acceptance (Registry + Planning, §44): versioned files ✓ · effective dates ✓ · primary-source provenance ✓ · coexisting versions ✓ · verification statuses ✓ · resolve by jurisdiction+fiscal year ✓ · missing input → `unknown` not guessed ✓.
 
-- [ ] **S2 — Requirements rule-derived (subsume re-point) + plain-English/legal-basis drawer** — IN PROGRESS.
+- [x] **S2 — Requirements rule-derived (subsume re-point) + plain-English/legal-basis drawer** — DONE.
+  Acceptance (Requirements, §44): requirements derive from the registry (Part A) ✓ · each rule shows
+  plain-English + legal basis (source) + applicability, with a compact drawer ✓ · missing inputs → `unknown`
+  not guessed ✓ · deterministic status flow preserved ✓ (full suite unchanged in behaviour). **Final gate: full
+  backend suite 251 passed** (246 + 5 Part B), tsc + build clean.
   - **Part A (subsume re-point) — DONE + verified.** The regulatory registry now owns jurisdiction requirements:
     `jurisdiction_requirements.json` moved `backend/app/data/` → `backend/regulatory/data/`; resolution
     (`ResolvedElement` + `resolve_requirements` + `draft_elements` + `available_jurisdictions`) moved into
@@ -59,6 +63,18 @@ task; they are kept OUT of every regulatory commit (staged files are explicit).
       `resolve_requirements` + `draft_elements` output (all fields) for **all 17 jurisdictions** — passes.
       **Full backend suite: 246 passed** (was 235; +11 = 9 regulatory + 2 golden) against the pgvector test DB.
       No behaviour change.
-  - **Part B (Requirements plain-English/legal-basis drawer) — TODO.** Attach the registry's applicability +
-    plain-English + source (Qatar is real; per-element citations are HITL content, not fabricated) to the
-    Requirements rows + a compact source drawer (§12); preserve the deterministic status flow.
+  - **Part B (Requirements plain-English/legal-basis drawer) — BUILT, final full-suite gate running.**
+    - Backend bridge `regulatory.regulatory_context(country, fiscal_year, facts)` (resolver.py): maps country
+      NAME→ISO code (resolve_requirements uses 'Qatar'; the registry dir is 'QA'), resolves the applicability
+      rules in force, and returns plain-English + applied/unknown determination + effective period +
+      verification status + resolved primary sources. `[]` when a jurisdiction has no registry rules yet
+      (honest — no fabricated content). Wired into `routers/coverage.py::_response` so both coverage endpoints
+      carry a new `regulatory` field (`schemas.py`: `RegulatoryContextRead`/`RegulatorySourceRead`).
+    - Frontend: compact **Regulatory basis** drawer on the Requirements view (`components/steps/requirements.tsx`,
+      native `<details>`, reuses existing tokens + the research-source link style) showing each rule's
+      determination badge (Required/Not required/Unknown), plain English, effective period, verification status,
+      and source links; `lib/api.ts` + `lib/demo-api.ts` typed.
+    - **Verification:** `test_regulatory.py` + `test_coverage.py` **26 passed** (bridge name/code mapping,
+      sources, applied/unknown, empty for unregistered; coverage response carries the context for Qatar and `[]`
+      for Netherlands). `npx tsc --noEmit` clean; `pnpm build` clean. Final full backend suite = the S2
+      completion gate (running).

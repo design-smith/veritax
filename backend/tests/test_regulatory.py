@@ -4,7 +4,14 @@ import pytest
 from pathlib import Path
 
 import regulatory.resolver as _resolver
-from regulatory import MissingInput, applicable_version, evaluate, evaluate_applicability, resolve_rules
+from regulatory import (
+    MissingInput,
+    applicable_version,
+    evaluate,
+    evaluate_applicability,
+    regulatory_context,
+    resolve_rules,
+)
 from regulatory.schemas import JurisdictionProfile, RegulatoryRule, RegulatorySource
 from regulatory.validators import validate_profile
 
@@ -85,6 +92,36 @@ def test_qatar_profile_provenance_and_validation():
     profile = JurisdictionProfile.model_validate_json(raw)
     assert validate_profile(profile) == []                       # referential integrity holds
     assert {s.source_id for s in profile.sources} >= {"qa_resolution_4_2020"}
+
+
+# ── Requirements bridge (S2 Part B): jurisdiction-level context for the Requirements view ──
+def test_regulatory_context_maps_country_name_and_iso_code():
+    # resolve_requirements keys on 'Qatar'; the registry dir is 'QA' — both must resolve to the same rules.
+    by_name = regulatory_context("Qatar", "2024")
+    by_code = regulatory_context("QA", "2024")
+    assert by_name and {r["rule_key"] for r in by_name} == {r["rule_key"] for r in by_code}
+    assert {"local_file_required", "master_file_required"} <= {r["rule_key"] for r in by_name}
+
+
+def test_regulatory_context_carries_sources_and_is_unknown_without_facts():
+    # Foreign AE known but turnover not captured → the single missing input is the turnover.
+    lf = next(r for r in regulatory_context("Qatar", "2024", {"has_foreign_associated_enterprise": True})
+              if r["rule_key"] == "local_file_required")
+    assert lf["plain_english"] and lf["verification_status"] == "verified" and lf["effective_from"] == "2020-01-01"
+    assert any("Resolution" in s["title"] for s in lf["sources"])
+    # Missing financials → unknown, not a guess (PRD §36).
+    assert lf["status"] == "unknown" and lf["missing_input"] == "annual_turnover_or_assets" and lf["result"] is None
+
+
+def test_regulatory_context_applies_with_facts():
+    lf = next(r for r in regulatory_context(
+        "Qatar", "2024", {"annual_turnover_or_assets": 60_000_000, "has_foreign_associated_enterprise": True}
+    ) if r["rule_key"] == "local_file_required")
+    assert lf["status"] == "applied" and lf["result"] is True
+
+
+def test_regulatory_context_empty_for_unregistered_jurisdiction():
+    assert regulatory_context("Netherlands", "2024") == []
 
 
 def test_validate_profile_flags_bad_data():

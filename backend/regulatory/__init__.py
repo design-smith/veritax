@@ -6,11 +6,17 @@ pure condition engine. Missing input yields `unknown`, never a guess (PRD §36).
 """
 
 from .engine import MissingInput, evaluate
-from .resolver import RuleResult, applicable_version, evaluate_applicability, resolve_rules
+from .resolver import (
+    RuleResult,
+    applicable_version,
+    evaluate_applicability,
+    regulatory_context,
+    resolve_rules,
+)
 from .schemas import JurisdictionProfile, RegulatoryRule, RegulatorySource
 
 __all__ = [
     "MissingInput", "evaluate",
-    "RuleResult", "applicable_version", "evaluate_applicability", "resolve_rules",
+    "RuleResult", "applicable_version", "evaluate_applicability", "regulatory_context", "resolve_rules",
     "JurisdictionProfile", "RegulatoryRule", "RegulatorySource",
 ]

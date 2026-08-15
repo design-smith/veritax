@@ -163,11 +163,32 @@ class SkippedDocumentRead(BaseModel):
     reason: str
 
 
+class RegulatorySourceRead(BaseModel):
+    title: str
+    issuing_authority: str
+    url: str | None = None
+    citation_locator: str | None = None
+
+
+class RegulatoryContextRead(BaseModel):
+    """A jurisdiction-level applicability rule surfaced on Requirements (PRD §11-12)."""
+    rule_key: str
+    plain_english: str
+    status: str                       # "applied" | "unknown"
+    result: bool | None = None
+    missing_input: str | None = None
+    effective_from: str
+    effective_to: str | None = None
+    verification_status: str
+    sources: list[RegulatorySourceRead] = []
+
+
 class CoverageResponse(BaseModel):
     jurisdiction: str
     summary: CoverageSummary
     requirements: list[CoverageRead]
     skipped_documents: list[SkippedDocumentRead] = []
+    regulatory: list[RegulatoryContextRead] = []  # jurisdiction rules from the registry (empty if none defined)
 
 
 class DraftCitationRead(BaseModel):
