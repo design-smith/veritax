@@ -4,13 +4,17 @@ import pytest
 from pathlib import Path
 
 import regulatory.resolver as _resolver
+
 from regulatory import (
     MissingInput,
     applicable_version,
+    benchmarking_method,
+    compute_arm_length_range,
     evaluate,
     evaluate_applicability,
     evaluate_period_compatibility,
     evaluate_transaction_scope,
+    position_in_range,
     regulatory_context,
     resolve_rules,
 )
@@ -182,6 +186,38 @@ def test_period_compatibility_business_change_forces_review_even_when_aligned():
 def test_period_compatibility_unknown_when_period_missing():
     assert evaluate_period_compatibility(None, 2024)["status"] == "unknown"
     assert evaluate_period_compatibility("no-year", "also none")["status"] == "unknown"
+
+
+# ── Benchmarking statistical config + calc (S5): reproducible range, no comparable search ──
+def test_arm_length_interquartile_range_is_reproducible():
+    r = compute_arm_length_range([1, 2, 3, 4, 5, 6, 7, 8])  # default = interquartile / inclusive
+    assert r["status"] == "computed" and r["n"] == 8
+    assert r["lower"] == pytest.approx(2.75) and r["upper"] == pytest.approx(6.25) and r["median"] == 4.5
+    assert r["method"] == "interquartile_range" and r["quartile_method"] == "inclusive"
+    # Explicit quartile convention changes the bounds deterministically.
+    ex = compute_arm_length_range([1, 2, 3, 4, 5, 6, 7, 8], quartile_method="exclusive")
+    assert ex["lower"] == pytest.approx(2.25) and ex["upper"] == pytest.approx(6.75)
+
+
+def test_arm_length_full_range_and_insufficient_and_unknown():
+    assert (compute_arm_length_range([3, 1, 9, 5], method="full_range")["lower"],
+            compute_arm_length_range([3, 1, 9, 5], method="full_range")["upper"]) == (1.0, 9.0)
+    assert compute_arm_length_range([1, 2, 3])["status"] == "insufficient"   # < 4 for an IQR
+    assert compute_arm_length_range([])["status"] == "unknown"
+
+
+def test_position_in_range():
+    rng = compute_arm_length_range([1, 2, 3, 4, 5, 6, 7, 8])  # [2.75, 6.25]
+    assert position_in_range(4.0, rng) == "within"
+    assert position_in_range(1.0, rng) == "below"
+    assert position_in_range(9.0, rng) == "above"
+    assert position_in_range(None, rng) == "unknown"
+
+
+def test_benchmarking_method_defaults_when_no_jurisdiction_rule():
+    m = benchmarking_method("Qatar", "2024")   # no benchmarking rule seeded → documented methodology default
+    assert m["method"] == "interquartile_range" and m["quartile_method"] == "inclusive"
+    assert m["verification_status"] == "methodology_default" and m["source"] is None
 
 
 def test_validate_profile_flags_bad_data():

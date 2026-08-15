@@ -24,8 +24,8 @@ principle: deterministic versioned rules decide; the LLM only summarizes/generat
 | S2 | Requirements rule-derived (subsume re-point) + plain-English/legal-basis drawer | AFK | S1 | ✅ DONE |
 | S3 | Transaction scope & materiality (jurisdiction-specific) | AFK | S1 | ✅ DONE |
 | S4 | Fiscal-year compatibility | AFK | S1 | ✅ DONE |
-| S5 | Jurisdiction-specific benchmarking rules + statistical config | AFK | S1 | ▶ NEXT |
-| S6 | Draft: Local Regulations section + regulatory snapshot | AFK | S1 (richer w/ S2,S3,S5) | pending |
+| S5 | Jurisdiction-specific benchmarking rules + statistical config | AFK | S1 | ✅ DONE |
+| S6 | Draft: Local Regulations section + regulatory snapshot | AFK | S1 (richer w/ S2,S3,S5) | ▶ NEXT |
 | S7 | Risks: deterministic regulatory findings | AFK | S3, S5 | pending |
 | S8 | Practitioner overrides + audit trail | AFK | S2 | pending |
 
@@ -65,6 +65,21 @@ task; they are kept OUT of every regulatory commit (staged files are explicit).
     backend — no registry/frontend change. **Full backend suite 259 passed** (256 + 3). Acceptance (Fiscal
     Years, §44): exact/acceptable/review/incompatible/unknown bands ✓ · business-change flag ✓ · missing period
     → unknown ✓ · informs, does not block ✓.
+
+- [ ] **S5 — Jurisdiction-specific benchmarking rules + statistical config** — BUILT, full-suite gate running.
+  - `backend/regulatory/benchmarking.py` (stdlib `statistics` — ponytail): `compute_arm_length_range(results,
+    method, quartile_method)` → reproducible range with metadata (method, quartile convention, `n`, bounds,
+    median); `interquartile_range` (inclusive/exclusive) + `full_range`; `insufficient` below 4 comparables;
+    `unknown` when empty. `position_in_range(tested, rng)` → within/below/above/unknown (feeds S7).
+    `benchmarking_method(country, fiscal_year)` reads a `benchmarking` registry rule if verifiably seeded, else
+    the documented methodology default.
+  - **Non-goals honoured (§42):** calc/config only — NO comparable search, NO TNMM/FAR workflow. **No
+    fabrication:** no jurisdiction seeds a statutory range method, so the default (OECD-aligned interquartile,
+    inclusive) is an explicit `methodology_default`, not a `verified` rule.
+  - **Verification:** `test_regulatory.py` **25 passed** (+4: reproducible IQR incl/excl, full-range +
+    insufficient + unknown, position-in-range, default method). Pure backend. **Full backend suite 263 passed**
+    (259 + 4). Acceptance (Benchmarking, §44): explicit method config ✓ · reproducible calc metadata ✓ · range
+    computed deterministically ✓ · calc-only, non-goals honoured ✓.
   - `backend/regulatory/scope.py`: `evaluate_transaction_scope(transactions, country, fiscal_year)` — reuses the
     S1 condition engine per controlled-transaction CATEGORY. Aggregates by category (absolute-sums so
     income/expense and acquisition/disposal are NOT netted, per the GTA rule), decides

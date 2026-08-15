@@ -5,7 +5,9 @@ version-controlled JSON under jurisdictions/<CC>/, resolved by (jurisdiction, fi
 pure condition engine. Missing input yields `unknown`, never a guess (PRD §36).
 """
 
+from .benchmarking import benchmarking_method, compute_arm_length_range, position_in_range
 from .engine import MissingInput, evaluate
+from .period import evaluate_period_compatibility
 from .resolver import (
     RuleResult,
     applicable_version,
@@ -13,7 +15,6 @@ from .resolver import (
     regulatory_context,
     resolve_rules,
 )
-from .period import evaluate_period_compatibility
 from .schemas import JurisdictionProfile, RegulatoryRule, RegulatorySource
 from .scope import CategoryScope, evaluate_transaction_scope
 
@@ -22,5 +23,6 @@ __all__ = [
     "RuleResult", "applicable_version", "evaluate_applicability", "regulatory_context", "resolve_rules",
     "CategoryScope", "evaluate_transaction_scope",
     "evaluate_period_compatibility",
+    "benchmarking_method", "compute_arm_length_range", "position_in_range",
     "JurisdictionProfile", "RegulatoryRule", "RegulatorySource",
 ]
