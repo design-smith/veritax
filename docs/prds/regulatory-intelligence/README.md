@@ -26,8 +26,8 @@ principle: deterministic versioned rules decide; the LLM only summarizes/generat
 | S4 | Fiscal-year compatibility | AFK | S1 | ✅ DONE |
 | S5 | Jurisdiction-specific benchmarking rules + statistical config | AFK | S1 | ✅ DONE |
 | S6 | Draft: Local Regulations section + regulatory snapshot | AFK | S1 (richer w/ S2,S3,S5) | ✅ DONE |
-| S7 | Risks: deterministic regulatory findings | AFK | S3, S5 | ▶ NEXT |
-| S8 | Practitioner overrides + audit trail | AFK | S2 | pending |
+| S7 | Risks: deterministic regulatory findings | AFK | S3, S5 | ✅ DONE |
+| S8 | Practitioner overrides + audit trail | AFK | S2 | ▶ NEXT |
 
 **DAG:** S1 → {S2, S3, S4, S5} → S6, S7 (after S3/S5), S8 (after S2).
 **Non-goals honoured (§42):** no regulatory CMS, no standalone regs page, no research-agent auto-approval, no
@@ -112,6 +112,24 @@ task; they are kept OUT of every regulatory commit (staged files are explicit).
     snapshot pinned). No frontend change (the section renders generically). **Full backend suite 266 passed**
     (263 + 3). Acceptance (Draft, §44): a Draft section restates the jurisdiction's rules deterministically with
     sources ✓ · shared snapshot persisted ✓ · non-gating value-add (never blocks the draft) ✓.
+
+- [ ] **S7 — Risks: deterministic regulatory findings** — BUILT, full-suite gate running.
+  - `backend/app/regulatory_risks.py::regulatory_findings(...)` — deterministic (no LLM), reuses the S3
+    (`evaluate_transaction_scope`), S4 (`evaluate_period_compatibility`), S5 (`compute_arm_length_range` +
+    `position_in_range`) engines and the resolved rules. Emits, **each naming its rule**: filing-timing (from
+    the seeded Qatar filing rule — 30 June following the fiscal year), missing-mandatory-transaction (in-scope
+    by materiality but undocumented), tested-result-outside-arm's-length-range, and stale-benchmark. Reuses the
+    `risks.Finding` shape, so findings persist through the existing pipeline.
+  - Merged into `routers/risks.py::run_analysis` alongside the LLM findings (same persist path). **Honest:**
+    only emits where inputs exist — live, that's filing-timing from the engagement fiscal year; the
+    transaction/benchmark findings activate once those inputs exist (no fabricated findings, PRD §36).
+  - Seeded the **Qatar filing rule** (`rule_category: filing`, 30 June following FY, Resolution 4/2020, verified).
+  - **Verification:** `test_regulatory_risks.py` + `test_risks.py` + `test_regulatory.py` **38 passed** (filing
+    passed/approaching/ok/none; missing-transaction names the rule + clears when documented; outside-range +
+    stale; a Qatar risk run merges the deterministic filing finding). No frontend change. **Full backend suite
+    271 passed** (266 + 5). Acceptance (Risks, §44): deterministic findings, each naming its rule ✓ · missing
+    mandatory transaction / methodology mismatch / stale benchmark / filing-timing covered ✓ · no fabricated
+    findings (unknown/absent inputs → no finding) ✓.
   - `backend/regulatory/scope.py`: `evaluate_transaction_scope(transactions, country, fiscal_year)` — reuses the
     S1 condition engine per controlled-transaction CATEGORY. Aggregates by category (absolute-sums so
     income/expense and acquisition/disposal are NOT netted, per the GTA rule), decides

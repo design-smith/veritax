@@ -91,6 +91,19 @@
       "plain_english": "A controlled-transaction category is in scope for the Local File when its annual amount is at least QAR 200,000. Amounts are taken per the taxpayer's accounts and must not be netted between income and expenses or between acquisitions and disposals.",
       "source_ids": ["qa_gta_tp_faq"],
       "verification_status": "verified"
+    },
+    {
+      "rule_key": "local_file_filing_deadline",
+      "rule_category": "filing",
+      "rule_type": "documentation_deadline",
+      "version": 1,
+      "effective_from": "2020-01-01",
+      "effective_to": null,
+      "conditions": null,
+      "result": { "due_month": 6, "due_day": 30, "year_offset": 1 },
+      "plain_english": "The Master File and Local File are due no later than 30 June of the year following the relevant fiscal year (GTA Resolution No. 4 of 2020 and GTA FAQ). Treated as the primary rule where a source conflict with the older Dhareeba manual exists.",
+      "source_ids": ["qa_resolution_4_2020"],
+      "verification_status": "verified"
     }
   ]
 }

@@ -31,6 +31,7 @@ from ..models import (
     RiskRunStatus,
     RiskSeverity,
 )
+from ..regulatory_risks import regulatory_findings
 from ..risks import RiskAnalyzer
 from ..schemas import RiskEvidenceRead, RiskFindingRead, RiskResponse, RiskSummary
 
@@ -241,6 +242,7 @@ async def run_analysis(session_factory: async_sessionmaker, analyzer: RiskAnalyz
             draft_started_at = time.perf_counter()
             eng = await session.get(Engagement, engagement_id)
             entity_name = eng.entity.name if eng and eng.entity else ""
+            fiscal_year = eng.fiscal_year if eng else None
             sections = (
                 await session.execute(
                     select(DraftSection)
@@ -322,11 +324,17 @@ async def run_analysis(session_factory: async_sessionmaker, analyzer: RiskAnalyz
                 raise RuntimeError(
                     f"risk analysis timed out after {RISK_ANALYSIS_TIMEOUT_SECONDS}s"
                 ) from exc
+            # Deterministic regulatory findings (PRD Class 1, S7) — rules decide, each names its rule. Merged
+            # with the LLM findings and persisted through the same path. Only emits where inputs support it
+            # (live: filing-timing from the Qatar deadline; transaction/benchmark findings await those inputs).
+            reg_findings = regulatory_findings(jurisdiction, fiscal_year)
+            findings = list(findings) + reg_findings
             log.info(
-                "risks.job.analysis_complete engagement_id=%s jurisdiction=%s findings=%d duration_ms=%d",
+                "risks.job.analysis_complete engagement_id=%s jurisdiction=%s findings=%d (regulatory=%d) duration_ms=%d",
                 _short_id(engagement_id),
                 jurisdiction,
                 len(findings),
+                len(reg_findings),
                 _elapsed_ms(analysis_started_at),
             )
 

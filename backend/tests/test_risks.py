@@ -64,6 +64,21 @@ async def test_risks_produces_both_kinds_with_evidence(client):
     assert "total" in got["summary"] and got["summary"]["total"] == 2
 
 
+async def test_regulatory_filing_finding_merged_into_risk_run(client):
+    # Qatar has a registry filing rule; a past fiscal year makes the deadline overdue → a deterministic finding
+    # is merged into the run alongside the LLM findings, naming its rule (Canada, with no registry rule, adds none).
+    eid = await _engagement_with_doc(client, _ready_text("Qatar", b"limited-risk distributor; royalty five percent"))
+    await client.patch(f"/engagements/{eid}", json={"jurisdictions": ["Qatar"], "fiscal_year": "FY2024"})
+    await _draft(client, eid, "Qatar")
+    assert (await client.post(f"/engagements/{eid}/risks", params={"jurisdiction": "Qatar"})).status_code == 201
+    got = (await client.get(f"/engagements/{eid}/risks", params={"jurisdiction": "Qatar"})).json()
+    assert got["status"] == "done"
+    filing = [f for f in got["findings"] if "filing deadline has passed" in f["title"]]
+    assert filing and filing[0]["kind"] == "exposure"
+    assert filing[0]["evidence"][0]["reference"] == "local_file_filing_deadline"   # names the rule
+    assert filing[0]["recommendations"]
+
+
 async def test_get_before_start_is_not_started(client):
     eid = (await client.post("/engagements")).json()["id"]
     got = (await client.get(f"/engagements/{eid}/risks", params={"jurisdiction": "Canada"})).json()
