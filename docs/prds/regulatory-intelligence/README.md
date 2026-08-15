@@ -45,8 +45,20 @@ task; they are kept OUT of every regulatory commit (staged files are explicit).
   - **Verification:** `pytest tests/test_regulatory.py` **9 passed** (comparators/membership; `exists` never raises; AND/OR/NOT three-valued incl. decisive-branch short-circuit and `unknown` propagation; fiscal-year version selection incl. future-rule-never-applies; Qatar applicability true/false/**unknown+missing_input**; provenance + `validate_profile` clean; bad-data flagged). `app + regulatory` import clean; existing `tests/test_requirements.py` **5 passed** (no regression). No existing file modified → the 235-suite is unaffected; no frontend change (backend-only slice).
   - Acceptance (Registry + Planning, §44): versioned files ✓ · effective dates ✓ · primary-source provenance ✓ · coexisting versions ✓ · verification statuses ✓ · resolve by jurisdiction+fiscal year ✓ · missing input → `unknown` not guessed ✓.
 
-- **▶ Continuing to S2** — the subsume re-point: migrate `jurisdiction_requirements.json` into the registry and
-  re-point `resolve_requirements()`/`draft_elements()` at it, **behaviour-preserving** (identical
-  `ResolvedElement` output + stable `requirement_key`s), with the **full backend suite (235) as the gate**;
-  then surface plain-English/legal-basis on Requirements + the compact source drawer (§11-12). This is the risk
-  centre — done in isolation in its own turn.
+- [ ] **S2 — Requirements rule-derived (subsume re-point) + plain-English/legal-basis drawer** — IN PROGRESS.
+  - **Part A (subsume re-point) — DONE + verified.** The regulatory registry now owns jurisdiction requirements:
+    `jurisdiction_requirements.json` moved `backend/app/data/` → `backend/regulatory/data/`; resolution
+    (`ResolvedElement` + `resolve_requirements` + `draft_elements` + `available_jurisdictions`) moved into
+    `backend/regulatory/requirements.py`; `backend/app/requirements.py` is now a thin re-export shim so every
+    caller (`matching.py`, `routers/coverage.py`, `routers/draft.py`, `document_classifier.py`) and test keeps
+    working unchanged. Ponytail: the data + resolution were relocated (registry = single source of truth), NOT
+    atomised element-by-element into `RegulatoryRule` objects — that would add risk without changing the subsume
+    outcome; the structured element list is the registry's requirement-content form.
+    - **Verification:** captured `tests/data/golden_requirements.json` from the PRE-migration code, then
+      `tests/test_requirements_golden.py` recomputes through the registry path and asserts byte-identical
+      `resolve_requirements` + `draft_elements` output (all fields) for **all 17 jurisdictions** — passes.
+      **Full backend suite: 246 passed** (was 235; +11 = 9 regulatory + 2 golden) against the pgvector test DB.
+      No behaviour change.
+  - **Part B (Requirements plain-English/legal-basis drawer) — TODO.** Attach the registry's applicability +
+    plain-English + source (Qatar is real; per-element citations are HITL content, not fabricated) to the
+    Requirements rows + a compact source drawer (§12); preserve the deterministic status flow.
