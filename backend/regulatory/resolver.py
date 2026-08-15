@@ -106,25 +106,45 @@ def _sources_for(jurisdiction: str) -> dict[str, Any]:
     return out
 
 
+def _leaf_value(conditions: Any, field: str) -> tuple[Any, Any]:
+    """First (value, currency) of a leaf matching `field` in a condition tree — for display (e.g. a threshold)."""
+    if not isinstance(conditions, dict):
+        return (None, None)
+    for grp in ("all", "any"):
+        for sub in conditions.get(grp, []):
+            hit = _leaf_value(sub, field)
+            if hit != (None, None):
+                return hit
+    if "not" in conditions:
+        return _leaf_value(conditions["not"], field)
+    if conditions.get("field") == field:
+        return conditions.get("value"), conditions.get("currency")
+    return (None, None)
+
+
 def regulatory_context(country: str, fiscal_year: str | int | None, facts: dict[str, Any] | None = None) -> list[dict]:
-    """Jurisdiction-level regulatory basis for the Requirements view: the applicability rules in force for this
-    country + fiscal year, each with plain-English text, applied/unknown determination, effective period,
-    verification status, and resolved primary sources (PRD §11-12). [] when no registry rules exist yet."""
+    """Jurisdiction-level regulatory basis for the Requirements view: the applicability + materiality rules in
+    force for this country + fiscal year, each with plain-English text, effective period, verification status,
+    and resolved primary sources (PRD §11-12). Applicability rules carry an applied/unknown determination;
+    materiality rules carry the numeric threshold. [] when no registry rules exist yet."""
     code = _name_to_code().get(str(country).lower(), str(country))
-    applic = [r for r in resolve_rules(code, fiscal_year) if r.rule_category == "applicability"]
-    if not applic:
+    rules = [r for r in resolve_rules(code, fiscal_year) if r.rule_category in ("applicability", "materiality")]
+    if not rules:
         return []
     sources = _sources_for(code)
-    results = {rr.rule_key: rr for rr in evaluate_applicability(applic, facts or {})}
+    applic = {rr.rule_key: rr for rr in
+              evaluate_applicability([r for r in rules if r.rule_category == "applicability"], facts or {})}
     out: list[dict] = []
-    for rule in applic:
-        rr = results[rule.rule_key]
-        out.append({
+    for rule in rules:
+        entry = {
             "rule_key": rule.rule_key,
+            "rule_category": rule.rule_category,
             "plain_english": rule.plain_english,
-            "status": rr.status,                 # "applied" | "unknown"
-            "result": rr.result,
-            "missing_input": rr.missing_input,
+            "status": "informational",
+            "result": None,
+            "missing_input": None,
+            "threshold": None,
+            "currency": None,
             "effective_from": rule.effective_from,
             "effective_to": rule.effective_to,
             "verification_status": rule.verification_status,
@@ -133,7 +153,14 @@ def regulatory_context(country: str, fiscal_year: str | int | None, facts: dict[
                  "url": s.url, "citation_locator": s.citation_locator}
                 for sid in rule.source_ids if (s := sources.get(sid)) is not None
             ],
-        })
+        }
+        if rule.rule_category == "applicability":
+            rr = applic[rule.rule_key]
+            entry.update(status=rr.status, result=rr.result, missing_input=rr.missing_input)
+        else:  # materiality
+            thr, cur = _leaf_value(rule.conditions, "category_annual_amount")
+            entry.update(threshold=thr, currency=cur)
+        out.append(entry)
     return out
 
 

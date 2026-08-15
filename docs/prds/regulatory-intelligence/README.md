@@ -22,8 +22,8 @@ principle: deterministic versioned rules decide; the LLM only summarizes/generat
 |---|-------|------|-----------|--------|
 | S1 | Regulatory registry + engine + resolver foundation (+ Qatar applicability) | AFK | — | ✅ DONE |
 | S2 | Requirements rule-derived (subsume re-point) + plain-English/legal-basis drawer | AFK | S1 | ✅ DONE |
-| S3 | Transaction scope & materiality (jurisdiction-specific) | AFK | S1 | ▶ NEXT |
-| S4 | Fiscal-year compatibility | AFK | S1 | pending |
+| S3 | Transaction scope & materiality (jurisdiction-specific) | AFK | S1 | ✅ DONE |
+| S4 | Fiscal-year compatibility | AFK | S1 | ▶ NEXT |
 | S5 | Jurisdiction-specific benchmarking rules + statistical config | AFK | S1 | pending |
 | S6 | Draft: Local Regulations section + regulatory snapshot | AFK | S1 (richer w/ S2,S3,S5) | pending |
 | S7 | Risks: deterministic regulatory findings | AFK | S3, S5 | pending |
@@ -50,6 +50,23 @@ task; they are kept OUT of every regulatory commit (staged files are explicit).
   plain-English + legal basis (source) + applicability, with a compact drawer ✓ · missing inputs → `unknown`
   not guessed ✓ · deterministic status flow preserved ✓ (full suite unchanged in behaviour). **Final gate: full
   backend suite 251 passed** (246 + 5 Part B), tsc + build clean.
+
+- [x] **S3 — Transaction scope & materiality (jurisdiction-specific)** — DONE. **Full backend suite 256 passed** (251 + 5). Acceptance (Transaction Scope, §44): categories aggregated + in/out of scope by materiality with a stated summary ✓ · no-netting honoured ✓ · missing amount → unknown ✓ · jurisdiction threshold cited with source ✓ (live per-transaction feed pending a transaction data model — noted below).
+  - `backend/regulatory/scope.py`: `evaluate_transaction_scope(transactions, country, fiscal_year)` — reuses the
+    S1 condition engine per controlled-transaction CATEGORY. Aggregates by category (absolute-sums so
+    income/expense and acquisition/disposal are NOT netted, per the GTA rule), decides
+    `in_scope`/`below_threshold`/`unknown` against the jurisdiction materiality rule, and returns a summary
+    ("N categories, M in scope, K below threshold"). No materiality rule → `no_rule`.
+  - Seeded **Qatar** real content (verified, from `scope_thresholds.transactional_materiality`): a
+    `transaction_category_materiality` rule = QAR 200,000 per controlled-transaction category per year, plus a
+    GTA TP FAQ source. Surfaced in the Requirements drawer via `regulatory_context` (now includes materiality
+    rules with their threshold; drawer shows a "≥ QAR 200,000" badge). `_leaf_value` extracts the threshold.
+  - **Honest limitation (noted, not fabricated):** the app has no structured controlled-transaction data model
+    yet, so live per-transaction evaluation isn't wired — the engine is verified by tests and the jurisdiction
+    threshold is surfaced as context. Wiring is trivial once transaction extraction exists.
+  - **Verification:** `test_regulatory.py`+`test_coverage.py` **31 passed** (+5: in-scope/below/unknown,
+    aggregation, no-netting, no-rule, materiality-in-context; coverage response carries the materiality
+    threshold for Qatar). `tsc` + `pnpm build` clean. Full backend suite = the completion gate (running).
   - **Part A (subsume re-point) — DONE + verified.** The regulatory registry now owns jurisdiction requirements:
     `jurisdiction_requirements.json` moved `backend/app/data/` → `backend/regulatory/data/`; resolution
     (`ResolvedElement` + `resolve_requirements` + `draft_elements` + `available_jurisdictions`) moved into

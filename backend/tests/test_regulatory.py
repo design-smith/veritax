@@ -9,6 +9,7 @@ from regulatory import (
     applicable_version,
     evaluate,
     evaluate_applicability,
+    evaluate_transaction_scope,
     regulatory_context,
     resolve_rules,
 )
@@ -122,6 +123,45 @@ def test_regulatory_context_applies_with_facts():
 
 def test_regulatory_context_empty_for_unregistered_jurisdiction():
     assert regulatory_context("Netherlands", "2024") == []
+
+
+# ── Transaction scope & materiality (S3): reuses the S1 engine per controlled-transaction category ──
+def test_transaction_scope_in_scope_below_and_unknown():
+    out = evaluate_transaction_scope(
+        [{"category": "Services", "amount": 250000}, {"category": "Royalties", "amount": 150000}, {"category": "Goods"}],
+        "Qatar", "2024",
+    )
+    assert out["threshold"] == 200000 and out["currency"] == "QAR"
+    by = {c["category"]: c for c in out["categories"]}
+    assert by["Services"]["status"] == "in_scope"
+    assert by["Royalties"]["status"] == "below_threshold"
+    assert by["Goods"]["status"] == "unknown" and by["Goods"]["missing_input"] == "category_annual_amount"
+    assert out["summary"] == {"total": 3, "in_scope": 1, "below_threshold": 1, "unknown": 1, "status": "evaluated"}
+
+
+def test_transaction_scope_aggregates_by_category():
+    out = evaluate_transaction_scope(
+        [{"category": "Services", "amount": 120000}, {"category": "Services", "amount": 120000}], "Qatar", "2024")
+    assert out["summary"]["total"] == 1
+    assert out["categories"][0]["status"] == "in_scope" and out["categories"][0]["amount"] == 240000
+
+
+def test_transaction_scope_does_not_net_opposing_flows():
+    # Income +300k and expense -300k in one category must NOT net to zero (GTA no-netting rule).
+    out = evaluate_transaction_scope(
+        [{"category": "Loans", "amount": 300000}, {"category": "Loans", "amount": -300000}], "Qatar", "2024")
+    assert out["categories"][0]["amount"] == 600000 and out["categories"][0]["status"] == "in_scope"
+
+
+def test_transaction_scope_no_rule_for_unregistered_jurisdiction():
+    out = evaluate_transaction_scope([{"category": "Services", "amount": 999999}], "Netherlands", "2024")
+    assert out["summary"]["status"] == "no_rule" and out["categories"] == []
+
+
+def test_regulatory_context_includes_materiality_rule():
+    mat = [r for r in regulatory_context("Qatar", "2024") if r["rule_category"] == "materiality"]
+    assert mat and mat[0]["threshold"] == 200000 and mat[0]["currency"] == "QAR"
+    assert mat[0]["verification_status"] == "verified" and mat[0]["sources"]
 
 
 def test_validate_profile_flags_bad_data():

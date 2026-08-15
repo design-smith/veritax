@@ -171,12 +171,16 @@ class RegulatorySourceRead(BaseModel):
 
 
 class RegulatoryContextRead(BaseModel):
-    """A jurisdiction-level applicability rule surfaced on Requirements (PRD §11-12)."""
+    """A jurisdiction-level rule surfaced on Requirements (PRD §11-12): applicability (applied/unknown) or
+    materiality (a per-category threshold)."""
     rule_key: str
+    rule_category: str                # "applicability" | "materiality"
     plain_english: str
-    status: str                       # "applied" | "unknown"
+    status: str                       # "applied" | "unknown" | "informational"
     result: bool | None = None
     missing_input: str | None = None
+    threshold: float | None = None    # materiality: in-scope at or above this amount
+    currency: str | None = None
     effective_from: str
     effective_to: str | None = None
     verification_status: str

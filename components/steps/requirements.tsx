@@ -669,7 +669,10 @@ export default function RequirementsStep({ engagementId, jurisdictions, onContin
               </p>
               <div style={{ display: "flex", flexDirection: "column", gap: "0.375rem" }}>
                 {coverage.regulatory.map(rc => {
-                  const d = determination(rc)
+                  const d = rc.rule_category === "materiality"
+                    ? { label: rc.threshold != null ? `≥ ${[rc.currency, rc.threshold.toLocaleString()].filter(Boolean).join(" ")}` : "Materiality",
+                        text: "var(--color-text-secondary)", bg: "var(--alpha-06)" }
+                    : determination(rc)
                   return (
                     <details key={rc.rule_key} style={{ fontSize: "var(--font-text-sm-size)" }}>
                       <summary style={{ cursor: "pointer", display: "flex", alignItems: "center", gap: "0.5rem", color: "var(--color-text)", listStyle: "none" }}>

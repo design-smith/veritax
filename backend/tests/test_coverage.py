@@ -201,6 +201,8 @@ async def test_coverage_response_carries_registry_regulatory_context(client):
     assert any("Resolution" in s["title"] for s in lf["sources"])
     # No engagement financials → applicability unknown, not guessed.
     assert lf["status"] == "unknown" and lf["missing_input"] in {"annual_turnover_or_assets", "has_foreign_associated_enterprise"}
+    # Materiality (S3) rides in the same context: the QAR 200k per-category threshold.
+    assert any(r["rule_category"] == "materiality" and r["threshold"] == 200000 for r in reg)
 
     # A jurisdiction without registry rules yet → empty context (honest, not fabricated).
     got_nl = (await client.post(f"/engagements/{eid}/coverage", params={"jurisdiction": "Netherlands"})).json()

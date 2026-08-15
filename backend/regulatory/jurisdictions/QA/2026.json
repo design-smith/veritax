@@ -27,6 +27,15 @@
       "url": "https://gta.gov.qa/assets/pdf/Income%20Tax%20Law%20EN%202024.pdf",
       "language": "en",
       "status": "active"
+    },
+    {
+      "source_id": "qa_gta_tp_faq",
+      "title": "GTA Transfer Pricing Declaration / Master File / Local File FAQ and Dhareeba Submission Manual",
+      "issuing_authority": "General Tax Authority (GTA)",
+      "source_type": "guidance",
+      "jurisdiction": "QA",
+      "language": "en",
+      "status": "active"
     }
   ],
   "rules": [
@@ -64,6 +73,23 @@
       "result": true,
       "plain_english": "A Master File is required on the same QAR 50 million turnover-or-assets test where the group includes a foreign associated enterprise.",
       "source_ids": ["qa_resolution_4_2020"],
+      "verification_status": "verified"
+    },
+    {
+      "rule_key": "transaction_category_materiality",
+      "rule_category": "materiality",
+      "rule_type": "per_category_threshold",
+      "version": 1,
+      "effective_from": "2020-01-01",
+      "effective_to": null,
+      "conditions": {
+        "all": [
+          { "field": "category_annual_amount", "operator": ">=", "value": 200000, "currency": "QAR" }
+        ]
+      },
+      "result": true,
+      "plain_english": "A controlled-transaction category is in scope for the Local File when its annual amount is at least QAR 200,000. Amounts are taken per the taxpayer's accounts and must not be netted between income and expenses or between acquisitions and disposals.",
+      "source_ids": ["qa_gta_tp_faq"],
       "verification_status": "verified"
     }
   ]

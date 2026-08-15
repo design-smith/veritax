@@ -209,10 +209,13 @@ export interface RegulatorySourceRef {
 
 export interface RegulatoryContext {
   rule_key: string
+  rule_category: "applicability" | "materiality"
   plain_english: string
-  status: "applied" | "unknown"
+  status: "applied" | "unknown" | "informational"
   result: boolean | null
   missing_input: string | null
+  threshold: number | null
+  currency: string | null
   effective_from: string
   effective_to: string | null
   verification_status: string
