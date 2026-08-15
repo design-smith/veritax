@@ -17,6 +17,7 @@ from .resolver import (
 )
 from .schemas import JurisdictionProfile, RegulatoryRule, RegulatorySource
 from .scope import CategoryScope, evaluate_transaction_scope
+from .snapshot import local_regulations_content, regulatory_snapshot
 
 __all__ = [
     "MissingInput", "evaluate",
@@ -24,5 +25,6 @@ __all__ = [
     "CategoryScope", "evaluate_transaction_scope",
     "evaluate_period_compatibility",
     "benchmarking_method", "compute_arm_length_range", "position_in_range",
+    "local_regulations_content", "regulatory_snapshot",
     "JurisdictionProfile", "RegulatoryRule", "RegulatorySource",
 ]

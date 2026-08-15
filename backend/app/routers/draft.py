@@ -34,12 +34,14 @@ from ..docx_export import build_document
 from ..drafting import Drafter, DraftResult, ResearchDrafter, validate_research
 from ..embeddings import Embedder
 from ..jobs import enqueue_pipeline_job, schedule_pipeline_drain
+from regulatory import local_regulations_content, regulatory_snapshot
 from ..models import (
     CitationKind,
     DraftCitation,
     DraftSection,
     DraftStatus,
     Engagement,
+    EngagementRegulatorySnapshot,
     PipelineJobKind,
     RequirementCoverage,
 )
@@ -311,6 +313,42 @@ async def _draft_research(session: AsyncSession, section: DraftSection, research
         log.info("draft_research DONE section=%s in %.1fs", section.id, time.monotonic() - t0)
     except Exception as exc:  # noqa: BLE001 - record the failure; caller stops the run
         log.exception("draft_research FAILED section=%s after %.1fs", section.id, time.monotonic() - t0)
+        section.status = DraftStatus.failed
+        section.status_updated_at = datetime.now(timezone.utc)
+        section.error = str(exc)[:1000]
+
+
+async def _upsert_regulatory_snapshot(session: AsyncSession, engagement_id: uuid.UUID, jurisdiction: str,
+                                      fiscal_year: str | None) -> None:
+    """Pin the resolved rule versions so Requirements/Draft/Risks share one snapshot (PRD §40)."""
+    snap = regulatory_snapshot(jurisdiction, fiscal_year)
+    stmt = pg_insert(EngagementRegulatorySnapshot).values(
+        engagement_id=engagement_id, jurisdiction=jurisdiction, fiscal_year=fiscal_year, snapshot=snap,
+    ).on_conflict_do_update(
+        index_elements=["engagement_id", "jurisdiction"],
+        set_={"fiscal_year": fiscal_year, "snapshot": snap, "captured_at": datetime.now(timezone.utc)},
+    )
+    await session.execute(stmt)
+
+
+# The Local Regulations section: DETERMINISTIC from the registry (no LLM, no retrieval). It restates the
+# resolved rules and their sources, and pins the shared regulatory snapshot.
+async def _draft_regulatory(session: AsyncSession, section: DraftSection, engagement_id: uuid.UUID,
+                            jurisdiction: str, fiscal_year: str | None) -> None:
+    section.status = DraftStatus.drafting
+    section.error = None
+    section.status_updated_at = datetime.now(timezone.utc)
+    try:
+        content = local_regulations_content(jurisdiction, fiscal_year)
+        section.content = content or "No jurisdiction-specific regulatory rules are loaded for this jurisdiction yet."
+        section.model = "deterministic:registry"
+        section.status = DraftStatus.drafted
+        section.drafted_at = datetime.now(timezone.utc)
+        section.status_updated_at = section.drafted_at
+        await _upsert_regulatory_snapshot(session, engagement_id, jurisdiction, fiscal_year)
+        log.info("draft_regulatory DONE section=%s jurisdiction=%s", section.id, jurisdiction)
+    except Exception as exc:  # noqa: BLE001 - record the failure; caller stops the run
+        log.exception("draft_regulatory FAILED section=%s", section.id)
         section.status = DraftStatus.failed
         section.status_updated_at = datetime.now(timezone.utc)
         section.error = str(exc)[:1000]
@@ -597,6 +635,20 @@ async def run_draft(session_factory: async_sessionmaker, drafter: Drafter, resea
                 if batch_size == 1:
                     section = group[0]
                     element = elements[section.requirement_key]
+                    if getattr(element, "regulatory", False):
+                        # Deterministic Local Regulations section: built from registry rules, no LLM/retrieval.
+                        await _draft_regulatory(session, section, engagement_id, jurisdiction, fiscal_year)
+                        await session.commit()
+                        if section.status == DraftStatus.failed:
+                            stopped = await _mark_open_sections_failed(
+                                session, engagement_id, jurisdiction, section.error or "draft section failed"
+                            )
+                            log.info(
+                                "run_draft STOPPED engagement=%s jurisdiction=%s failed_section=%s stopped_sections=%d reason=%s",
+                                engagement_id, jurisdiction, section.id, stopped, section.error,
+                            )
+                            return
+                        continue
                     if getattr(element, "research", False):
                         # Web-sourced section: no document retrieval; research the industry on the web.
                         await _draft_research(session, section, research_drafter,
@@ -895,6 +947,11 @@ async def regenerate_section(
     engagement = await session.get(Engagement, section.engagement_id)
     entity_name = engagement.entity.name if engagement and engagement.entity else None
     fiscal_year = engagement.fiscal_year if engagement else None
+    if getattr(element, "regulatory", False):
+        await _draft_regulatory(session, section, section.engagement_id, section.jurisdiction, fiscal_year)
+        await session.commit()
+        await session.refresh(section)
+        return _to_read(section)
     if getattr(element, "research", False):
         await _draft_research(session, section, research_drafter,
                               entity_name, section.jurisdiction, fiscal_year, fname_to_docid)

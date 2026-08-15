@@ -935,6 +935,25 @@ class WaitlistRequest(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
+class EngagementRegulatorySnapshot(Base):
+    """Pins the resolved regulatory rule versions for an engagement's (jurisdiction, fiscal_year) so
+    Requirements, Draft, and Risks all reason from the SAME snapshot (PRD Class 1 §40)."""
+
+    __tablename__ = "engagement_regulatory_snapshots"
+    __table_args__ = (
+        UniqueConstraint("engagement_id", "jurisdiction", name="uq_regulatory_snapshot"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
+    engagement_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("engagements.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    jurisdiction: Mapped[str] = mapped_column(Text, nullable=False)
+    fiscal_year: Mapped[str | None] = mapped_column(Text, nullable=True)
+    snapshot: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict)  # regulatory_snapshot() payload
+    captured_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
 # Seed data for the connector registry (all available, none wired yet).
 CONNECTOR_SEED: list[dict] = [
     {"provider": "sap", "display_name": "SAP", "category": ConnectorCategory.accounting},

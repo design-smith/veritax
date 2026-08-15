@@ -12,6 +12,8 @@ from dataclasses import dataclass, replace
 from functools import lru_cache
 from pathlib import Path
 
+from .resolver import regulatory_context
+
 _DATA_PATH = Path(__file__).parent / "data" / "jurisdiction_requirements.json"
 
 
@@ -31,6 +33,7 @@ class ResolvedElement:
     depends_on: tuple[int, ...] = ()     # element orders that must be present, else this is blocked
     severity: str = "medium"             # how badly a gap here hurts: critical | high | medium | low
     research: bool = False               # True = web-sourced value-add section (not doc-gated, never blocks the draft)
+    regulatory: bool = False             # True = deterministic Local Regulations section built from registry rules
 
 
 @lru_cache(maxsize=1)
@@ -123,17 +126,38 @@ def _industry_element(country: str) -> ResolvedElement:
     )
 
 
+def _regulatory_element(country: str) -> ResolvedElement:
+    return ResolvedElement(
+        requirement_key=f"{country}:local_regulations",   # distinct from statutory f"{country}:{order}" keys
+        order=0,                                           # display order set by draft_elements()
+        element_name="Local Regulations",
+        description=(
+            "The jurisdiction's transfer-pricing documentation rules in force for this engagement — "
+            "applicability, materiality, and their primary sources, resolved deterministically from the registry."
+        ),
+        sub_requirements=(),
+        required=False,
+        verified=True,
+        regulatory=True,
+        severity="low",
+    )
+
+
 @lru_cache(maxsize=32)
 def draft_elements(country: str) -> tuple[ResolvedElement, ...]:
-    """Statutory elements plus the injected Industry Analysis section, in document order.
+    """Statutory elements plus injected value-add sections (Local Regulations, Industry Analysis), in order.
 
-    Industry Analysis is placed right after the business-strategy element (or after the entity profile where
-    a jurisdiction has no strategy element). Statutory `requirement_key`s are preserved (so the coverage↔draft
-    linkage stays intact); only the display `order` is renumbered to make room for the inserted section.
+    Local Regulations leads the document (it frames the regulatory basis) and is injected ONLY where the
+    jurisdiction has registry rules — so a jurisdiction without seeded rules is unchanged. Industry Analysis is
+    placed right after the business-strategy element (or after the entity profile where a jurisdiction has no
+    strategy element). Statutory `requirement_key`s are preserved (the coverage↔draft linkage stays intact);
+    only the display `order` is renumbered to make room for the inserted sections.
     """
     base = list(resolve_requirements(country))
     if not base:
         return ()
     idx = next((i for i, e in enumerate(base) if "strateg" in e.element_name.lower()), 0)
     ordered = base[: idx + 1] + [_industry_element(country)] + base[idx + 1 :]
+    if regulatory_context(country, None):              # jurisdiction has registry rules → lead with Local Regulations
+        ordered = [_regulatory_element(country)] + ordered
     return tuple(replace(e, order=i + 1) for i, e in enumerate(ordered))

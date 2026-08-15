@@ -25,8 +25,8 @@ principle: deterministic versioned rules decide; the LLM only summarizes/generat
 | S3 | Transaction scope & materiality (jurisdiction-specific) | AFK | S1 | ✅ DONE |
 | S4 | Fiscal-year compatibility | AFK | S1 | ✅ DONE |
 | S5 | Jurisdiction-specific benchmarking rules + statistical config | AFK | S1 | ✅ DONE |
-| S6 | Draft: Local Regulations section + regulatory snapshot | AFK | S1 (richer w/ S2,S3,S5) | ▶ NEXT |
-| S7 | Risks: deterministic regulatory findings | AFK | S3, S5 | pending |
+| S6 | Draft: Local Regulations section + regulatory snapshot | AFK | S1 (richer w/ S2,S3,S5) | ✅ DONE |
+| S7 | Risks: deterministic regulatory findings | AFK | S3, S5 | ▶ NEXT |
 | S8 | Practitioner overrides + audit trail | AFK | S2 | pending |
 
 **DAG:** S1 → {S2, S3, S4, S5} → S6, S7 (after S3/S5), S8 (after S2).
@@ -80,6 +80,38 @@ task; they are kept OUT of every regulatory commit (staged files are explicit).
     insufficient + unknown, position-in-range, default method). Pure backend. **Full backend suite 263 passed**
     (259 + 4). Acceptance (Benchmarking, §44): explicit method config ✓ · reproducible calc metadata ✓ · range
     computed deterministically ✓ · calc-only, non-goals honoured ✓.
+
+- [ ] **S6 — Draft: Local Regulations section + regulatory snapshot** — BUILT, full-suite gate running.
+  - New table **`engagement_regulatory_snapshots`** (`models.py`) pins the resolved rule versions per
+    (engagement, jurisdiction) so Requirements/Draft/Risks share one snapshot (§40). `backend/regulatory/
+    snapshot.py`: `regulatory_snapshot(country, fiscal_year)` (payload) + `local_regulations_content(...)`
+    (DETERMINISTIC markdown from the resolved rules — restates them + cites sources, no LLM; `None` when a
+    jurisdiction has no rules).
+  - Draft integration: a `regulatory=True` value-add element (`ResolvedElement.regulatory`) injected by
+    `draft_elements` **only where the jurisdiction has registry rules** (Qatar today) — leads the document.
+    `run_draft` + `regenerate_section` gained a deterministic branch (`_draft_regulatory`) that writes the
+    section content and upserts the snapshot; no LLM, no retrieval.
+  - **Behaviour-preservation checked:** golden re-captured — `resolve_requirements` output is identical except
+    for the new `regulatory: false` field on every element (a dataclass field addition, like `research`); the
+    `draft` list changed for **Qatar only** (the added section + order shift). Verified programmatically.
+  - **⚠ Prod migration required** (conftest `create_all` covers tests, NOT prod):
+    ```sql
+    CREATE TABLE engagement_regulatory_snapshots (
+        id UUID PRIMARY KEY,
+        engagement_id UUID NOT NULL REFERENCES engagements(id) ON DELETE CASCADE,
+        jurisdiction TEXT NOT NULL,
+        fiscal_year TEXT,
+        snapshot JSONB NOT NULL DEFAULT '{}'::jsonb,
+        captured_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+        CONSTRAINT uq_regulatory_snapshot UNIQUE (engagement_id, jurisdiction)
+    );
+    CREATE INDEX ix_ers_engagement_id ON engagement_regulatory_snapshots (engagement_id);
+    ```
+  - **Verification:** affected tests (regulatory units + golden + draft + industry-analysis + coverage) **64
+    passed** (incl. a Qatar draft: deterministic Local Regulations section leads, restates rules with sources,
+    snapshot pinned). No frontend change (the section renders generically). **Full backend suite 266 passed**
+    (263 + 3). Acceptance (Draft, §44): a Draft section restates the jurisdiction's rules deterministically with
+    sources ✓ · shared snapshot persisted ✓ · non-gating value-add (never blocks the draft) ✓.
   - `backend/regulatory/scope.py`: `evaluate_transaction_scope(transactions, country, fiscal_year)` — reuses the
     S1 condition engine per controlled-transaction CATEGORY. Aggregates by category (absolute-sums so
     income/expense and acquisition/disposal are NOT netted, per the GTA rule), decides

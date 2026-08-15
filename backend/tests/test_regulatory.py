@@ -14,8 +14,10 @@ from regulatory import (
     evaluate_applicability,
     evaluate_period_compatibility,
     evaluate_transaction_scope,
+    local_regulations_content,
     position_in_range,
     regulatory_context,
+    regulatory_snapshot,
     resolve_rules,
 )
 from regulatory.schemas import JurisdictionProfile, RegulatoryRule, RegulatorySource
@@ -218,6 +220,21 @@ def test_benchmarking_method_defaults_when_no_jurisdiction_rule():
     m = benchmarking_method("Qatar", "2024")   # no benchmarking rule seeded → documented methodology default
     assert m["method"] == "interquartile_range" and m["quartile_method"] == "inclusive"
     assert m["verification_status"] == "methodology_default" and m["source"] is None
+
+
+# ── Regulatory snapshot + deterministic Local Regulations content (S6) ──
+def test_regulatory_snapshot_pins_resolved_rule_versions():
+    snap = regulatory_snapshot("Qatar", "2024")
+    assert snap["jurisdiction"] == "Qatar" and snap["code"] == "QA" and snap["fiscal_year"] == "2024"
+    keys = {r["rule_key"] for r in snap["rules"]}
+    assert {"local_file_required", "master_file_required", "transaction_category_materiality"} <= keys
+    assert all("version" in r and "verification_status" in r for r in snap["rules"])
+
+
+def test_local_regulations_content_restates_rules_with_sources():
+    md = local_regulations_content("Qatar", "2024")
+    assert md and "Local File" in md and "200,000" in md and "Resolution" in md
+    assert local_regulations_content("Netherlands", "2024") is None   # no registry rules → no section
 
 
 def test_validate_profile_flags_bad_data():

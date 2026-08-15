@@ -208,6 +208,35 @@ async def test_industry_analysis_section_is_injected_non_gating_with_research(cl
     assert "Industry Analysis" in doc_xml
 
 
+async def test_local_regulations_section_is_deterministic_and_snapshots(client):
+    # Qatar has registry rules → a deterministic Local Regulations section leads the draft, and a snapshot is pinned.
+    from sqlalchemy import select
+
+    from app.models import EngagementRegulatorySnapshot
+
+    eid = await _engagement_ready_for_draft(client, "Qatar", b"The entity is a limited-risk distributor.")
+    await client.post(f"/engagements/{eid}/draft", params={"jurisdiction": "Qatar"})
+    got = (await client.get(f"/engagements/{eid}/draft", params={"jurisdiction": "Qatar"})).json()
+    assert got["summary"]["pending"] == 0 and got["summary"]["failed"] == 0
+
+    reg = next(s for s in got["sections"] if s["element_name"] == "Local Regulations")
+    assert reg["status"] == "drafted" and reg["content"]
+    # Deterministic content from the registry — restates the rules + cites their sources, no LLM.
+    assert "Local File" in reg["content"] and "200,000" in reg["content"] and "Resolution" in reg["content"]
+    # It leads the document.
+    ordered = sorted(got["sections"], key=lambda s: s["element_order"])
+    assert ordered[0]["element_name"] == "Local Regulations"
+
+    # The shared regulatory snapshot is pinned for the engagement (Requirements/Draft/Risks read the same one).
+    async with app.state.session_factory() as session:
+        snap = (await session.execute(select(EngagementRegulatorySnapshot).where(
+            EngagementRegulatorySnapshot.engagement_id == uuid.UUID(eid),
+            EngagementRegulatorySnapshot.jurisdiction == "Qatar",
+        ))).scalar_one()
+    keys = {r["rule_key"] for r in snap.snapshot["rules"]}
+    assert {"local_file_required", "master_file_required", "transaction_category_materiality"} <= keys
+
+
 async def test_unknown_jurisdiction_404(client):
     eid = (await client.post("/engagements")).json()["id"]
     r = await client.post(f"/engagements/{eid}/draft", params={"jurisdiction": "Narnia"})
