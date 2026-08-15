@@ -1,0 +1,70 @@
+{
+  "jurisdiction": "QA",
+  "name": "Qatar",
+  "status": "active",
+  "sources": [
+    {
+      "source_id": "qa_resolution_4_2020",
+      "title": "General Tax Authority Resolution No. 4 of 2020 (Transfer Pricing)",
+      "issuing_authority": "General Tax Authority (GTA)",
+      "source_type": "regulation",
+      "jurisdiction": "QA",
+      "publication_date": "2020-01-01",
+      "effective_date": "2020-01-01",
+      "url": "https://gta.gov.qa/assets/pdf/Resolution%20of%20President%20of%20General%20Tax%20Authority%20No.%20%284%29%20of%202020.pdf",
+      "citation_locator": "Arts. 2-3",
+      "language": "en",
+      "status": "active"
+    },
+    {
+      "source_id": "qa_income_tax_law_24_2018",
+      "title": "Income Tax Law No. 24 of 2018 and its Executive Regulations",
+      "issuing_authority": "State of Qatar",
+      "source_type": "statute",
+      "jurisdiction": "QA",
+      "publication_date": "2018-12-13",
+      "effective_date": "2019-01-01",
+      "url": "https://gta.gov.qa/assets/pdf/Income%20Tax%20Law%20EN%202024.pdf",
+      "language": "en",
+      "status": "active"
+    }
+  ],
+  "rules": [
+    {
+      "rule_key": "local_file_required",
+      "rule_category": "applicability",
+      "rule_type": "documentation_applicability",
+      "version": 1,
+      "effective_from": "2020-01-01",
+      "effective_to": null,
+      "conditions": {
+        "all": [
+          { "field": "annual_turnover_or_assets", "operator": ">=", "value": 50000000, "currency": "QAR" },
+          { "field": "has_foreign_associated_enterprise", "operator": "=", "value": true }
+        ]
+      },
+      "result": true,
+      "plain_english": "A Local File is required when annual turnover or total assets are at least QAR 50 million and the group includes a foreign associated enterprise.",
+      "source_ids": ["qa_resolution_4_2020", "qa_income_tax_law_24_2018"],
+      "verification_status": "verified"
+    },
+    {
+      "rule_key": "master_file_required",
+      "rule_category": "applicability",
+      "rule_type": "documentation_applicability",
+      "version": 1,
+      "effective_from": "2020-01-01",
+      "effective_to": null,
+      "conditions": {
+        "all": [
+          { "field": "annual_turnover_or_assets", "operator": ">=", "value": 50000000, "currency": "QAR" },
+          { "field": "has_foreign_associated_enterprise", "operator": "=", "value": true }
+        ]
+      },
+      "result": true,
+      "plain_english": "A Master File is required on the same QAR 50 million turnover-or-assets test where the group includes a foreign associated enterprise.",
+      "source_ids": ["qa_resolution_4_2020"],
+      "verification_status": "verified"
+    }
+  ]
+}
