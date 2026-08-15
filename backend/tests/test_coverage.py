@@ -209,6 +209,30 @@ async def test_coverage_response_carries_registry_regulatory_context(client):
     assert got_nl["regulatory"] == []
 
 
+async def test_regulatory_override_is_audited_and_applied(client):
+    # A practitioner overrides Qatar's local_file_required; the original is captured and the marker/reason surface.
+    eid = (await client.post("/engagements")).json()["id"]
+    r = await client.post(f"/engagements/{eid}/regulatory-overrides", json={
+        "jurisdiction": "Qatar", "rule_key": "local_file_required",
+        "override_value": {"status": "applied", "result": True},
+        "reason": "Client confirmed a foreign associated enterprise.",
+    })
+    assert r.status_code == 201
+    body = r.json()
+    assert body["overridden_by"] is not None and body["reason"].startswith("Client confirmed")
+    assert body["original_value"]  # pre-override values captured for the audit trail
+
+    got = (await client.get(f"/engagements/{eid}/coverage", params={"jurisdiction": "Qatar"})).json()
+    lf = next(c for c in got["regulatory"] if c["rule_key"] == "local_file_required")
+    assert lf["overridden"] is True and lf["result"] is True and lf["status"] == "applied"
+    assert "confirmed" in lf["override_reason"].lower()
+
+    # Cannot override a rule that doesn't exist.
+    bad = await client.post(f"/engagements/{eid}/regulatory-overrides", json={
+        "jurisdiction": "Qatar", "rule_key": "nonexistent", "override_value": {"result": True}, "reason": "x"})
+    assert bad.status_code == 404
+
+
 def test_system_prompt_refuses_correctness():
     p = SYSTEM_PROMPT.lower()
     assert "must not" in p and "arm's-length" in p and "sufficiency" in p

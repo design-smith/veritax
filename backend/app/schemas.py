@@ -185,6 +185,27 @@ class RegulatoryContextRead(BaseModel):
     effective_to: str | None = None
     verification_status: str
     sources: list[RegulatorySourceRead] = []
+    overridden: bool = False          # a practitioner override is in force (S8)
+    override_reason: str | None = None
+
+
+class RegulatoryOverrideCreate(BaseModel):
+    jurisdiction: str
+    rule_key: str
+    override_value: dict               # fields overlaid onto the resolved rule, e.g. {"result": true}
+    reason: str
+
+
+class RegulatoryOverrideRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: uuid.UUID
+    jurisdiction: str
+    rule_key: str
+    original_value: dict
+    override_value: dict
+    reason: str
+    overridden_by: str | None
+    created_at: datetime
 
 
 class CoverageResponse(BaseModel):

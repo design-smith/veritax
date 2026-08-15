@@ -954,6 +954,29 @@ class EngagementRegulatorySnapshot(Base):
     captured_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
+class RegulatoryOverride(Base):
+    """A practitioner override of a resolved regulatory rule (PRD Class 1 §S8). The original value is preserved
+    and the change is audited (reason, user, timestamp); overlaid on the resolved rules with a 'Practitioner
+    override' marker so the source of truth stays auditable."""
+
+    __tablename__ = "regulatory_overrides"
+    __table_args__ = (
+        UniqueConstraint("engagement_id", "jurisdiction", "rule_key", name="uq_regulatory_override"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
+    engagement_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("engagements.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    jurisdiction: Mapped[str] = mapped_column(Text, nullable=False)
+    rule_key: Mapped[str] = mapped_column(Text, nullable=False)
+    original_value: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict)  # audit: value before override
+    override_value: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict)  # fields overlaid onto the rule
+    reason: Mapped[str] = mapped_column(Text, nullable=False)
+    overridden_by: Mapped[str | None] = mapped_column(Text, nullable=True)  # auth user (sub / email)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
 # Seed data for the connector registry (all available, none wired yet).
 CONNECTOR_SEED: list[dict] = [
     {"provider": "sap", "display_name": "SAP", "category": ConnectorCategory.accounting},

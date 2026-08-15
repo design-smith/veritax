@@ -220,6 +220,8 @@ export interface RegulatoryContext {
   effective_to: string | null
   verification_status: string
   sources: RegulatorySourceRef[]
+  overridden: boolean
+  override_reason: string | null
 }
 
 export type DraftStatusValue = "pending" | "drafting" | "drafted" | "failed"

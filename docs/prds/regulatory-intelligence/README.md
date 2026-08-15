@@ -27,7 +27,7 @@ principle: deterministic versioned rules decide; the LLM only summarizes/generat
 | S5 | Jurisdiction-specific benchmarking rules + statistical config | AFK | S1 | ✅ DONE |
 | S6 | Draft: Local Regulations section + regulatory snapshot | AFK | S1 (richer w/ S2,S3,S5) | ✅ DONE |
 | S7 | Risks: deterministic regulatory findings | AFK | S3, S5 | ✅ DONE |
-| S8 | Practitioner overrides + audit trail | AFK | S2 | ▶ NEXT |
+| S8 | Practitioner overrides + audit trail | AFK | S2 | ✅ DONE |
 
 **DAG:** S1 → {S2, S3, S4, S5} → S6, S7 (after S3/S5), S8 (after S2).
 **Non-goals honoured (§42):** no regulatory CMS, no standalone regs page, no research-agent auto-approval, no
@@ -130,6 +130,59 @@ task; they are kept OUT of every regulatory commit (staged files are explicit).
     271 passed** (266 + 5). Acceptance (Risks, §44): deterministic findings, each naming its rule ✓ · missing
     mandatory transaction / methodology mismatch / stale benchmark / filing-timing covered ✓ · no fabricated
     findings (unknown/absent inputs → no finding) ✓.
+
+- [ ] **S8 — Practitioner overrides + audit trail** — BUILT, full-suite gate running.
+  - New table **`regulatory_overrides`** (`models.py`): `original_value` + `override_value` + `reason` +
+    `overridden_by` + `created_at`, unique per (engagement, jurisdiction, rule_key). `backend/regulatory/
+    overrides.py::apply_overrides` overlays `override_value` onto the resolved rule context, marks it
+    `overridden` with the reason, and **preserves the pre-override values in `original`** — the registry itself
+    is never mutated. `POST /engagements/{id}/regulatory-overrides` (coverage.py) captures the original from the
+    current resolved context + records the user, then `_response` applies overrides to the Requirements context.
+    Frontend: a "Practitioner override" marker + reason in the drawer (`requirements.tsx`, `lib/api.ts`).
+  - **⚠ Prod migration required** (conftest `create_all` covers tests, NOT prod):
+    ```sql
+    CREATE TABLE regulatory_overrides (
+        id UUID PRIMARY KEY,
+        engagement_id UUID NOT NULL REFERENCES engagements(id) ON DELETE CASCADE,
+        jurisdiction TEXT NOT NULL,
+        rule_key TEXT NOT NULL,
+        original_value JSONB NOT NULL DEFAULT '{}'::jsonb,
+        override_value JSONB NOT NULL DEFAULT '{}'::jsonb,
+        reason TEXT NOT NULL,
+        overridden_by TEXT,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+        CONSTRAINT uq_regulatory_override UNIQUE (engagement_id, jurisdiction, rule_key)
+    );
+    CREATE INDEX ix_regulatory_overrides_engagement_id ON regulatory_overrides (engagement_id);
+    ```
+  - **Verification:** `test_regulatory.py` + `test_coverage.py` **42 passed** (apply_overrides overlays +
+    preserves original; POST override audited with the captured original + user, applied to the coverage
+    response with marker/reason; unknown rule → 404). `tsc` + `pnpm build` clean. **Full backend suite 273
+    passed** (271 + 2). Acceptance (Overrides, §44): practitioner can override a resolved rule ✓ · original
+    preserved + reason/user/timestamp audited ✓ · "Practitioner override" marker surfaced ✓ · registry never
+    mutated ✓.
+
+---
+
+## ✅ ALL 8 SLICES COMPLETE
+
+Class 1 — Regulatory Intelligence is delivered as a deterministic, versioned rule engine threaded under the
+existing Planning → Requirements → Draft → Risks workflow. Commits: S1 `33a458e` · S2 `7e0f6ee`/`b4dec19` ·
+S3 `f4af8f9` · S4 `d2833fe` · S5 `4d8945c` · S6 `54b4f4b` · S7 `7fcb6b8` · S8 (this commit). Full backend suite
+**273 passed**.
+
+### ⚠ Prod migrations required before deploy (conftest `create_all` covers tests only)
+1. `ALTER TABLE draft_sections ADD COLUMN research JSONB;` (from the earlier Industry-Analysis work)
+2. `CREATE TABLE engagement_regulatory_snapshots ...` (S6 — DDL above)
+3. `CREATE TABLE regulatory_overrides ...` (S8 — DDL above)
+
+### Honest limitations (no fabrication)
+- No structured controlled-transaction or comparable-set data models exist yet → the S3 transaction-scope, S5
+  benchmarking, and S7 transaction/benchmark findings are engine-tested but await live inputs (they surface
+  `unknown`/nothing until fed). S7 filing-timing IS live from the engagement fiscal year.
+- Fiscal-year tolerance (S4) and the benchmarking method (S5) are documented **Veritax methodology defaults**,
+  not statutory claims; a jurisdiction can override via a registry rule when verified.
+- Jurisdiction rule **content beyond Qatar** is HITL content-ops work (the engine is jurisdiction-agnostic).
   - `backend/regulatory/scope.py`: `evaluate_transaction_scope(transactions, country, fiscal_year)` — reuses the
     S1 condition engine per controlled-transaction CATEGORY. Aggregates by category (absolute-sums so
     income/expense and acquisition/disposal are NOT netted, per the GTA rule), decides

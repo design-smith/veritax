@@ -678,9 +678,17 @@ export default function RequirementsStep({ engagementId, jurisdictions, onContin
                       <summary style={{ cursor: "pointer", display: "flex", alignItems: "center", gap: "0.5rem", color: "var(--color-text)", listStyle: "none" }}>
                         <span style={{ fontWeight: "var(--font-weight-medium)" }}>{ruleLabel(rc.rule_key)}</span>
                         <span style={{ padding: "0.0625rem 0.4rem", borderRadius: "9999px", fontSize: "var(--font-text-xs-size)", background: d.bg, color: d.text }}>{d.label}</span>
+                        {rc.overridden && (
+                          <span style={{ padding: "0.0625rem 0.4rem", borderRadius: "9999px", fontSize: "var(--font-text-xs-size)", background: "var(--color-background-info-soft)", color: "var(--color-text-info-soft)" }}>Practitioner override</span>
+                        )}
                       </summary>
                       <div style={{ padding: "0.5rem 0 0.25rem", color: "var(--color-text-secondary)", display: "flex", flexDirection: "column", gap: "0.25rem" }}>
                         <p style={{ margin: 0 }}>{rc.plain_english}</p>
+                        {rc.overridden && rc.override_reason && (
+                          <p style={{ margin: 0, fontSize: "var(--font-text-xs-size)", color: "var(--color-text-info-soft)" }}>
+                            Practitioner override: {rc.override_reason}
+                          </p>
+                        )}
                         {rc.status === "unknown" && rc.missing_input && (
                           <p style={{ margin: 0, fontSize: "var(--font-text-xs-size)", color: "var(--color-text-tertiary)" }}>
                             Applicability unknown — needs {humanizeField(rc.missing_input)}.

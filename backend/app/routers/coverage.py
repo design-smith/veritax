@@ -69,15 +69,24 @@ from ..models import (
     EngagementJurisdiction,
     Entity,
     PipelineJobKind,
+    RegulatoryOverride,
     RequirementCoverage,
     Source,
     SourceKind,
     SourceOrigin,
     SupplementKind,
 )
-from regulatory import regulatory_context
+from regulatory import apply_overrides, regulatory_context
 from ..requirements import available_jurisdictions, resolve_requirements
-from ..schemas import CoverageEvidenceRead, CoverageRead, CoverageResponse, CoverageSummary, SkippedDocumentRead
+from ..schemas import (
+    CoverageEvidenceRead,
+    CoverageRead,
+    CoverageResponse,
+    CoverageSummary,
+    RegulatoryOverrideCreate,
+    RegulatoryOverrideRead,
+    SkippedDocumentRead,
+)
 from ..storage import Storage
 
 router = APIRouter(tags=["coverage"])
@@ -242,17 +251,30 @@ async def _invalidate_drafts_for_element(session: AsyncSession, row: Requirement
     return sorted({section.jurisdiction for section in sections})
 
 
+async def _regulatory_overrides(session: AsyncSession, engagement_id: uuid.UUID, jurisdiction: str) -> list[dict]:
+    rows = (
+        await session.execute(
+            select(RegulatoryOverride).where(
+                RegulatoryOverride.engagement_id == engagement_id,
+                RegulatoryOverride.jurisdiction == jurisdiction,
+            )
+        )
+    ).scalars().all()
+    return [{"rule_key": r.rule_key, "override_value": r.override_value, "reason": r.reason} for r in rows]
+
+
 async def _response(session: AsyncSession, engagement_id: uuid.UUID, jurisdiction: str) -> CoverageResponse:
     rows = await _load_rows(session, engagement_id, jurisdiction)
     doc_kind = await _doc_kind(session, engagement_id)
     section_by_key = await _draft_section_by_key(session, engagement_id, jurisdiction)
     _entity, _jurisdictions, fiscal_year = await _engagement_scope(session, engagement_id)
+    overrides = await _regulatory_overrides(session, engagement_id, jurisdiction)
     return CoverageResponse(
         jurisdiction=jurisdiction,
         summary=_summary(rows),
         requirements=[_to_read(r, doc_kind, section_by_key) for r in rows],
         skipped_documents=await _skipped_documents(session, engagement_id),
-        regulatory=regulatory_context(jurisdiction, fiscal_year),
+        regulatory=apply_overrides(regulatory_context(jurisdiction, fiscal_year), overrides),
     )
 
 
@@ -807,6 +829,44 @@ async def get_coverage(
     _owner: Engagement = Depends(require_engagement_owner),
 ) -> CoverageResponse:
     return await _response(session, engagement_id, jurisdiction)
+
+
+@router.post("/engagements/{engagement_id}/regulatory-overrides", response_model=RegulatoryOverrideRead, status_code=201)
+async def create_regulatory_override(
+    engagement_id: uuid.UUID,
+    body: RegulatoryOverrideCreate,
+    session: AsyncSession = Depends(get_session),
+    user: AuthUser = Depends(get_current_user),
+    _owner: Engagement = Depends(require_engagement_owner),
+) -> RegulatoryOverrideRead:
+    """Record a practitioner override of a resolved regulatory rule — preserving the original value and auditing
+    the reason/user/timestamp (PRD §S8). Overlaid on the resolved rules; the registry itself is never mutated."""
+    _entity, _jurisdictions, fiscal_year = await _engagement_scope(session, engagement_id)
+    ctx = {c["rule_key"]: c for c in regulatory_context(body.jurisdiction, fiscal_year)}
+    if body.rule_key not in ctx:
+        raise HTTPException(status_code=404, detail=f"no regulatory rule '{body.rule_key}' for {body.jurisdiction}")
+    original = {k: ctx[body.rule_key].get(k) for k in body.override_value}   # audit: values before the override
+    who = (user.email or str(user.id)) if user else None
+    stmt = pg_insert(RegulatoryOverride).values(
+        engagement_id=engagement_id, jurisdiction=body.jurisdiction, rule_key=body.rule_key,
+        original_value=original, override_value=body.override_value, reason=body.reason, overridden_by=who,
+    ).on_conflict_do_update(
+        index_elements=["engagement_id", "jurisdiction", "rule_key"],
+        set_={"original_value": original, "override_value": body.override_value, "reason": body.reason,
+              "overridden_by": who, "created_at": datetime.now(timezone.utc)},
+    )
+    await session.execute(stmt)
+    await session.commit()
+    row = (
+        await session.execute(
+            select(RegulatoryOverride).where(
+                RegulatoryOverride.engagement_id == engagement_id,
+                RegulatoryOverride.jurisdiction == body.jurisdiction,
+                RegulatoryOverride.rule_key == body.rule_key,
+            )
+        )
+    ).scalar_one()
+    return RegulatoryOverrideRead.model_validate(row)
 
 
 @router.post("/coverage/{coverage_id}/supplements", response_model=CoverageRead, status_code=201)

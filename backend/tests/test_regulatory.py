@@ -7,6 +7,7 @@ import regulatory.resolver as _resolver
 
 from regulatory import (
     MissingInput,
+    apply_overrides,
     applicable_version,
     benchmarking_method,
     compute_arm_length_range,
@@ -235,6 +236,23 @@ def test_local_regulations_content_restates_rules_with_sources():
     md = local_regulations_content("Qatar", "2024")
     assert md and "Local File" in md and "200,000" in md and "Resolution" in md
     assert local_regulations_content("Netherlands", "2024") is None   # no registry rules → no section
+
+
+# ── Practitioner overrides (S8): overlay + audit, original never lost ──
+def test_apply_overrides_overlays_and_preserves_original():
+    ctx = [
+        {"rule_key": "local_file_required", "status": "unknown", "result": None},
+        {"rule_key": "master_file_required", "status": "unknown", "result": None},
+    ]
+    overrides = [{"rule_key": "local_file_required", "override_value": {"status": "applied", "result": True},
+                  "reason": "Confirmed by the controller."}]
+    out = apply_overrides(ctx, overrides)
+    lf = next(c for c in out if c["rule_key"] == "local_file_required")
+    assert lf["overridden"] is True and lf["status"] == "applied" and lf["result"] is True
+    assert lf["override_reason"] == "Confirmed by the controller."
+    assert lf["original"] == {"status": "unknown", "result": None}      # original preserved for audit
+    mf = next(c for c in out if c["rule_key"] == "master_file_required")
+    assert mf["overridden"] is False and mf["original"] is None
 
 
 def test_validate_profile_flags_bad_data():

@@ -7,6 +7,7 @@ pure condition engine. Missing input yields `unknown`, never a guess (PRD §36).
 
 from .benchmarking import benchmarking_method, compute_arm_length_range, position_in_range
 from .engine import MissingInput, evaluate
+from .overrides import apply_overrides
 from .period import evaluate_period_compatibility
 from .resolver import (
     RuleResult,
@@ -26,5 +27,6 @@ __all__ = [
     "evaluate_period_compatibility",
     "benchmarking_method", "compute_arm_length_range", "position_in_range",
     "local_regulations_content", "regulatory_snapshot",
+    "apply_overrides",
     "JurisdictionProfile", "RegulatoryRule", "RegulatorySource",
 ]
