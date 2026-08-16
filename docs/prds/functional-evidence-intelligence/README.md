@@ -17,6 +17,14 @@ those are evidence-backed + rule-driven (§45).
 - **Characterization = deterministic rules + `undetermined`.** A controlled rule maps the FAR profile →
   a characterization value, or returns `undetermined` when evidence is insufficient. No LLM conclusion (§2,§45).
 - **Granularity:** 13 slices as approved.
+- **S5 interview-fact provenance (resolved with the user):** the fact pipeline is document-centric
+  (`ExtractedFact`/`extraction_runs`/`FactSource.document_id` NOT NULL), but guided-interview responses have no
+  document. Decision = **nullable `document_id` + interview-response link**: make those `document_id`s nullable,
+  add `interview_response_id` provenance to `ExtractedFact` + `FactSource`, and teach canonicalization's
+  provenance/validity checks to accept EITHER a document OR an interview response. Keeps ONE evidence model
+  (honours S2/§4) and preserves the §19 interview→response chain. Additive + behaviour-preserving for existing
+  document facts; full backend suite (+ golden) is the gate. Uploaded transcripts stay on the normal document
+  path (they have a real document).
 - **Placement:** Class 2 domain code under `backend/app/functional/` (inside the already-copied `app` package)
   → deploys automatically (no Dockerfile `COPY` needed; avoids the Class 1 top-level-package deploy bug).
 
