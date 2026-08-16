@@ -39,8 +39,8 @@ those are evidence-backed + rule-driven (§45).
 | S5 | Interview extraction — responses → validated functional facts (§46 gate) → canonicalization | AFK | S2, S3 | ✅ DONE (response path; transcript-file + LLM extractor = noted follow-ons) |
 | S6 | TP questionnaire integration — import responses → same functional evidence model (not a silo) | AFK | S1, S2 | ✅ DONE |
 | S7 | Org-chart intelligence — key roles + reporting lines as scoped evidence; supports but never proves control | AFK | S2 | ✅ DONE |
-| S8 | Invoice evidence — basic transaction-existence facts, properly scoped; cannot establish FAR | AFK | S2 | ▶ NEXT |
-| S9 | FAR builder — aggregate facts → per entity/txn FAR profile + deterministic characterization (undetermined allowed) + evidence-strength hierarchy | AFK | S1, S2, S5 | pending |
+| S8 | Invoice evidence — basic transaction-existence facts, properly scoped; cannot establish FAR | AFK | S2 | ✅ DONE |
+| S9 | FAR builder — aggregate facts → per entity/txn FAR profile + deterministic characterization (undetermined allowed) + evidence-strength hierarchy | AFK | S1, S2, S5 | ▶ NEXT |
 | S10 | Risk control & capability — risk_control_profiles (bearer/exposure/decision/control/capability/financial capacity), evidence-linked, mismatches preserved + risk table | AFK | S1, S2, S9 | pending |
 | S11 | Requirements integration — evaluate FAR concept sufficiency (partial when risk-control unknown); gap-driven interview recommendation | AFK | S9, S10 | pending |
 | S12 | Draft integration — FAR sections from structured evidence, traceable (DraftSection pattern) | AFK | S9, S10 | pending |
@@ -177,3 +177,15 @@ of every Class 2 commit (staged files are explicit). `.claude/settings.json` and
     §60): key roles + reporting relationships preserved ✓ · scoped ✓ · does not independently prove risk control ✓.
   - **Follow-on (honest):** extracting roles from an uploaded org-chart FILE reuses this table but needs the
     document-extraction dispatch (same gap as the S5 transcript-file); structured ingest is the v1 path.
+
+- [ ] **S8 — Invoice evidence** — BUILT, full-suite gate running.
+  - Registered an `invoice` extraction schema (issuer/recipient [counterparty] + amount/number/date/description
+    [transaction]). `app/invoice_evidence.py::ingest_invoice` creates document-sourced ExtractedFacts with **no
+    far_type** (so they are NOT functional facts and cannot establish FAR/risk-control/pricing, §26); scoped
+    counterparty/transaction; canonicalized. `POST /engagements/{id}/invoices` (routers/invoices.py).
+  - **Verification:** `test_invoice_evidence.py` **1 passed** (issuer/recipient/amount facts, document-sourced,
+    scoped; far_type all None; none in FUNCTIONAL_FACT_TYPES; still canonicalize). **Full backend suite 294
+    passed** (293 + 1). Acceptance (Invoices, §60): basic transaction facts extracted ✓ · properly scoped ✓ ·
+    cannot independently establish FAR ✓.
+  - Follow-on (honest): extraction from an uploaded invoice FILE reuses `ingest_invoice` once the doc dispatch is
+    wired; structured ingest is the v1 path.

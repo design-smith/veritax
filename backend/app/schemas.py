@@ -519,3 +519,20 @@ class OrgRoleRead(BaseModel):
 
 class OrgChartResponse(BaseModel):
     roles: list[OrgRoleRead]
+
+
+# Invoice evidence (Class 2 §26) — transaction-existence facts; cannot establish FAR.
+class InvoiceRecord(BaseModel):
+    document_id: uuid.UUID   # the uploaded invoice document (provenance)
+    issuer: str | None = None
+    recipient: str | None = None
+    amount: float | None = None
+    currency: str | None = None
+    date: str | None = None
+    number: str | None = None
+    description: str | None = None
+    agreement_ref: str | None = None
+
+
+class InvoiceIngest(BaseModel):
+    invoices: list[InvoiceRecord]

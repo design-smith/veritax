@@ -532,6 +532,72 @@
           ]
         }
       ]
+    },
+    {
+      "schema_key": "invoice",
+      "schema_version": "2026-08-16",
+      "supported_document_types": [
+        "Invoice"
+      ],
+      "candidate_entity_roles": [
+        "issuer",
+        "recipient"
+      ],
+      "provenance_required": [
+        "document_id",
+        "quote",
+        "locator"
+      ],
+      "fact_types": [
+        {
+          "fact_type": "invoice_issuer",
+          "value_type": "text",
+          "required": false,
+          "allowed_scope_levels": [
+            "counterparty"
+          ]
+        },
+        {
+          "fact_type": "invoice_recipient",
+          "value_type": "text",
+          "required": false,
+          "allowed_scope_levels": [
+            "counterparty"
+          ]
+        },
+        {
+          "fact_type": "invoice_amount",
+          "value_type": "number",
+          "required": false,
+          "allowed_scope_levels": [
+            "transaction"
+          ]
+        },
+        {
+          "fact_type": "invoice_number",
+          "value_type": "text",
+          "required": false,
+          "allowed_scope_levels": [
+            "transaction"
+          ]
+        },
+        {
+          "fact_type": "invoice_date",
+          "value_type": "text",
+          "required": false,
+          "allowed_scope_levels": [
+            "transaction"
+          ]
+        },
+        {
+          "fact_type": "invoice_description",
+          "value_type": "text",
+          "required": false,
+          "allowed_scope_levels": [
+            "transaction"
+          ]
+        }
+      ]
     }
   ]
 }
