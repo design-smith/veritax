@@ -3,7 +3,7 @@
 import { createContext, useContext, useEffect, useRef, useState, type CSSProperties, type ReactNode } from "react"
 import { Check, ChevronDown, Globe, Upload, X } from "lucide-react"
 import { cn } from "@/lib/utils"
-import { api, type DocumentRead } from "@/lib/api"
+import { api, type DocumentRead, type Interview, type InterviewFindings, type InterviewListItem } from "@/lib/api"
 import { evidenceFilterUsed, scopeFilterValue } from "@/lib/analytics"
 import { ActionModal } from "@/components/ui/action-modal"
 import {
@@ -644,12 +644,157 @@ function WebsiteInput() {
   )
 }
 
-function InterviewInput() {
+// ─── Guided functional interviews (Class 2 §13-19, §35, §37) ─────────────────────
+const INTERVIEW_ROLES = ["finance", "treasury", "sales", "operations", "rnd", "management", "legal", "hr", "it"]
+const TRANSACTION_TYPES = ["services", "distribution", "manufacturing", "licensing", "financing"]
+const _emptyForm = { participant_name: "", participant_title: "", participant_role: "finance", transaction_types: [] as string[], fiscal_period: "" }
+
+function GuidedInterviews() {
+  const { engagementId } = useContext(PlanningCtx)
+  const [interviews, setInterviews] = useState<InterviewListItem[]>([])
+  const [active, setActive] = useState<Interview | null>(null)
+  const [findings, setFindings] = useState<InterviewFindings | null>(null)
+  const [creating, setCreating] = useState(false)
+  const [form, setForm] = useState(_emptyForm)
+  const [drafts, setDrafts] = useState<Record<string, string>>({})
+  const [busy, setBusy] = useState(false)
+
+  async function refresh() {
+    if (!engagementId) return
+    try { setInterviews(await api.listInterviews(engagementId)) } catch { setInterviews([]) }
+  }
+  useEffect(() => { void refresh() /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [engagementId])
+
+  async function openInterview(id: string) {
+    setBusy(true)
+    try { setActive(await api.getInterview(id)); setFindings(null) } catch { /* leave list */ } finally { setBusy(false) }
+  }
+  async function create() {
+    if (!engagementId || !form.participant_name.trim()) return
+    setBusy(true)
+    try {
+      const iv = await api.createInterview(engagementId, form)
+      setActive(iv); setFindings(null); setCreating(false); setForm(_emptyForm); void refresh()
+    } catch { /* surfaced by the network layer */ } finally { setBusy(false) }
+  }
+  async function saveAnswer(questionId: string) {
+    if (!active) return
+    const text = (drafts[questionId] || "").trim()
+    if (!text) return
+    setBusy(true)
+    try {
+      await api.addInterviewResponse(active.id, { question_id: questionId, response_raw: text })
+      setActive(await api.getInterview(active.id))
+      setDrafts(d => ({ ...d, [questionId]: "" })); void refresh()
+    } catch { /* surfaced by the network layer */ } finally { setBusy(false) }
+  }
+
+  const card: CSSProperties = { border: "1px solid var(--color-border)", borderRadius: "var(--radius-md)", background: "var(--color-background-secondary)", padding: "0.75rem 0.875rem" }
+  const chip = (text: string, tone: "muted" | "ok" = "muted"): CSSProperties => ({
+    padding: "0.0625rem 0.4rem", borderRadius: "9999px", fontSize: "var(--font-text-xs-size)",
+    background: tone === "ok" ? "var(--color-background-success-soft)" : "var(--alpha-06)",
+    color: tone === "ok" ? "var(--color-text-success-soft)" : "var(--color-text-tertiary)",
+  })
+
+  // ── Interview screen ──
+  if (active) {
+    return (
+      <div style={{ paddingLeft: "2rem", display: "flex", flexDirection: "column", gap: "0.75rem" }}>
+        <div style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
+          <button type="button" onClick={() => { setActive(null); setFindings(null) }} style={{ border: "none", background: "transparent", color: "var(--color-text-link, var(--color-text-info-soft))", cursor: "pointer", fontSize: "var(--font-text-sm-size)" }}>← Interviews</button>
+          <span style={{ fontWeight: "var(--font-weight-medium)", color: "var(--color-text)" }}>{active.participant_name}</span>
+          {active.participant_role && <span style={chip(active.participant_role)}>{active.participant_role}</span>}
+          <span style={chip(active.status.replace(/_/g, " "), active.status.startsWith("completed") ? "ok" : "muted")}>{active.status.replace(/_/g, " ")}</span>
+        </div>
+        {active.questions.map(q => {
+          const answered = q.responses[0]
+          return (
+            <div key={q.id} style={card}>
+              <p style={{ margin: "0 0 0.375rem", fontSize: "var(--font-text-sm-size)", color: "var(--color-text)" }}>
+                {q.parent_question_id && <span style={{ color: "var(--color-text-tertiary)" }}>↳ </span>}{q.question_text}
+              </p>
+              {answered ? (
+                <p style={{ margin: 0, fontSize: "var(--font-text-sm-size)", color: "var(--color-text-secondary)", whiteSpace: "pre-wrap" }}>{answered.response_raw}</p>
+              ) : (
+                <div style={{ display: "flex", gap: "0.5rem", alignItems: "flex-start" }}>
+                  <textarea value={drafts[q.id] || ""} onChange={e => setDrafts(d => ({ ...d, [q.id]: e.target.value }))}
+                    placeholder="Record the answer…" rows={2}
+                    style={{ flex: 1, resize: "vertical", padding: "0.5rem", borderRadius: "var(--radius-md)", border: "1px solid var(--color-border)", background: "var(--color-surface)", color: "var(--color-text)", fontSize: "var(--font-text-sm-size)", fontFamily: "inherit" }} />
+                  <button type="button" onClick={() => saveAnswer(q.id)} disabled={busy || !(drafts[q.id] || "").trim()}
+                    style={{ padding: "0 var(--control-gutter-md)", height: "var(--control-size-md)", borderRadius: "var(--control-radius-md)", border: "none", background: "var(--color-background-primary-solid)", color: "var(--color-text-inverse)", cursor: "pointer", fontSize: "var(--control-font-size-md)" }}>Save</button>
+                </div>
+              )}
+            </div>
+          )
+        })}
+        <div>
+          <button type="button" onClick={async () => setFindings(await api.getInterviewFindings(active.id).catch(() => null))}
+            style={{ border: "1px solid var(--color-border)", background: "transparent", color: "var(--color-text-secondary)", borderRadius: "var(--control-radius-md)", padding: "0.25rem 0.75rem", cursor: "pointer", fontSize: "var(--font-text-sm-size)" }}>Show findings</button>
+        </div>
+        {findings && (
+          <div style={card}>
+            {([["Functions", findings.functions], ["Risks", findings.risks], ["Decision makers", findings.decision_makers], ["Open questions", findings.open_questions]] as const).map(([label, items]) => (
+              <div key={label} style={{ marginBottom: "0.5rem" }}>
+                <p style={{ margin: "0 0 0.25rem", fontSize: "var(--font-text-xs-size)", textTransform: "uppercase", letterSpacing: "0.04em", color: "var(--color-text-tertiary)" }}>{label} ({items.length})</p>
+                {items.map((t, i) => <p key={i} style={{ margin: 0, fontSize: "var(--font-text-sm-size)", color: "var(--color-text-secondary)" }}>• {t}</p>)}
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    )
+  }
+
+  // ── List + create ──
   return (
     <div style={{ paddingLeft: "2rem", display: "flex", flexDirection: "column", gap: "0.75rem" }}>
-      <UploadZone kind="interview" accept=".txt,.pdf,.docx,.vtt,.srt" hint="TXT, PDF, Word, VTT, SRT · up to 50 MB each" connectors={NOTETAKER_CONNECTORS} />
+      {interviews.length > 0 && (
+        <div style={{ display: "flex", flexDirection: "column", gap: "0.375rem" }}>
+          {interviews.map(i => (
+            <button key={i.id} type="button" onClick={() => openInterview(i.id)} style={{ ...card, textAlign: "left", cursor: "pointer", display: "flex", alignItems: "center", gap: "0.5rem" }}>
+              <span style={{ fontWeight: "var(--font-weight-medium)", color: "var(--color-text)" }}>{i.participant_name}</span>
+              {i.participant_role && <span style={chip(i.participant_role)}>{i.participant_role}</span>}
+              <span style={{ marginLeft: "auto", fontSize: "var(--font-text-xs-size)", color: "var(--color-text-tertiary)" }}>{i.answered_count}/{i.question_count} answered</span>
+              <span style={chip(i.status.replace(/_/g, " "), i.status.startsWith("completed") ? "ok" : "muted")}>{i.status.replace(/_/g, " ")}</span>
+            </button>
+          ))}
+        </div>
+      )}
+
+      {creating ? (
+        <div style={{ ...card, display: "flex", flexDirection: "column", gap: "0.5rem" }}>
+          <input value={form.participant_name} onChange={e => setForm(f => ({ ...f, participant_name: e.target.value }))} placeholder="Participant name"
+            style={{ padding: "0.5rem", borderRadius: "var(--radius-md)", border: "1px solid var(--color-border)", background: "var(--color-surface)", color: "var(--color-text)", fontSize: "var(--font-text-sm-size)" }} />
+          <input value={form.participant_title} onChange={e => setForm(f => ({ ...f, participant_title: e.target.value }))} placeholder="Job title (e.g. Finance Director)"
+            style={{ padding: "0.5rem", borderRadius: "var(--radius-md)", border: "1px solid var(--color-border)", background: "var(--color-surface)", color: "var(--color-text)", fontSize: "var(--font-text-sm-size)" }} />
+          <div style={{ display: "flex", gap: "0.5rem" }}>
+            <select value={form.participant_role} onChange={e => setForm(f => ({ ...f, participant_role: e.target.value }))}
+              style={{ flex: 1, padding: "0.5rem", borderRadius: "var(--radius-md)", border: "1px solid var(--color-border)", background: "var(--color-surface)", color: "var(--color-text)", fontSize: "var(--font-text-sm-size)" }}>
+              {INTERVIEW_ROLES.map(r => <option key={r} value={r}>{r}</option>)}
+            </select>
+            <input value={form.fiscal_period} onChange={e => setForm(f => ({ ...f, fiscal_period: e.target.value }))} placeholder="Fiscal period (e.g. FY2026)"
+              style={{ flex: 1, padding: "0.5rem", borderRadius: "var(--radius-md)", border: "1px solid var(--color-border)", background: "var(--color-surface)", color: "var(--color-text)", fontSize: "var(--font-text-sm-size)" }} />
+          </div>
+          <MultiSelect options={TRANSACTION_TYPES} value={form.transaction_types} onChange={v => setForm(f => ({ ...f, transaction_types: v }))} placeholder="Transaction type(s)" />
+          <div style={{ display: "flex", gap: "0.5rem" }}>
+            <button type="button" onClick={create} disabled={busy || !form.participant_name.trim()}
+              style={{ padding: "0 var(--control-gutter-lg)", height: "var(--control-size-md)", borderRadius: "var(--control-radius-md)", border: "none", background: "var(--color-background-primary-solid)", color: "var(--color-text-inverse)", cursor: "pointer", fontSize: "var(--control-font-size-md)" }}>Generate interview</button>
+            <button type="button" onClick={() => { setCreating(false); setForm(_emptyForm) }}
+              style={{ padding: "0 var(--control-gutter-md)", height: "var(--control-size-md)", borderRadius: "var(--control-radius-md)", border: "1px solid var(--color-border)", background: "transparent", color: "var(--color-text-secondary)", cursor: "pointer", fontSize: "var(--control-font-size-md)" }}>Cancel</button>
+          </div>
+        </div>
+      ) : (
+        <button type="button" onClick={() => setCreating(true)} disabled={!engagementId}
+          style={{ alignSelf: "flex-start", padding: "0.25rem 0.75rem", borderRadius: "var(--control-radius-md)", border: "1px dashed var(--color-border)", background: "transparent", color: "var(--color-text-secondary)", cursor: engagementId ? "pointer" : "not-allowed", fontSize: "var(--font-text-sm-size)" }}>+ New functional interview</button>
+      )}
+
+      <UploadZone kind="interview" accept=".txt,.pdf,.docx,.vtt,.srt" hint="Or upload notes/transcript — TXT, PDF, Word, VTT, SRT" connectors={NOTETAKER_CONNECTORS} />
     </div>
   )
+}
+
+function InterviewInput() {
+  return <GuidedInterviews />
 }
 
 // ─── Sources list ─────────────────────────────────────────────────────────────

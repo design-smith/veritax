@@ -27,8 +27,8 @@ those are evidence-backed + rule-driven (§45).
 | S1 | FAR ontology — controlled, versioned functions/assets/risks/capabilities/characterizations + validators | AFK | — | ✅ DONE |
 | S2 | Functional fact model — functional assertions enter the existing fact pipeline (fact shape §7, scope §47, period §48, provenance) | AFK (risk centre) | S1 | ✅ DONE |
 | S3 | Interview data model — interviews / questions / responses + provenance chain; raw answer immutable | AFK | — | ✅ DONE |
-| S4 | Guided functional interview (Planning) — scope→controlled question modules→answers→list/screen/findings | AFK | S1, S3 | ▶ NEXT |
-| S5 | Interview extraction — responses → validated functional facts (§46 gate) → canonicalization; + transcript upload | AFK | S2, S3 | pending |
+| S4 | Guided functional interview (Planning) — scope→controlled question modules→answers→list/screen/findings | AFK | S1, S3 | ✅ DONE |
+| S5 | Interview extraction — responses → validated functional facts (§46 gate) → canonicalization; + transcript upload | AFK | S2, S3 | ▶ NEXT |
 | S6 | TP questionnaire integration — import responses → same functional evidence model (not a silo) | AFK | S1, S2 | pending |
 | S7 | Org-chart intelligence — key roles + reporting lines as scoped evidence; supports but never proves control | AFK | S2 | pending |
 | S8 | Invoice evidence — basic transaction-existence facts, properly scoped; cannot establish FAR | AFK | S2 | pending |
@@ -113,5 +113,15 @@ of every Class 2 commit (staged files are explicit). `.claude/settings.json` and
     response (raw immutable §18, status→in_progress), GET findings (§37 functions/risks/decision-makers/open).
     Schemas in schemas.py. `test_interviews_api.py` **4 passed** (role/transaction-aware generation; capture +
     findings + immutable raw; foreign-question rejected). Full backend suite = the gate (running).
-  - **Frontend (TODO):** Planning interview card (§35) + list/screen/findings + lib/api.ts types/methods; then
-    tsc + pnpm build. S4 stays IN PROGRESS until the frontend + tsc + build pass.
+  - **Frontend (DONE):** `lib/api.ts` interview types + client methods (`createInterview`/`listInterviews`/
+    `getInterview`/`addInterviewResponse`/`getInterviewFindings`); `components/steps/planning.tsx` — the
+    Interview source is now a guided **Functional Interviews** workflow (§35): a New-interview form (participant
+    name/title/role + transaction type(s) via the existing MultiSelect + fiscal period) that auto-generates the
+    scoped questions, an interview list (§37 participant/role/status/answered counts), a question-by-question
+    screen (answer textarea → Save; saved answers render read-only = raw immutable §18; follow-ups indented), and
+    a findings view (§37 functions/risks/decision-makers/open). Transcript upload stays (its extraction is S5).
+    Fetch is fail-safe so the /demo route stays clean. `npx tsc --noEmit` clean; `pnpm build` clean.
+  - **S4 DONE.** Backend suite **287** + `tsc` clean + `pnpm build` clean. Acceptance (Interviews, §60): create
+    interview for entity/transaction ✓ · questions adapt to participant role + transaction type ✓ · raw answers
+    preserved ✓ · question/response provenance ✓ · completion states incl. completed_with_gaps ✓. (Uploaded
+    transcript *processing* into facts is S5.)

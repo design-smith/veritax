@@ -388,6 +388,68 @@ async function fetchCurrentHealth(): Promise<HealthResponse> {
   return { ...basic, db: undefined, source: "health" }
 }
 
+// Functional interviews (Class 2 §13-19, §37).
+export interface InterviewResponse {
+  id: string
+  response_raw: string
+  response_summary: string | null
+  locator: string | null
+  created_at: string
+}
+
+export interface InterviewQuestion {
+  id: string
+  question_key: string
+  question_text: string
+  question_category: string | null
+  sequence: number
+  parent_question_id: string | null
+  responses: InterviewResponse[]
+}
+
+export interface Interview {
+  id: string
+  engagement_id: string
+  entity_id: string | null
+  participant_name: string
+  participant_title: string | null
+  participant_role: string | null
+  transaction_ids: string[]
+  fiscal_period: string | null
+  interview_date: string | null
+  status: string
+  questions: InterviewQuestion[]
+}
+
+export interface InterviewListItem {
+  id: string
+  participant_name: string
+  participant_role: string | null
+  entity_id: string | null
+  transaction_ids: string[]
+  status: string
+  interview_date: string | null
+  question_count: number
+  answered_count: number
+}
+
+export interface InterviewFindings {
+  functions: string[]
+  risks: string[]
+  decision_makers: string[]
+  open_questions: string[]
+}
+
+export interface InterviewCreate {
+  entity_id?: string | null
+  participant_name: string
+  participant_title?: string | null
+  participant_role?: string | null
+  transaction_ids?: string[]
+  transaction_types?: string[]
+  fiscal_period?: string | null
+}
+
 const realApi = {
   health: async (): Promise<HealthResponse> => {
     let lastError: unknown = null
@@ -547,6 +609,32 @@ const realApi = {
       trace: "risks.get",
     })
       .then(r => parse<RiskResponse>(r)),
+
+  createInterview: (engagementId: string, body: InterviewCreate): Promise<Interview> =>
+    afetch(`${BASE}/engagements/${engagementId}/interviews`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    }).then(r => parse<Interview>(r)),
+
+  listInterviews: (engagementId: string): Promise<InterviewListItem[]> =>
+    afetch(`${BASE}/engagements/${engagementId}/interviews`).then(r => parse<InterviewListItem[]>(r)),
+
+  getInterview: (interviewId: string): Promise<Interview> =>
+    afetch(`${BASE}/interviews/${interviewId}`).then(r => parse<Interview>(r)),
+
+  addInterviewResponse: (
+    interviewId: string,
+    body: { question_id: string; response_raw: string; response_summary?: string | null; locator?: string | null },
+  ): Promise<InterviewResponse> =>
+    afetch(`${BASE}/interviews/${interviewId}/responses`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    }).then(r => parse<InterviewResponse>(r)),
+
+  getInterviewFindings: (interviewId: string): Promise<InterviewFindings> =>
+    afetch(`${BASE}/interviews/${interviewId}/findings`).then(r => parse<InterviewFindings>(r)),
 }
 
 // On the public /demo route, serve canned data from lib/demo-api instead of the network so the real
