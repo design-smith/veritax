@@ -400,3 +400,76 @@ class RiskResponse(BaseModel):
     stale: bool
     summary: RiskSummary
     findings: list[RiskFindingRead]
+
+
+# ── Functional interviews (Class 2 §13-19, §37, §43) ──
+class InterviewResponseRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: uuid.UUID
+    response_raw: str
+    response_summary: str | None
+    locator: str | None
+    created_at: datetime
+
+
+class InterviewQuestionRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: uuid.UUID
+    question_key: str
+    question_text: str
+    question_category: str | None
+    sequence: int
+    parent_question_id: uuid.UUID | None
+    responses: list[InterviewResponseRead] = []
+
+
+class InterviewRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: uuid.UUID
+    engagement_id: uuid.UUID
+    entity_id: uuid.UUID | None
+    participant_name: str
+    participant_title: str | None
+    participant_role: str | None
+    transaction_ids: list = []
+    fiscal_period: str | None
+    interview_date: datetime | None
+    status: str
+    questions: list[InterviewQuestionRead] = []
+
+
+class InterviewListItem(BaseModel):
+    id: uuid.UUID
+    participant_name: str
+    participant_role: str | None
+    entity_id: uuid.UUID | None
+    transaction_ids: list = []
+    status: str
+    interview_date: datetime | None
+    question_count: int
+    answered_count: int
+
+
+class InterviewCreate(BaseModel):
+    entity_id: uuid.UUID | None = None
+    participant_name: str
+    participant_title: str | None = None
+    participant_role: str | None = None
+    transaction_ids: list[str] = []
+    transaction_types: list[str] = []   # drives question-module selection (§22); not stored on the interview
+    fiscal_period: str | None = None
+    interview_date: datetime | None = None
+
+
+class ResponseCreate(BaseModel):
+    question_id: uuid.UUID
+    response_raw: str
+    response_summary: str | None = None
+    locator: str | None = None
+
+
+class InterviewFindings(BaseModel):
+    functions: list[str] = []
+    risks: list[str] = []
+    decision_makers: list[str] = []
+    open_questions: list[str] = []

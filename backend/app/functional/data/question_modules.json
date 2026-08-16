@@ -1,0 +1,60 @@
+{
+  "version": 1,
+  "core": [
+    {"question_key": "core.functions", "question_text": "Which functions does the local entity actually perform for this transaction?", "question_category": "functions"},
+    {"question_key": "core.decision_makers", "question_text": "Who makes the key decisions for this transaction, and where are they located?", "question_category": "decision_making"},
+    {"question_key": "core.risks", "question_text": "Which risks does the local entity bear in practice, and who controls them?", "question_category": "risks"}
+  ],
+  "transaction_modules": {
+    "services": [
+      {"question_key": "services.scope", "question_text": "Who determines the services to be provided to group entities?", "question_category": "functions"},
+      {"question_key": "services.fee_approval", "question_text": "Who approves the service fee?", "question_category": "pricing"},
+      {"question_key": "services.cost_pool", "question_text": "How is the cost pool created, and which costs are excluded?", "question_category": "pricing"},
+      {"question_key": "services.allocation_key", "question_text": "Who decides the allocation key?", "question_category": "pricing"},
+      {"question_key": "services.non_performance", "question_text": "Who bears the risk if the services are not performed to standard?", "question_category": "risks"}
+    ],
+    "distribution": [
+      {"question_key": "distribution.pricing", "question_text": "Who sets customer pricing, and can the local entity deviate from it?", "question_category": "pricing"},
+      {"question_key": "distribution.inventory", "question_text": "Who bears inventory and obsolescence risk?", "question_category": "risks"},
+      {"question_key": "distribution.marketing", "question_text": "Who develops and approves marketing and market development?", "question_category": "functions"}
+    ],
+    "manufacturing": [
+      {"question_key": "manufacturing.production_planning", "question_text": "Who decides production volumes and the production schedule?", "question_category": "functions"},
+      {"question_key": "manufacturing.capacity", "question_text": "Who bears capacity and idle-capacity risk?", "question_category": "risks"},
+      {"question_key": "manufacturing.quality", "question_text": "Who is responsible for quality control and product-liability exposure?", "question_category": "risks"}
+    ],
+    "licensing": [
+      {"question_key": "licensing.dempe", "question_text": "Who performs the development, enhancement, maintenance, protection and exploitation of the IP?", "question_category": "functions"},
+      {"question_key": "licensing.royalty", "question_text": "Who sets and approves the royalty rate?", "question_category": "pricing"},
+      {"question_key": "licensing.ip_risk", "question_text": "Who bears the risk of IP obsolescence or infringement?", "question_category": "risks"}
+    ],
+    "financing": [
+      {"question_key": "financing.fx_hedge_decision", "question_text": "Who determines whether currency exposure should be hedged?", "question_category": "risks"},
+      {"question_key": "financing.credit", "question_text": "Who assesses and approves credit risk for intercompany lending?", "question_category": "risks"},
+      {"question_key": "financing.funding_terms", "question_text": "Who sets the interest rate and funding terms?", "question_category": "pricing"}
+    ]
+  },
+  "role_modules": {
+    "finance": [
+      {"question_key": "finance.pricing_authority", "question_text": "Does the local entity have authority to set or deviate from intercompany prices?", "question_category": "pricing"},
+      {"question_key": "finance.approvals", "question_text": "Which financial approvals must be escalated outside the local entity?", "question_category": "decision_making"}
+    ],
+    "treasury": [
+      {"question_key": "treasury.fx_authority", "question_text": "Who has authority to execute hedging transactions?", "question_category": "risks"},
+      {"question_key": "treasury.fx_monitor", "question_text": "Which team monitors FX exposure?", "question_category": "risks"},
+      {"question_key": "treasury.funding", "question_text": "Who decides the entity's funding and cash management?", "question_category": "functions"}
+    ],
+    "sales": [
+      {"question_key": "sales.customer_ownership", "question_text": "Who owns and manages the customer relationships?", "question_category": "functions"},
+      {"question_key": "sales.discount_authority", "question_text": "Who has authority to approve discounts and negotiate contracts?", "question_category": "decision_making"}
+    ],
+    "operations": [
+      {"question_key": "operations.supply_chain", "question_text": "Who manages the supply chain and bears supply-chain risk?", "question_category": "risks"},
+      {"question_key": "operations.service_delivery", "question_text": "Who is accountable for day-to-day service or production delivery?", "question_category": "functions"}
+    ],
+    "rnd": [
+      {"question_key": "rnd.direction", "question_text": "Who directs and funds the research and development programme?", "question_category": "functions"},
+      {"question_key": "rnd.ip_ownership", "question_text": "Which entity owns the IP that results from the R&D?", "question_category": "functions"}
+    ]
+  }
+}

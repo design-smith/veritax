@@ -104,5 +104,14 @@ of every Class 2 commit (staged files are explicit). `.claude/settings.json` and
     provenance chain ✓ · raw answer preserved ✓ · follow-up parent link ✓ · completion states incl.
     completed_with_gaps ✓. (S3 code committed in `7dfe094`; this entry finalizes it post-gate.)
 
-- **▶ Continuing to S4** — guided functional interview (Planning workflow) — first slice with real frontend
-  (question modules → answers → list/screen/findings); tsc + build required.
+- [ ] **S4 — Guided functional interview (Planning workflow)** — IN PROGRESS (backend built, gate running; frontend next).
+  - **Backend (built, focused tests green):** `app/functional/questions.py` + `data/question_modules.json` —
+    deterministic controlled modules (core + transaction: services/distribution/manufacturing/licensing/financing
+    + role: finance/treasury/sales/operations/rnd) with `select_questions(role, transaction_types)` (deduped +
+    sequenced, unrelated modules excluded; §16/§22, NOT 500 static). New `routers/interviews.py` (registered in
+    main.py): POST create (auto-generates scoped questions), GET list (§37 counts), GET one (screen), POST
+    response (raw immutable §18, status→in_progress), GET findings (§37 functions/risks/decision-makers/open).
+    Schemas in schemas.py. `test_interviews_api.py` **4 passed** (role/transaction-aware generation; capture +
+    findings + immutable raw; foreign-question rejected). Full backend suite = the gate (running).
+  - **Frontend (TODO):** Planning interview card (§35) + list/screen/findings + lib/api.ts types/methods; then
+    tsc + pnpm build. S4 stays IN PROGRESS until the frontend + tsc + build pass.

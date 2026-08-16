@@ -5,6 +5,7 @@ characterizations; the LLM may only classify INTO these values, never invent cat
 """
 
 from .facts import FUNCTIONAL_FACT_TYPES, functional_fact_ok, is_functional_fact_type
+from .questions import question_modules_version, select_questions
 from .ontology import (
     assets,
     capabilities,
@@ -25,4 +26,5 @@ __all__ = [
     "valid_function", "valid_asset", "valid_risk", "valid_capability", "valid_characterization",
     "valid_far_value",
     "FUNCTIONAL_FACT_TYPES", "is_functional_fact_type", "functional_fact_ok",
+    "select_questions", "question_modules_version",
 ]
