@@ -12,6 +12,12 @@ COPY pyproject.toml ./
 COPY app ./app
 RUN pip install --no-cache-dir .
 
+# The `regulatory` package is a sibling top-level package (the deterministic rules registry). It runs from
+# source and carries JSON data files, so copy the whole tree; PYTHONPATH=/app makes both `app` and `regulatory`
+# importable from the copied source (not the shadowed wheel).
+COPY regulatory ./regulatory
+ENV PYTHONPATH=/app
+
 # Render injects $PORT; bind to it (fall back to 8000 for local `docker run`).
 ENV PORT=8000
 EXPOSE 8000
