@@ -59,9 +59,12 @@ async def test_risks_produces_both_kinds_with_evidence(client):
         assert f["exposure_amount"] is None  # no computed figure this build
     # At least one finding's evidence points at a real document (clickable provenance).
     assert any(e["document_id"] for f in got["findings"] for e in f["evidence"])
-    # Summary counts by severity AND kind; no fake total exposure.
-    assert got["summary"]["by_kind"] == {"discrepancy": 1, "exposure": 1}
-    assert "total" in got["summary"] and got["summary"]["total"] == 2
+    # Summary counts by severity AND kind; no fake total exposure. The two LLM findings (one of each kind) are
+    # joined by one deterministic functional finding: this engagement captured no functional evidence, so the
+    # functional analysis is flagged incomplete (S13, an exposure).
+    assert got["summary"]["by_kind"] == {"discrepancy": 1, "exposure": 2}
+    assert "total" in got["summary"] and got["summary"]["total"] == 3
+    assert any(f["title"] == "Functional analysis is incomplete" for f in got["findings"])
 
 
 async def test_regulatory_filing_finding_merged_into_risk_run(client):
@@ -92,7 +95,7 @@ async def test_rerun_replaces_findings(client):
     await client.post(f"/engagements/{eid}/risks", params={"jurisdiction": "Canada"})
     await client.post(f"/engagements/{eid}/risks", params={"jurisdiction": "Canada"})
     got = (await client.get(f"/engagements/{eid}/risks", params={"jurisdiction": "Canada"})).json()
-    assert got["summary"]["total"] == 2  # not doubled
+    assert got["summary"]["total"] == 3  # 2 LLM + 1 deterministic functional finding; rerun replaces, not doubled
 
 
 async def test_risks_retrieval_excludes_out_of_scope_documents(client):

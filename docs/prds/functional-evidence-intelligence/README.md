@@ -44,7 +44,7 @@ those are evidence-backed + rule-driven (§45).
 | S10 | Risk control & capability — risk_control_profiles (bearer/exposure/decision/control/capability/financial capacity), evidence-linked, mismatches preserved + risk table | AFK | S1, S2, S9 | ✅ DONE |
 | S11 | Requirements integration — evaluate FAR concept sufficiency (partial when risk-control unknown); gap-driven interview recommendation | AFK | S9, S10 | ✅ DONE |
 | S12 | Draft integration — FAR sections from structured evidence, traceable (DraftSection pattern) | AFK | S9, S10 | ✅ DONE |
-| S13 | Risks integration — unsupported risk allocation, capability gap, functional inconsistency, contract-vs-conduct mismatch, missing-interview findings | AFK | S9, S10 | ▶ NEXT |
+| S13 | Risks integration — unsupported risk allocation, capability gap, functional inconsistency, contract-vs-conduct mismatch, missing-interview findings | AFK | S9, S10 | ✅ DONE |
 
 **DAG:** S1 → S2 → {S3, S6, S7, S8}; S3 → {S4, S5}; S5 → S9 → S10 → {S11, S12, S13}.
 **Non-goals honoured (§57):** no video/STT, HR/ERP integration, financial segmentation, TNMM/benchmarking, full
@@ -259,3 +259,26 @@ of every Class 2 commit (staged files are explicit). `.claude/settings.json` and
     deterministic, no fabricated conclusions ✓ · never blocks the draft ✓.
   - Honest: engagement-level FAR (per-transaction section is a follow-on; `functional_section_content` already
     accepts a `transaction_id`).
+
+- [ ] **S13 — Risks integration (FINAL slice)** — BUILT, full-suite gate running. Mirrors the Class 1
+  `regulatory_risks.py` pattern EXACTLY: deterministic findings, each names its functional basis, no LLM.
+  - `app/functional_risks.py::functional_findings(session, engagement_id, jurisdiction)` → `risks.Finding` list
+    (§41): (1) **contract-vs-conduct mismatch** — each S10 risk-control row with status `potential_mismatch`
+    (kind discrepancy; names the bearer/control/capability divergence — Jayesh's conduct-over-contract point);
+    (2) **capability gap** — bearer set but `capability_entity_id` unevidenced, incl. rows that look `aligned`
+    (kind exposure); (3) **unsupported risk allocation** — a `risk_assumed` fact with no risk-control row and no
+    `risk_controlled` evidence (kind exposure); (4) **incomplete functional analysis** — `functional_analysis_
+    summary` status `unknown`/`partial` (kind exposure, severity low/medium; drives the interview
+    recommendation). Only emits where evidence supports it (§46) — no fabricated findings.
+  - `routers/risks.py::run_analysis`: `func_findings = await functional_findings(session, engagement_id,
+    jurisdiction)` merged with the LLM + regulatory findings and persisted through the same path (delete+reinsert
+    per run, so reruns replace, never double). Offline/deterministic; adds no paid-API call.
+  - **Verification:** `test_functional_risks.py` **5 passed** (mismatch names its basis; capability gap on an
+    aligned row; unsupported allocation from an assumed fact; nothing fabricated without evidence → only the
+    incomplete finding; fully-resolved evidence → no findings). Updated `test_risks.py` legitimately: every run
+    now carries one deterministic functional finding when there's no functional evidence (2 LLM + 1 functional =
+    3; rerun replaces, not doubles). Acceptance (Risks, §41): unsupported risk allocation ✓ · capability gap ✓ ·
+    contract-vs-conduct mismatch ✓ · missing-interview evidence ✓ · each finding names its basis, deterministic ✓.
+  - Note (per spec, §41): the incomplete-analysis finding fires for any engagement lacking functional evidence
+    (a Local File without a functional analysis is genuinely incomplete) — low severity, sorted last, never
+    fabricated. Per-transaction functional risk scoping remains a follow-on.

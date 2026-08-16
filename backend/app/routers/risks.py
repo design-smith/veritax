@@ -32,6 +32,7 @@ from ..models import (
     RiskSeverity,
 )
 from ..regulatory_risks import regulatory_findings
+from ..functional_risks import functional_findings
 from ..risks import RiskAnalyzer
 from ..schemas import RiskEvidenceRead, RiskFindingRead, RiskResponse, RiskSummary
 
@@ -328,13 +329,18 @@ async def run_analysis(session_factory: async_sessionmaker, analyzer: RiskAnalyz
             # with the LLM findings and persisted through the same path. Only emits where inputs support it
             # (live: filing-timing from the Qatar deadline; transaction/benchmark findings await those inputs).
             reg_findings = regulatory_findings(jurisdiction, fiscal_year)
-            findings = list(findings) + reg_findings
+            # Deterministic functional findings (PRD Class 2, S13) — from the FAR profile + risk-control rows:
+            # contract-vs-conduct mismatch, capability gap, unsupported risk allocation, incomplete functional
+            # analysis. Each names its functional basis; only emits where the evidence supports it.
+            func_findings = await functional_findings(session, engagement_id, jurisdiction)
+            findings = list(findings) + reg_findings + func_findings
             log.info(
-                "risks.job.analysis_complete engagement_id=%s jurisdiction=%s findings=%d (regulatory=%d) duration_ms=%d",
+                "risks.job.analysis_complete engagement_id=%s jurisdiction=%s findings=%d (regulatory=%d functional=%d) duration_ms=%d",
                 _short_id(engagement_id),
                 jurisdiction,
                 len(findings),
                 len(reg_findings),
+                len(func_findings),
                 _elapsed_ms(analysis_started_at),
             )
 
