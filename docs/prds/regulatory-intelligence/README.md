@@ -171,10 +171,11 @@ existing Planning → Requirements → Draft → Risks workflow. Commits: S1 `33
 S3 `f4af8f9` · S4 `d2833fe` · S5 `4d8945c` · S6 `54b4f4b` · S7 `7fcb6b8` · S8 (this commit). Full backend suite
 **273 passed**.
 
-### ⚠ Prod migrations required before deploy (conftest `create_all` covers tests only)
-1. `ALTER TABLE draft_sections ADD COLUMN research JSONB;` (from the earlier Industry-Analysis work)
-2. `CREATE TABLE engagement_regulatory_snapshots ...` (S6 — DDL above)
-3. `CREATE TABLE regulatory_overrides ...` (S8 — DDL above)
+### ✅ Prod migrations — APPLIED to Supabase (2026-08-15) via `init_db()`
+Verified before→after on the Supabase pooler (`aws-1-us-west-2.pooler.supabase.com`): all three now present.
+1. `ALTER TABLE draft_sections ADD COLUMN research JSONB;` — now a permanent idempotent line in `backend/app/db.py::init_db` (was missing; from the earlier Industry-Analysis work).
+2. `engagement_regulatory_snapshots` — created (S6); `create_all` in `init_db` handles it from the model.
+3. `regulatory_overrides` — created (S8); `create_all` in `init_db` handles it from the model.
 
 ### Honest limitations (no fabrication)
 - No structured controlled-transaction or comparable-set data models exist yet → the S3 transaction-scope, S5
