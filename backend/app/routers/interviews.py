@@ -21,6 +21,7 @@ from ..schemas import (
     InterviewListItem,
     InterviewRead,
     InterviewResponseRead,
+    QuestionnaireIngest,
     ResponseCreate,
 )
 
@@ -119,6 +120,35 @@ async def add_response(
     await session.commit()
     await session.refresh(resp)
     return InterviewResponseRead.model_validate(resp)
+
+
+@router.post("/engagements/{engagement_id}/questionnaire")
+async def ingest_questionnaire(
+    engagement_id: uuid.UUID,
+    body: QuestionnaireIngest,
+    session: AsyncSession = Depends(get_session),
+    _owner: Engagement = Depends(require_engagement_owner),
+    extractor: InterviewExtractor = Depends(get_interview_extractor),
+) -> dict:
+    """Import a TP questionnaire's structured Q/A into the SAME functional evidence model as interviews (§21-22):
+    stored as a FunctionalInterview + responses, then extracted to functional facts (evidence_type=questionnaire)."""
+    interview = FunctionalInterview(
+        engagement_id=engagement_id, participant_name="TP Questionnaire", participant_role=None,
+        transaction_ids=body.transaction_ids, fiscal_period=body.fiscal_period, entity_id=body.entity_id,
+        status="completed",
+    )
+    session.add(interview)
+    await session.flush()
+    for i, item in enumerate(body.items):
+        question = InterviewQuestion(interview_id=interview.id, question_key=f"questionnaire.{i + 1}",
+                                     question_text=item.question, question_category="questionnaire", sequence=i + 1)
+        session.add(question)
+        await session.flush()
+        session.add(InterviewResponse(question_id=question.id, response_raw=item.answer))
+    await session.commit()
+    created = await run_interview_extraction(session, extractor, interview.id, evidence_type="questionnaire")
+    await session.commit()
+    return {"interview_id": str(interview.id), "facts_created": created}
 
 
 @router.post("/interviews/{interview_id}/extract")

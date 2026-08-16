@@ -473,3 +473,16 @@ class InterviewFindings(BaseModel):
     risks: list[str] = []
     decision_makers: list[str] = []
     open_questions: list[str] = []
+
+
+# TP questionnaire (Class 2 §21-22) — structured Q/A that enters the SAME functional model as interviews (no silo).
+class QuestionnaireItem(BaseModel):
+    question: str
+    answer: str
+
+
+class QuestionnaireIngest(BaseModel):
+    entity_id: uuid.UUID | None = None
+    transaction_ids: list[str] = []
+    fiscal_period: str | None = None
+    items: list[QuestionnaireItem]

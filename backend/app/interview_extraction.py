@@ -77,8 +77,11 @@ FakeInterviewExtractor = KeywordInterviewExtractor
 
 
 async def run_interview_extraction(session: AsyncSession, extractor: InterviewExtractor,
-                                   interview_id: uuid.UUID) -> int:
-    """Extract §46-validated functional facts from an interview's responses and promote them. Returns facts added."""
+                                   interview_id: uuid.UUID, *, evidence_type: str = "functional_interview") -> int:
+    """Extract §46-validated functional facts from an interview's responses and promote them. Returns facts added.
+
+    `evidence_type` labels the provenance kind (functional_interview | questionnaire) — questionnaires (S6) reuse
+    this exact path so their answers enter the SAME functional model (§21), not a separate silo."""
     interview = (
         await session.execute(
             select(FunctionalInterview).where(FunctionalInterview.id == interview_id)
@@ -109,7 +112,7 @@ async def run_interview_extraction(session: AsyncSession, extractor: InterviewEx
                         schema_key="functional", schema_version=_FUNCTIONAL_SCHEMA_VERSION,
                         fact_type=cand.fact_type, value_raw=response.response_raw[:500],
                         value_normalized=str(cand.value).lower(), value_type="boolean", scope_level="local_entity",
-                        far_type=cand.far_type, transaction_id=transaction_id, evidence_type="functional_interview",
+                        far_type=cand.far_type, transaction_id=transaction_id, evidence_type=evidence_type,
                         interview_response_id=response.id),
                     sources=[FactSourceInput(document_id=None, interview_response_id=response.id,
                                              locator=question.question_key, quote=response.response_raw)],
