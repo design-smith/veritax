@@ -658,6 +658,23 @@ export default function RequirementsStep({ engagementId, jurisdictions, onContin
               </div>
             </Animate>
           ) : null}
+          {coverage?.functional_analysis && coverage.functional_analysis.status !== "unknown" ? (
+            <div style={{
+              margin: "0 0 1rem", padding: "0.75rem 0.875rem",
+              border: "1px solid var(--color-border)", borderRadius: "var(--radius-md)",
+              background: "var(--color-background-secondary)",
+            }}>
+              <p style={{ fontSize: "var(--font-text-xs-size)", textTransform: "uppercase", letterSpacing: "0.04em", color: "var(--color-text-tertiary)", margin: "0 0 0.5rem" }}>
+                Functional analysis · <span style={{ color: coverage.functional_analysis.status === "present" ? "var(--color-text-success-soft)" : "var(--color-text-caution-soft)" }}>{coverage.functional_analysis.status}</span>
+              </p>
+              <p style={{ fontSize: "var(--font-text-sm-size)", color: "var(--color-text-secondary)", margin: "0 0 0.375rem" }}>
+                {coverage.functional_analysis.functions_count} functions · {coverage.functional_analysis.assets_count} assets · {coverage.functional_analysis.risks_count} risks · risk control {coverage.functional_analysis.risk_control.resolved}/{coverage.functional_analysis.risk_control.total}
+              </p>
+              {coverage.functional_analysis.gaps.map((g, i) => (
+                <p key={i} style={{ margin: 0, fontSize: "var(--font-text-xs-size)", color: "var(--color-text-caution-soft)" }}>! {g}</p>
+              ))}
+            </div>
+          ) : null}
           {coverage?.regulatory?.length ? (
             <div style={{
               margin: "0 0 1rem", padding: "0.75rem 0.875rem",

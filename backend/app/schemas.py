@@ -208,12 +208,29 @@ class RegulatoryOverrideRead(BaseModel):
     created_at: datetime
 
 
+class FunctionalRiskControlSummary(BaseModel):
+    resolved: int
+    total: int
+    unresolved: list[str] = []
+
+
+class FunctionalAnalysisRead(BaseModel):
+    """Deterministic functional-analysis sufficiency for Requirements (Class 2 §34/§54)."""
+    status: str                       # present | partial | unknown
+    functions_count: int
+    assets_count: int
+    risks_count: int
+    risk_control: FunctionalRiskControlSummary
+    gaps: list[str] = []
+
+
 class CoverageResponse(BaseModel):
     jurisdiction: str
     summary: CoverageSummary
     requirements: list[CoverageRead]
     skipped_documents: list[SkippedDocumentRead] = []
     regulatory: list[RegulatoryContextRead] = []  # jurisdiction rules from the registry (empty if none defined)
+    functional_analysis: FunctionalAnalysisRead | None = None  # Class 2 §34: FAR-concept sufficiency
 
 
 class DraftCitationRead(BaseModel):

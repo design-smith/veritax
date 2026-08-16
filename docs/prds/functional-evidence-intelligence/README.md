@@ -42,8 +42,8 @@ those are evidence-backed + rule-driven (§45).
 | S8 | Invoice evidence — basic transaction-existence facts, properly scoped; cannot establish FAR | AFK | S2 | ✅ DONE |
 | S9 | FAR builder — aggregate facts → per entity/txn FAR profile + deterministic characterization (undetermined allowed) + evidence-strength hierarchy | AFK | S1, S2, S5 | ✅ DONE |
 | S10 | Risk control & capability — risk_control_profiles (bearer/exposure/decision/control/capability/financial capacity), evidence-linked, mismatches preserved + risk table | AFK | S1, S2, S9 | ✅ DONE |
-| S11 | Requirements integration — evaluate FAR concept sufficiency (partial when risk-control unknown); gap-driven interview recommendation | AFK | S9, S10 | ▶ NEXT |
-| S12 | Draft integration — FAR sections from structured evidence, traceable (DraftSection pattern) | AFK | S9, S10 | pending |
+| S11 | Requirements integration — evaluate FAR concept sufficiency (partial when risk-control unknown); gap-driven interview recommendation | AFK | S9, S10 | ✅ DONE |
+| S12 | Draft integration — FAR sections from structured evidence, traceable (DraftSection pattern) | AFK | S9, S10 | ▶ NEXT |
 | S13 | Risks integration — unsupported risk allocation, capability gap, functional inconsistency, contract-vs-conduct mismatch, missing-interview findings | AFK | S9, S10 | pending |
 
 **DAG:** S1 → S2 → {S3, S6, S7, S8}; S3 → {S4, S5}; S5 → S9 → S10 → {S11, S12, S13}.
@@ -214,3 +214,18 @@ of every Class 2 commit (staged files are explicit). `.claude/settings.json` and
     preserved incl. financial capacity; upsert recomputes). **Full backend suite 298 passed** (296 + 2).
     Acceptance (Risk control, §60): all six roles representable ✓ · deterministic mismatch status ✓ · conflicts
     remain visible ✓.
+
+- [ ] **S11 — Requirements integration** — BUILT (backend + frontend), full-suite gate running. USER-VISIBLE.
+  - `app/functional_coverage.py::functional_analysis_summary` — deterministic (§54, not an LLM score): from the
+    S9 FAR profile + S10 risk-control rows → `present` / `partial` / `unknown` + specific gaps (§34, e.g. "Risk
+    control for foreign exchange risk remains unclear"); document existence alone never makes it `present`.
+    Attached to `CoverageResponse.functional_analysis` (mirrors the Class 1 `regulatory` field). A compact
+    **Functional analysis** panel on the Requirements view (`requirements.tsx`) shows status + counts + gaps;
+    `lib/api.ts` + `lib/demo-api.ts` typed.
+  - **Verification:** `test_functional_coverage.py` 3 + `test_coverage.py` 14 = **17 passed** (unknown w/o
+    evidence; partial + gap when risk-control unresolved; present when resolved + rides the coverage response).
+    `tsc` clean; `pnpm build` clean. **Full backend suite 301 passed** (298 + 3). Acceptance (Requirements, §60):
+    functional-evidence completeness evaluated ✓ · missing risk-control → partial ✓ · document existence alone
+    doesn't prove sufficiency ✓.
+  - Honest: summarised at engagement level (no material-transaction gating model yet); per-transaction is a
+    follow-on (the summary already accepts a transaction_id).

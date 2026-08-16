@@ -77,12 +77,14 @@ from ..models import (
     SupplementKind,
 )
 from regulatory import apply_overrides, regulatory_context
+from ..functional_coverage import functional_analysis_summary
 from ..requirements import available_jurisdictions, resolve_requirements
 from ..schemas import (
     CoverageEvidenceRead,
     CoverageRead,
     CoverageResponse,
     CoverageSummary,
+    FunctionalAnalysisRead,
     RegulatoryOverrideCreate,
     RegulatoryOverrideRead,
     SkippedDocumentRead,
@@ -275,6 +277,7 @@ async def _response(session: AsyncSession, engagement_id: uuid.UUID, jurisdictio
         requirements=[_to_read(r, doc_kind, section_by_key) for r in rows],
         skipped_documents=await _skipped_documents(session, engagement_id),
         regulatory=apply_overrides(regulatory_context(jurisdiction, fiscal_year), overrides),
+        functional_analysis=FunctionalAnalysisRead(**await functional_analysis_summary(session, engagement_id)),
     )
 
 

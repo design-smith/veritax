@@ -198,6 +198,16 @@ export interface CoverageResponse {
   requirements: CoverageRow[]
   skipped_documents: { document_id: string; filename: string; reason: string }[]
   regulatory: RegulatoryContext[]
+  functional_analysis: FunctionalAnalysis | null
+}
+
+export interface FunctionalAnalysis {
+  status: "present" | "partial" | "unknown"
+  functions_count: number
+  assets_count: number
+  risks_count: number
+  risk_control: { resolved: number; total: number; unresolved: string[] }
+  gaps: string[]
 }
 
 export interface RegulatorySourceRef {
