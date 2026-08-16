@@ -26,8 +26,8 @@ those are evidence-backed + rule-driven (§45).
 |---|-------|------|-----------|--------|
 | S1 | FAR ontology — controlled, versioned functions/assets/risks/capabilities/characterizations + validators | AFK | — | ✅ DONE |
 | S2 | Functional fact model — functional assertions enter the existing fact pipeline (fact shape §7, scope §47, period §48, provenance) | AFK (risk centre) | S1 | ✅ DONE |
-| S3 | Interview data model — interviews / questions / responses + provenance chain; raw answer immutable | AFK | — | ▶ NEXT |
-| S4 | Guided functional interview (Planning) — scope→controlled question modules→answers→list/screen/findings | AFK | S1, S3 | pending |
+| S3 | Interview data model — interviews / questions / responses + provenance chain; raw answer immutable | AFK | — | ✅ DONE |
+| S4 | Guided functional interview (Planning) — scope→controlled question modules→answers→list/screen/findings | AFK | S1, S3 | ▶ NEXT |
 | S5 | Interview extraction — responses → validated functional facts (§46 gate) → canonicalization; + transcript upload | AFK | S2, S3 | pending |
 | S6 | TP questionnaire integration — import responses → same functional evidence model (not a silo) | AFK | S1, S2 | pending |
 | S7 | Org-chart intelligence — key roles + reporting lines as scoped evidence; supports but never proves control | AFK | S2 | pending |
@@ -99,7 +99,10 @@ of every Class 2 commit (staged files are explicit). `.claude/settings.json` and
     (`response_raw` immutable §18 + summary + locator). Provenance chain response→question→interview→participant.
   - **Migration:** `create_all` in `init_db` creates the 3 tables (tests + deploy); no ALTER needed.
   - **Verification:** `test_interview_model.py` **3 passed** (chain + provenance; follow-up parent link;
-    completion states not_started/in_progress/completed/completed_with_gaps). Full backend suite = the gate (running).
+    completion states not_started/in_progress/completed/completed_with_gaps). **Full backend suite 283 passed**
+    (280 + 3). Acceptance (Interviews data-model portion, §43/§18-19/§53): interview/question/response with
+    provenance chain ✓ · raw answer preserved ✓ · follow-up parent link ✓ · completion states incl.
+    completed_with_gaps ✓. (S3 code committed in `7dfe094`; this entry finalizes it post-gate.)
 
 - **▶ Continuing to S4** — guided functional interview (Planning workflow) — first slice with real frontend
   (question modules → answers → list/screen/findings); tsc + build required.
