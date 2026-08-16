@@ -4,6 +4,7 @@ Deterministic where it matters (PRD §45): the ontology fixes the allowed functi
 characterizations; the LLM may only classify INTO these values, never invent categories or decide conclusions.
 """
 
+from .facts import FUNCTIONAL_FACT_TYPES, functional_fact_ok, is_functional_fact_type
 from .ontology import (
     assets,
     capabilities,
@@ -23,4 +24,5 @@ __all__ = [
     "functions", "assets", "risks", "capabilities", "characterizations", "ontology_version",
     "valid_function", "valid_asset", "valid_risk", "valid_capability", "valid_characterization",
     "valid_far_value",
+    "FUNCTIONAL_FACT_TYPES", "is_functional_fact_type", "functional_fact_ok",
 ]

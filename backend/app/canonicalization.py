@@ -10,6 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from .extraction_schemas import validate_fact_scope
 from .extraction_store import extracted_fact_promotable
+from .functional import functional_fact_ok
 from .models import (
     CanonicalFact,
     CanonicalFactSource,
@@ -66,6 +67,9 @@ async def promote_canonical_facts(session: AsyncSession, engagement_id: uuid.UUI
                 unit=fact.unit,
                 period=fact.period,
                 scope_level=fact.scope_level,
+                far_type=fact.far_type,
+                transaction_id=fact.transaction_id,
+                evidence_type=fact.evidence_type,
                 canonical_key=key,
             )
             session.add(canonical)
@@ -91,6 +95,9 @@ async def _canonical_key(session: AsyncSession, fact: ExtractedFact) -> str | No
         return None
     if not extracted_fact_promotable(fact):
         return None
+    # Functional facts (§7): the far_type must be a known ontology value, else it's not a supported conclusion (§46).
+    if not functional_fact_ok(fact.fact_type, fact.far_type):
+        return None
 
     entity_id = None
     if fact.entity_mention_id is not None:
@@ -107,6 +114,12 @@ async def _canonical_key(session: AsyncSession, fact: ExtractedFact) -> str | No
         "unit": fact.unit,
         "value": _fact_value(fact),
     }
+    # Functional dimensions distinguish e.g. "sales for txn1" from "marketing for txn1" / "sales for txn2".
+    # Added only when present, so non-functional facts keep byte-identical keys (behaviour-preserving).
+    if fact.far_type is not None:
+        payload["far_type"] = fact.far_type
+    if fact.transaction_id is not None:
+        payload["transaction_id"] = fact.transaction_id
     return json.dumps(payload, sort_keys=True, separators=(",", ":"))
 
 

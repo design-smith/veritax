@@ -57,6 +57,9 @@ class ExtractedFactInput(BaseModel):
     scope_level: str
     entity_mention_id: uuid.UUID | None = None
     resolution_status: str = "not_required"
+    far_type: str | None = None            # Class 2 §7: function/asset/risk value (validated at promotion)
+    transaction_id: str | None = None
+    evidence_type: str | None = None
 
 
 class FactSourceInput(BaseModel):

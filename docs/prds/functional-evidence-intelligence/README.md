@@ -25,8 +25,8 @@ those are evidence-backed + rule-driven (§45).
 | # | Title | Type | Blocked by | Status |
 |---|-------|------|-----------|--------|
 | S1 | FAR ontology — controlled, versioned functions/assets/risks/capabilities/characterizations + validators | AFK | — | ✅ DONE |
-| S2 | Functional fact model — functional assertions enter the existing fact pipeline (fact shape §7, scope §47, period §48, provenance) | AFK (risk centre) | S1 | ▶ NEXT |
-| S3 | Interview data model — interviews / questions / responses + provenance chain; raw answer immutable | AFK | — | pending |
+| S2 | Functional fact model — functional assertions enter the existing fact pipeline (fact shape §7, scope §47, period §48, provenance) | AFK (risk centre) | S1 | ✅ DONE |
+| S3 | Interview data model — interviews / questions / responses + provenance chain; raw answer immutable | AFK | — | ▶ NEXT |
 | S4 | Guided functional interview (Planning) — scope→controlled question modules→answers→list/screen/findings | AFK | S1, S3 | pending |
 | S5 | Interview extraction — responses → validated functional facts (§46 gate) → canonicalization; + transcript upload | AFK | S2, S3 | pending |
 | S6 | TP questionnaire integration — import responses → same functional evidence model (not a silo) | AFK | S1, S2 | pending |
@@ -73,6 +73,23 @@ of every Class 2 commit (staged files are explicit). `.claude/settings.json` and
   - Acceptance (Functional ontology, §60): functions ✓ · assets ✓ · risks ✓ · capability separate from risk
     assumption ✓ · versioned ✓.
 
-- **▶ Continuing to S2** — functional fact model: extend `ExtractedFact`/`CanonicalFact` with `far_type` /
-  `transaction_id` / `value` / `evidence_type`, validate functional facts against the S1 ontology, behaviour-
-  preserving for existing facts, gated on the full backend suite. Risk centre — done in its own turn.
+- [ ] **S2 — Functional fact model** — BUILT, full-suite gate running (REUSE decision).
+  - `ExtractedFact` + `CanonicalFact` gained nullable `far_type` / `transaction_id` / `evidence_type` (value
+    reuses `value_normalized`); `ExtractedFactInput` carries them (flow via `model_dump()`). Registered a
+    `functional` extraction schema (`function_performed`/`asset_used`/`risk_assumed`/`risk_controlled`/
+    `capability`; scopes `local_entity`/`transaction`/`counterparty` per §47 — group excluded).
+  - `canonicalization.py`: `functional_fact_ok` rejects an unknown `far_type` → not promoted (§46, §45); the
+    canonical key adds `far_type`/`transaction_id` **only when present**, so non-functional keys are
+    byte-identical (behaviour-preserving); `CanonicalFact` carries the new columns. `app/functional/facts.py`:
+    `FUNCTIONAL_FACT_TYPES` + `is_functional_fact_type` + `functional_fact_ok`.
+  - **Migration:** idempotent `ALTER TABLE extracted_facts|canonical_facts ADD COLUMN IF NOT EXISTS
+    far_type|transaction_id|evidence_type text` added to `init_db` → auto-applies on deploy startup (conftest
+    `create_all` covers tests).
+  - **Verification:** `test_functional_facts.py` **3 passed** (functional fact promotes with far dimensions +
+    provenance; far_type+transaction distinguish otherwise-identical facts; unknown far_type not promoted) +
+    `test_canonical_facts.py` **4 passed** (existing behaviour preserved). **Full backend suite 280 passed**
+    (273 baseline + 4 S1 + 3 S2). Acceptance (FAR traceability, §7/§43/§46): functional facts ride the existing
+    evidence model ✓ · far_type validated vs ontology, unsupported not promoted ✓ · provenance preserved ✓ ·
+    behaviour-preserving for existing facts ✓.
+
+- **▶ Continuing to S3** — interview data model (interviews / questions / responses + provenance chain).

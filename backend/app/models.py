@@ -403,6 +403,12 @@ class ExtractedFact(Base):
     scope_level: Mapped[str] = mapped_column(Text, nullable=False)
     entity_mention_id: Mapped[uuid.UUID | None] = mapped_column(nullable=True)
     resolution_status: Mapped[str] = mapped_column(Text, nullable=False, default="not_required")
+    # Functional evidence (Class 2 §7): far_type = the function/asset/risk value (validated vs the FAR ontology);
+    # transaction_id = the controlled transaction; evidence_type = the kind of functional evidence. Nullable —
+    # non-functional facts leave them null, so existing rows/flows are unchanged.
+    far_type: Mapped[str | None] = mapped_column(Text, nullable=True)
+    transaction_id: Mapped[str | None] = mapped_column(Text, nullable=True)
+    evidence_type: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     sources: Mapped[list[FactSource]] = relationship(
@@ -498,6 +504,9 @@ class CanonicalFact(Base):
     unit: Mapped[str | None] = mapped_column(Text, nullable=True)
     period: Mapped[str | None] = mapped_column(Text, nullable=True)
     scope_level: Mapped[str] = mapped_column(Text, nullable=False)
+    far_type: Mapped[str | None] = mapped_column(Text, nullable=True)          # Class 2 §7 functional dimensions
+    transaction_id: Mapped[str | None] = mapped_column(Text, nullable=True)
+    evidence_type: Mapped[str | None] = mapped_column(Text, nullable=True)
     canonical_key: Mapped[str] = mapped_column(Text, nullable=False)
     active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     conflict_candidate: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)

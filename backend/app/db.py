@@ -94,6 +94,11 @@ async def init_db(eng=engine) -> None:
             await conn.execute(text(
                 "ALTER TABLE draft_sections ADD COLUMN IF NOT EXISTS research jsonb"
             ))
+            # Class 2 functional evidence: functional dimensions on the shared fact tables (nullable, additive).
+            for _tbl in ("extracted_facts", "canonical_facts"):
+                await conn.execute(text(f"ALTER TABLE {_tbl} ADD COLUMN IF NOT EXISTS far_type text"))
+                await conn.execute(text(f"ALTER TABLE {_tbl} ADD COLUMN IF NOT EXISTS transaction_id text"))
+                await conn.execute(text(f"ALTER TABLE {_tbl} ADD COLUMN IF NOT EXISTS evidence_type text"))
             await conn.execute(text(
                 "ALTER TABLE risk_runs ADD COLUMN IF NOT EXISTS status_updated_at "
                 "timestamp with time zone DEFAULT now()"

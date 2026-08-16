@@ -12,293 +12,524 @@
         "Loan Agreement",
         "Cost Sharing Agreement"
       ],
-      "candidate_entity_roles": ["provider", "recipient", "lender", "borrower", "licensor", "licensee"],
-      "provenance_required": ["document_id", "quote", "locator"],
+      "candidate_entity_roles": [
+        "provider",
+        "recipient",
+        "lender",
+        "borrower",
+        "licensor",
+        "licensee"
+      ],
+      "provenance_required": [
+        "document_id",
+        "quote",
+        "locator"
+      ],
       "fact_types": [
         {
           "fact_type": "provider",
           "value_type": "entity_ref",
           "required": true,
-          "allowed_scope_levels": ["counterparty", "transaction"]
+          "allowed_scope_levels": [
+            "counterparty",
+            "transaction"
+          ]
         },
         {
           "fact_type": "recipient",
           "value_type": "entity_ref",
           "required": true,
-          "allowed_scope_levels": ["local_entity", "counterparty", "transaction"]
+          "allowed_scope_levels": [
+            "local_entity",
+            "counterparty",
+            "transaction"
+          ]
         },
         {
           "fact_type": "agreement_type",
           "value_type": "string",
           "required": true,
-          "allowed_scope_levels": ["transaction"]
+          "allowed_scope_levels": [
+            "transaction"
+          ]
         },
         {
           "fact_type": "effective_date",
           "value_type": "date",
           "required": false,
-          "allowed_scope_levels": ["transaction"]
+          "allowed_scope_levels": [
+            "transaction"
+          ]
         },
         {
           "fact_type": "expiry_date",
           "value_type": "date",
           "required": false,
-          "allowed_scope_levels": ["transaction"]
+          "allowed_scope_levels": [
+            "transaction"
+          ]
         },
         {
           "fact_type": "services_description",
           "value_type": "string",
           "required": false,
-          "allowed_scope_levels": ["transaction"]
+          "allowed_scope_levels": [
+            "transaction"
+          ]
         },
         {
           "fact_type": "pricing_method",
           "value_type": "string",
           "required": false,
-          "allowed_scope_levels": ["transaction"]
+          "allowed_scope_levels": [
+            "transaction"
+          ]
         },
         {
           "fact_type": "markup",
           "value_type": "percentage",
           "required": false,
-          "allowed_scope_levels": ["transaction"]
+          "allowed_scope_levels": [
+            "transaction"
+          ]
         },
         {
           "fact_type": "royalty_rate",
           "value_type": "percentage",
           "required": false,
-          "allowed_scope_levels": ["transaction"]
+          "allowed_scope_levels": [
+            "transaction"
+          ]
         },
         {
           "fact_type": "payment_terms",
           "value_type": "string",
           "required": false,
-          "allowed_scope_levels": ["transaction"]
+          "allowed_scope_levels": [
+            "transaction"
+          ]
         },
         {
           "fact_type": "governing_law",
           "value_type": "string",
           "required": false,
-          "allowed_scope_levels": ["transaction"]
+          "allowed_scope_levels": [
+            "transaction"
+          ]
         }
       ]
     },
     {
       "schema_key": "financial_table",
       "schema_version": "2026-08-07",
-      "supported_document_types": ["Trial Balance", "General Ledger", "Invoice Population", "Segmented P&L"],
-      "candidate_entity_roles": ["entity", "counterparty"],
-      "provenance_required": ["document_id", "quote", "locator"],
+      "supported_document_types": [
+        "Trial Balance",
+        "General Ledger",
+        "Invoice Population",
+        "Segmented P&L"
+      ],
+      "candidate_entity_roles": [
+        "entity",
+        "counterparty"
+      ],
+      "provenance_required": [
+        "document_id",
+        "quote",
+        "locator"
+      ],
       "fact_types": [
         {
           "fact_type": "revenue",
           "value_type": "money",
           "required": false,
-          "allowed_scope_levels": ["local_entity", "transaction"]
+          "allowed_scope_levels": [
+            "local_entity",
+            "transaction"
+          ]
         },
         {
           "fact_type": "expense",
           "value_type": "money",
           "required": false,
-          "allowed_scope_levels": ["local_entity", "transaction"]
+          "allowed_scope_levels": [
+            "local_entity",
+            "transaction"
+          ]
         },
         {
           "fact_type": "transaction_amount",
           "value_type": "money",
           "required": false,
-          "allowed_scope_levels": ["transaction"]
+          "allowed_scope_levels": [
+            "transaction"
+          ]
         },
         {
           "fact_type": "transaction_date",
           "value_type": "date",
           "required": false,
-          "allowed_scope_levels": ["transaction"]
+          "allowed_scope_levels": [
+            "transaction"
+          ]
         },
         {
           "fact_type": "operating_margin",
           "value_type": "percentage",
           "required": false,
-          "allowed_scope_levels": ["local_entity"]
+          "allowed_scope_levels": [
+            "local_entity"
+          ]
         },
         {
           "fact_type": "gl_account",
           "value_type": "string",
           "required": false,
-          "allowed_scope_levels": ["local_entity", "transaction"]
+          "allowed_scope_levels": [
+            "local_entity",
+            "transaction"
+          ]
         },
         {
           "fact_type": "entity_name",
           "value_type": "entity_ref",
           "required": false,
-          "allowed_scope_levels": ["local_entity"]
+          "allowed_scope_levels": [
+            "local_entity"
+          ]
         },
         {
           "fact_type": "invoice_amount",
           "value_type": "money",
           "required": false,
-          "allowed_scope_levels": ["transaction"]
+          "allowed_scope_levels": [
+            "transaction"
+          ]
         },
         {
           "fact_type": "invoice_number",
           "value_type": "string",
           "required": false,
-          "allowed_scope_levels": ["transaction"]
+          "allowed_scope_levels": [
+            "transaction"
+          ]
         },
         {
           "fact_type": "counterparty_name",
           "value_type": "entity_ref",
           "required": false,
-          "allowed_scope_levels": ["counterparty", "transaction"]
+          "allowed_scope_levels": [
+            "counterparty",
+            "transaction"
+          ]
         }
       ]
     },
     {
       "schema_key": "entity_record",
       "schema_version": "2026-08-07",
-      "supported_document_types": ["Registry Extract", "Organization Chart"],
-      "candidate_entity_roles": ["legal_entity", "parent", "subsidiary", "manager"],
-      "provenance_required": ["document_id", "quote", "locator"],
+      "supported_document_types": [
+        "Registry Extract",
+        "Organization Chart"
+      ],
+      "candidate_entity_roles": [
+        "legal_entity",
+        "parent",
+        "subsidiary",
+        "manager"
+      ],
+      "provenance_required": [
+        "document_id",
+        "quote",
+        "locator"
+      ],
       "fact_types": [
         {
           "fact_type": "legal_name",
           "value_type": "entity_ref",
           "required": true,
-          "allowed_scope_levels": ["local_entity", "counterparty"]
+          "allowed_scope_levels": [
+            "local_entity",
+            "counterparty"
+          ]
         },
         {
           "fact_type": "jurisdiction",
           "value_type": "string",
           "required": false,
-          "allowed_scope_levels": ["local_entity", "counterparty"]
+          "allowed_scope_levels": [
+            "local_entity",
+            "counterparty"
+          ]
         },
         {
           "fact_type": "entity_type",
           "value_type": "string",
           "required": false,
-          "allowed_scope_levels": ["local_entity", "counterparty"]
+          "allowed_scope_levels": [
+            "local_entity",
+            "counterparty"
+          ]
         },
         {
           "fact_type": "reporting_line",
           "value_type": "string",
           "required": false,
-          "allowed_scope_levels": ["local_entity", "group"]
+          "allowed_scope_levels": [
+            "local_entity",
+            "group"
+          ]
         }
       ]
     },
     {
       "schema_key": "tp_group_document",
       "schema_version": "2026-08-07",
-      "supported_document_types": ["Annual Report", "Master File"],
-      "candidate_entity_roles": ["group"],
-      "provenance_required": ["document_id", "quote", "locator"],
+      "supported_document_types": [
+        "Annual Report",
+        "Master File"
+      ],
+      "candidate_entity_roles": [
+        "group"
+      ],
+      "provenance_required": [
+        "document_id",
+        "quote",
+        "locator"
+      ],
       "fact_types": [
         {
           "fact_type": "group_business_description",
           "value_type": "string",
           "required": false,
-          "allowed_scope_levels": ["group"]
+          "allowed_scope_levels": [
+            "group"
+          ]
         },
         {
           "fact_type": "function",
           "value_type": "string",
           "required": false,
-          "allowed_scope_levels": ["group"]
+          "allowed_scope_levels": [
+            "group"
+          ]
         },
         {
           "fact_type": "asset",
           "value_type": "string",
           "required": false,
-          "allowed_scope_levels": ["group"]
+          "allowed_scope_levels": [
+            "group"
+          ]
         },
         {
           "fact_type": "risk",
           "value_type": "string",
           "required": false,
-          "allowed_scope_levels": ["group"]
+          "allowed_scope_levels": [
+            "group"
+          ]
         }
       ]
     },
     {
       "schema_key": "benchmark_study",
       "schema_version": "2026-08-07",
-      "supported_document_types": ["Benchmark Study"],
-      "candidate_entity_roles": ["tested_party", "counterparty"],
-      "provenance_required": ["document_id", "quote", "locator"],
+      "supported_document_types": [
+        "Benchmark Study"
+      ],
+      "candidate_entity_roles": [
+        "tested_party",
+        "counterparty"
+      ],
+      "provenance_required": [
+        "document_id",
+        "quote",
+        "locator"
+      ],
       "fact_types": [
         {
           "fact_type": "tested_party",
           "value_type": "entity_ref",
           "required": false,
-          "allowed_scope_levels": ["transaction"]
+          "allowed_scope_levels": [
+            "transaction"
+          ]
         },
         {
           "fact_type": "benchmark_range",
           "value_type": "string",
           "required": false,
-          "allowed_scope_levels": ["transaction"]
+          "allowed_scope_levels": [
+            "transaction"
+          ]
         },
         {
           "fact_type": "function",
           "value_type": "string",
           "required": false,
-          "allowed_scope_levels": ["transaction"]
+          "allowed_scope_levels": [
+            "transaction"
+          ]
         },
         {
           "fact_type": "asset",
           "value_type": "string",
           "required": false,
-          "allowed_scope_levels": ["transaction"]
+          "allowed_scope_levels": [
+            "transaction"
+          ]
         },
         {
           "fact_type": "risk",
           "value_type": "string",
           "required": false,
-          "allowed_scope_levels": ["transaction"]
+          "allowed_scope_levels": [
+            "transaction"
+          ]
         }
       ]
     },
     {
       "schema_key": "tp_local_file",
       "schema_version": "2026-08-07",
-      "supported_document_types": ["Local File"],
-      "candidate_entity_roles": ["tested_party", "counterparty", "local_entity"],
-      "provenance_required": ["document_id", "quote", "locator"],
+      "supported_document_types": [
+        "Local File"
+      ],
+      "candidate_entity_roles": [
+        "tested_party",
+        "counterparty",
+        "local_entity"
+      ],
+      "provenance_required": [
+        "document_id",
+        "quote",
+        "locator"
+      ],
       "fact_types": [
         {
           "fact_type": "local_business_description",
           "value_type": "string",
           "required": false,
-          "allowed_scope_levels": ["local_entity"]
+          "allowed_scope_levels": [
+            "local_entity"
+          ]
         },
         {
           "fact_type": "function",
           "value_type": "string",
           "required": false,
-          "allowed_scope_levels": ["local_entity", "transaction"]
+          "allowed_scope_levels": [
+            "local_entity",
+            "transaction"
+          ]
         },
         {
           "fact_type": "asset",
           "value_type": "string",
           "required": false,
-          "allowed_scope_levels": ["local_entity", "transaction"]
+          "allowed_scope_levels": [
+            "local_entity",
+            "transaction"
+          ]
         },
         {
           "fact_type": "risk",
           "value_type": "string",
           "required": false,
-          "allowed_scope_levels": ["local_entity", "transaction"]
+          "allowed_scope_levels": [
+            "local_entity",
+            "transaction"
+          ]
         },
         {
           "fact_type": "tested_party",
           "value_type": "entity_ref",
           "required": false,
-          "allowed_scope_levels": ["transaction"]
+          "allowed_scope_levels": [
+            "transaction"
+          ]
         },
         {
           "fact_type": "benchmark_range",
           "value_type": "string",
           "required": false,
-          "allowed_scope_levels": ["transaction"]
+          "allowed_scope_levels": [
+            "transaction"
+          ]
+        }
+      ]
+    },
+    {
+      "schema_key": "functional",
+      "schema_version": "2026-08-16",
+      "supported_document_types": [
+        "Functional Interview",
+        "Transfer Pricing Questionnaire",
+        "Organization Chart",
+        "Invoice"
+      ],
+      "candidate_entity_roles": [
+        "performer",
+        "owner",
+        "user",
+        "controller",
+        "decision_maker"
+      ],
+      "provenance_required": [
+        "document_id",
+        "quote",
+        "locator"
+      ],
+      "fact_types": [
+        {
+          "fact_type": "function_performed",
+          "value_type": "boolean",
+          "required": false,
+          "allowed_scope_levels": [
+            "local_entity",
+            "transaction",
+            "counterparty"
+          ]
+        },
+        {
+          "fact_type": "asset_used",
+          "value_type": "boolean",
+          "required": false,
+          "allowed_scope_levels": [
+            "local_entity",
+            "transaction",
+            "counterparty"
+          ]
+        },
+        {
+          "fact_type": "risk_assumed",
+          "value_type": "boolean",
+          "required": false,
+          "allowed_scope_levels": [
+            "local_entity",
+            "transaction",
+            "counterparty"
+          ]
+        },
+        {
+          "fact_type": "risk_controlled",
+          "value_type": "boolean",
+          "required": false,
+          "allowed_scope_levels": [
+            "local_entity",
+            "transaction",
+            "counterparty"
+          ]
+        },
+        {
+          "fact_type": "capability",
+          "value_type": "boolean",
+          "required": false,
+          "allowed_scope_levels": [
+            "local_entity",
+            "transaction",
+            "counterparty"
+          ]
         }
       ]
     }
