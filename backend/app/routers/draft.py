@@ -32,6 +32,7 @@ from ..deps import (
 )
 from ..docx_export import build_document
 from ..drafting import Drafter, DraftResult, ResearchDrafter, validate_research
+from ..far_builder import functional_section_content
 from ..embeddings import Embedder
 from ..jobs import enqueue_pipeline_job, schedule_pipeline_drain
 from regulatory import local_regulations_content, regulatory_snapshot
@@ -354,6 +355,26 @@ async def _draft_regulatory(session: AsyncSession, section: DraftSection, engage
         section.error = str(exc)[:1000]
 
 
+# The Functional Analysis section: DETERMINISTIC from the FAR profile + risk-control rows (no LLM, no retrieval).
+# Never blocks the draft — with no functional evidence it emits an honest "not yet established" note.
+async def _draft_functional(session: AsyncSession, section: DraftSection, engagement_id: uuid.UUID) -> None:
+    section.status = DraftStatus.drafting
+    section.error = None
+    section.status_updated_at = datetime.now(timezone.utc)
+    try:
+        section.content = await functional_section_content(session, engagement_id)
+        section.model = "deterministic:far"
+        section.status = DraftStatus.drafted
+        section.drafted_at = datetime.now(timezone.utc)
+        section.status_updated_at = section.drafted_at
+        log.info("draft_functional DONE section=%s", section.id)
+    except Exception as exc:  # noqa: BLE001 - record the failure; caller stops the run
+        log.exception("draft_functional FAILED section=%s", section.id)
+        section.status = DraftStatus.failed
+        section.status_updated_at = datetime.now(timezone.utc)
+        section.error = str(exc)[:1000]
+
+
 async def _draft_one(session: AsyncSession, section: DraftSection, element, documents: list[DocContext],
                      coverage_note: str, scope_note: str, drafter: Drafter,
                      fname_to_docid: dict[str, str]) -> None:
@@ -649,6 +670,20 @@ async def run_draft(session_factory: async_sessionmaker, drafter: Drafter, resea
                             )
                             return
                         continue
+                    if getattr(element, "functional", False):
+                        # Deterministic Functional Analysis section: built from the FAR profile, no LLM/retrieval.
+                        await _draft_functional(session, section, engagement_id)
+                        await session.commit()
+                        if section.status == DraftStatus.failed:
+                            stopped = await _mark_open_sections_failed(
+                                session, engagement_id, jurisdiction, section.error or "draft section failed"
+                            )
+                            log.info(
+                                "run_draft STOPPED engagement=%s jurisdiction=%s failed_section=%s stopped_sections=%d reason=%s",
+                                engagement_id, jurisdiction, section.id, stopped, section.error,
+                            )
+                            return
+                        continue
                     if getattr(element, "research", False):
                         # Web-sourced section: no document retrieval; research the industry on the web.
                         await _draft_research(session, section, research_drafter,
@@ -860,8 +895,12 @@ async def download_draft_docx(
     drafted = [s for s in sections if s.status == DraftStatus.drafted and s.content]
     if expected == 0 or len(sections) != expected or len(drafted) != expected:
         raise HTTPException(status_code=409, detail=f"draft not complete for '{jurisdiction}'")
-    # Research (web-sourced) sections carry provenance in `research.sources`, not inline document citations.
-    uncited = [s.element_name for s in drafted if not s.citations and s.research is None]
+    # Research (web-sourced) sections carry provenance in `research.sources`; deterministic sections
+    # (Local Regulations, Functional Analysis) are traceable to the registry/FAR — neither uses inline citations.
+    uncited = [
+        s.element_name for s in drafted
+        if not s.citations and s.research is None and not (s.model or "").startswith("deterministic:")
+    ]
     if uncited:
         raise HTTPException(status_code=409, detail=f"draft has uncited section(s): {', '.join(uncited[:3])}")
     entity = owner.entity.name if owner.entity else "Entity"
@@ -949,6 +988,11 @@ async def regenerate_section(
     fiscal_year = engagement.fiscal_year if engagement else None
     if getattr(element, "regulatory", False):
         await _draft_regulatory(session, section, section.engagement_id, section.jurisdiction, fiscal_year)
+        await session.commit()
+        await session.refresh(section)
+        return _to_read(section)
+    if getattr(element, "functional", False):
+        await _draft_functional(session, section, section.engagement_id)
         await session.commit()
         await session.refresh(section)
         return _to_read(section)

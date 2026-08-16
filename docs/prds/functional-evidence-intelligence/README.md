@@ -43,8 +43,8 @@ those are evidence-backed + rule-driven (§45).
 | S9 | FAR builder — aggregate facts → per entity/txn FAR profile + deterministic characterization (undetermined allowed) + evidence-strength hierarchy | AFK | S1, S2, S5 | ✅ DONE |
 | S10 | Risk control & capability — risk_control_profiles (bearer/exposure/decision/control/capability/financial capacity), evidence-linked, mismatches preserved + risk table | AFK | S1, S2, S9 | ✅ DONE |
 | S11 | Requirements integration — evaluate FAR concept sufficiency (partial when risk-control unknown); gap-driven interview recommendation | AFK | S9, S10 | ✅ DONE |
-| S12 | Draft integration — FAR sections from structured evidence, traceable (DraftSection pattern) | AFK | S9, S10 | ▶ NEXT |
-| S13 | Risks integration — unsupported risk allocation, capability gap, functional inconsistency, contract-vs-conduct mismatch, missing-interview findings | AFK | S9, S10 | pending |
+| S12 | Draft integration — FAR sections from structured evidence, traceable (DraftSection pattern) | AFK | S9, S10 | ✅ DONE |
+| S13 | Risks integration — unsupported risk allocation, capability gap, functional inconsistency, contract-vs-conduct mismatch, missing-interview findings | AFK | S9, S10 | ▶ NEXT |
 
 **DAG:** S1 → S2 → {S3, S6, S7, S8}; S3 → {S4, S5}; S5 → S9 → S10 → {S11, S12, S13}.
 **Non-goals honoured (§57):** no video/STT, HR/ERP integration, financial segmentation, TNMM/benchmarking, full
@@ -229,3 +229,33 @@ of every Class 2 commit (staged files are explicit). `.claude/settings.json` and
     doesn't prove sufficiency ✓.
   - Honest: summarised at engagement level (no material-transaction gating model yet); per-transaction is a
     follow-on (the summary already accepts a transaction_id).
+
+- [ ] **S12 — Draft integration** — BUILT, full-suite gate running. Reuses the Class 1 deterministic-section
+  pattern EXACTLY (Local Regulations / Industry Analysis).
+  - `far_builder.py::functional_section_content(session, engagement_id, transaction_id=None)` — deterministic
+    markdown from the S9 FAR profile + S10 risk-control rows: Entity characterization (`derive_characterization`)
+    + Functions performed / Assets employed / Risks assumed + a Risk Control & Decision-Making table
+    (risk / contractual bearer / control / capability / status), each traceable to functional evidence, NO LLM,
+    NO retrieval. No functional evidence → an honest "Functional analysis is not yet established from operational
+    evidence" note (never blocks the draft).
+  - `regulatory/requirements.py`: new `ResolvedElement.functional` flag + `_functional_element(country)`
+    (`{country}:functional_analysis`, `functional=True`, required=False, verified=True, severity=low); injected
+    by `draft_elements` **always**, right after Industry Analysis (functional evidence is per-engagement, so
+    gate like Industry, not country-gated like Local Regulations). `resolve_requirements` untouched (coverage /
+    matching / assessment never see it).
+  - `routers/draft.py`: `_draft_functional` deterministic branch in `run_draft` dispatch + `regenerate_section`
+    (`model="deterministic:far"`, non-gating on empty). Root-cause fix: the `.docx` "uncited section" guard now
+    exempts deterministic sections (`model` starts `deterministic:`) — this also fixes a latent bug where a
+    Local Regulations docx export would have 409'd.
+  - **Golden re-capture (behaviour-preserving):** `golden_requirements.json` resolve+draft re-captured; a proof
+    script confirmed the ONLY changes are the defaulted `functional:false` flag on every element (resolve+draft)
+    plus exactly one functional element inserted after industry_analysis per jurisdiction (orders renumbered) —
+    no semantic change to statutory elements. `test_industry_analysis` `+1`→`+2` + new functional structural
+    tests updated legitimately.
+  - **Verification:** `test_draft.py` **13 passed** (incl. new: functional section deterministic from FAR +
+    positioned after Industry; honest non-gating fallback without evidence) + `test_requirements_golden.py` 2 +
+    `test_industry_analysis.py` 13. **Full backend suite gate running.** No frontend change (draft renders
+    sections generically). Acceptance (Draft, §38-40): FAR section built from structured evidence ✓ · traceable,
+    deterministic, no fabricated conclusions ✓ · never blocks the draft ✓.
+  - Honest: engagement-level FAR (per-transaction section is a follow-on; `functional_section_content` already
+    accepts a `transaction_id`).

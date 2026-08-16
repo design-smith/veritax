@@ -4,7 +4,7 @@ import zipfile
 
 from app.drafting import SYSTEM_PROMPT, FakeDrafter
 from app.main import app
-from app.models import Document, DocumentChunk
+from app.models import CanonicalFact, Document, DocumentChunk
 from app.requirements import draft_elements, resolve_requirements
 
 
@@ -235,6 +235,51 @@ async def test_local_regulations_section_is_deterministic_and_snapshots(client):
         ))).scalar_one()
     keys = {r["rule_key"] for r in snap.snapshot["rules"]}
     assert {"local_file_required", "master_file_required", "transaction_category_materiality"} <= keys
+
+
+async def _seed_functional_fact(session, engagement_id, fact_type, far_type):
+    session.add(CanonicalFact(
+        engagement_id=engagement_id, fact_type=fact_type, value_normalized="true", value_type="boolean",
+        scope_level="local_entity", far_type=far_type, transaction_id="txn_1",
+        evidence_type="functional_interview", canonical_key=f"k-{fact_type}-{far_type}-{uuid.uuid4().hex[:8]}"))
+
+
+async def test_functional_analysis_section_is_deterministic_from_far_evidence(client):
+    # S12: the Functional Analysis section is built deterministically from the FAR profile + risk-control rows.
+    eid = await _engagement_ready_for_draft(client, "Netherlands", b"The entity is a limited-risk distributor.")
+    async with app.state.session_factory() as session:
+        await _seed_functional_fact(session, uuid.UUID(eid), "function_performed", "distribution")
+        await _seed_functional_fact(session, uuid.UUID(eid), "risk_assumed", "foreign_exchange_risk")
+        await session.commit()
+    await client.post(f"/engagements/{eid}/risk-control", json={"items": [
+        {"transaction_id": "txn_1", "risk_type": "foreign_exchange_risk", "contractual_bearer_entity_id": "NL",
+         "control_entity_id": "NL", "capability_entity_id": "NL"}]})
+
+    await client.post(f"/engagements/{eid}/draft", params={"jurisdiction": "Netherlands"})
+    got = (await client.get(f"/engagements/{eid}/draft", params={"jurisdiction": "Netherlands"})).json()
+    assert got["summary"]["pending"] == 0 and got["summary"]["failed"] == 0
+
+    fn = next(s for s in got["sections"] if s["element_name"] == "Functional Analysis")
+    assert fn["status"] == "drafted" and fn["content"]
+    # Deterministic content from the FAR profile — no LLM, no document citations.
+    assert "distribution" in fn["content"]
+    assert "foreign exchange risk" in fn["content"]              # risk-control table row
+    assert "characterization" in fn["content"].lower()
+    assert not fn["citations"]
+    # Positioned right after Industry Analysis.
+    ordered = [s["element_name"] for s in sorted(got["sections"], key=lambda s: s["element_order"])]
+    assert ordered[ordered.index("Functional Analysis") - 1] == "Industry Analysis"
+
+
+async def test_functional_analysis_section_is_non_gating_without_evidence(client):
+    # No functional evidence → an honest 'not yet established' section that still drafts and never blocks.
+    eid = await _engagement_ready_for_draft(client, "Netherlands", b"The entity is a limited-risk distributor.")
+    await client.post(f"/engagements/{eid}/draft", params={"jurisdiction": "Netherlands"})
+    got = (await client.get(f"/engagements/{eid}/draft", params={"jurisdiction": "Netherlands"})).json()
+    assert got["summary"]["failed"] == 0
+    fn = next(s for s in got["sections"] if s["element_name"] == "Functional Analysis")
+    assert fn["status"] == "drafted"
+    assert "not yet established" in fn["content"].lower()
 
 
 async def test_unknown_jurisdiction_404(client):

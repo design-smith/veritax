@@ -65,12 +65,32 @@ def test_draft_elements_injects_industry_analysis_after_business_strategy():
     ind = els[idx]
     assert ind.research is True and ind.required is False       # web-sourced, non-gating
     assert ind.requirement_key == "United Arab Emirates:industry_analysis"   # distinct, no key collision
-    # display orders stay contiguous, exactly one more element than the statutory list
+    # display orders stay contiguous; two more elements than the statutory list (Industry + Functional Analysis)
     assert [e.order for e in els] == list(range(1, len(els) + 1))
-    assert len(els) == len(resolve_requirements("United Arab Emirates")) + 1
+    assert len(els) == len(resolve_requirements("United Arab Emirates")) + 2
     # statutory requirement_keys are preserved (coverage <-> draft linkage intact)
     statutory_keys = {e.requirement_key for e in resolve_requirements("United Arab Emirates")}
     assert statutory_keys.issubset({e.requirement_key for e in els})
+
+
+def test_draft_elements_injects_functional_analysis_after_industry():
+    # S12: Functional Analysis is a draft-only value-add section, injected right after Industry Analysis,
+    # always present (functional evidence is per-engagement, so gate like Industry, never country-gated).
+    els = draft_elements("United Arab Emirates")
+    names = [e.element_name for e in els]
+    assert "Functional Analysis" in names
+    idx = names.index("Functional Analysis")
+    assert names[idx - 1] == "Industry Analysis"                # positioned right after Industry Analysis
+    fn = els[idx]
+    assert fn.functional is True and fn.required is False        # deterministic, non-gating
+    assert fn.requirement_key == "United Arab Emirates:functional_analysis"   # distinct, no key collision
+
+
+def test_resolve_requirements_excludes_the_functional_element():
+    # The statutory source of truth (coverage/matching) must not see Functional Analysis.
+    els = resolve_requirements("United Arab Emirates")
+    assert all(not getattr(e, "functional", False) for e in els)
+    assert all(e.requirement_key != "United Arab Emirates:functional_analysis" for e in els)
 
 
 def test_draft_elements_falls_after_profile_when_no_strategy_element():

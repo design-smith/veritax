@@ -34,6 +34,7 @@ class ResolvedElement:
     severity: str = "medium"             # how badly a gap here hurts: critical | high | medium | low
     research: bool = False               # True = web-sourced value-add section (not doc-gated, never blocks the draft)
     regulatory: bool = False             # True = deterministic Local Regulations section built from registry rules
+    functional: bool = False             # True = deterministic Functional Analysis section built from FAR evidence
 
 
 @lru_cache(maxsize=1)
@@ -143,6 +144,23 @@ def _regulatory_element(country: str) -> ResolvedElement:
     )
 
 
+def _functional_element(country: str) -> ResolvedElement:
+    return ResolvedElement(
+        requirement_key=f"{country}:functional_analysis",   # distinct from statutory f"{country}:{order}" keys
+        order=0,                                             # display order set by draft_elements()
+        element_name="Functional Analysis",
+        description=(
+            "Functions performed, assets employed, risks assumed, risk control & decision-making, and the "
+            "resulting entity characterization — built deterministically from evidence-backed functional facts."
+        ),
+        sub_requirements=(),
+        required=False,
+        verified=True,
+        functional=True,
+        severity="low",
+    )
+
+
 @lru_cache(maxsize=32)
 def draft_elements(country: str) -> tuple[ResolvedElement, ...]:
     """Statutory elements plus injected value-add sections (Local Regulations, Industry Analysis), in order.
@@ -157,7 +175,7 @@ def draft_elements(country: str) -> tuple[ResolvedElement, ...]:
     if not base:
         return ()
     idx = next((i for i, e in enumerate(base) if "strateg" in e.element_name.lower()), 0)
-    ordered = base[: idx + 1] + [_industry_element(country)] + base[idx + 1 :]
+    ordered = base[: idx + 1] + [_industry_element(country), _functional_element(country)] + base[idx + 1 :]
     if regulatory_context(country, None):              # jurisdiction has registry rules → lead with Local Regulations
         ordered = [_regulatory_element(country)] + ordered
     return tuple(replace(e, order=i + 1) for i, e in enumerate(ordered))

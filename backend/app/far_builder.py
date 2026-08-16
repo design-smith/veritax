@@ -16,7 +16,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from .functional import FUNCTIONAL_FACT_TYPES
-from .models import CanonicalFact
+from .models import CanonicalFact, RiskControlProfile
 
 _BUCKET = {
     "function_performed": "functions",
@@ -60,6 +60,43 @@ async def build_far_profile(session: AsyncSession, engagement_id: uuid.UUID, *,
     }
     profile["evidence_types"] = sorted(evidence_types)
     return profile
+
+
+async def functional_section_content(session: AsyncSession, engagement_id: uuid.UUID, *,
+                                     transaction_id: str | None = None) -> str:
+    """Deterministic markdown for the Draft 'Functional Analysis' section (§38-40) — built from the FAR profile +
+    risk-control rows; traceable, no LLM. Honest 'not yet established' when there's no functional evidence."""
+    profile = await build_far_profile(session, engagement_id, transaction_id=transaction_id)
+    functions = [f["far_type"] for f in profile["functions"]]
+    assets = [a["far_type"] for a in profile["assets"]]
+    risks_assumed = [r["far_type"] for r in profile["risks_assumed"]]
+    rc = (
+        await session.execute(select(RiskControlProfile).where(RiskControlProfile.engagement_id == engagement_id))
+    ).scalars().all()
+
+    if not (functions or assets or risks_assumed or profile["risks_controlled"] or rc):
+        return ("Functional analysis is not yet established from operational evidence (no functional interviews, "
+                "questionnaires, or agreements captured). This section populates once functional evidence is recorded.")
+
+    def fmt(xs: list[str]) -> str:
+        return ", ".join(x.replace("_", " ") for x in xs) or "none evidenced"
+
+    lines = [
+        f"**Entity characterization:** {derive_characterization(profile).replace('_', ' ')}.",
+        "",
+        f"**Functions performed:** {fmt(functions)}.",
+        f"**Assets employed:** {fmt(assets)}.",
+        f"**Risks assumed:** {fmt(risks_assumed)}.",
+    ]
+    if rc:
+        lines += ["", "**Risk control & decision-making:**", "",
+                  "| Risk | Contractual bearer | Control | Capability | Status |",
+                  "| --- | --- | --- | --- | --- |"]
+        for r in rc:
+            lines.append(f"| {r.risk_type.replace('_', ' ')} | {r.contractual_bearer_entity_id or '?'} | "
+                         f"{r.control_entity_id or '?'} | {r.capability_entity_id or '?'} | {r.status.replace('_', ' ')} |")
+    lines += ["", "Each element above is traceable to the underlying functional evidence."]
+    return "\n".join(lines)
 
 
 def derive_characterization(profile: dict) -> str:
