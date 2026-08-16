@@ -41,8 +41,8 @@ those are evidence-backed + rule-driven (§45).
 | S7 | Org-chart intelligence — key roles + reporting lines as scoped evidence; supports but never proves control | AFK | S2 | ✅ DONE |
 | S8 | Invoice evidence — basic transaction-existence facts, properly scoped; cannot establish FAR | AFK | S2 | ✅ DONE |
 | S9 | FAR builder — aggregate facts → per entity/txn FAR profile + deterministic characterization (undetermined allowed) + evidence-strength hierarchy | AFK | S1, S2, S5 | ✅ DONE |
-| S10 | Risk control & capability — risk_control_profiles (bearer/exposure/decision/control/capability/financial capacity), evidence-linked, mismatches preserved + risk table | AFK | S1, S2, S9 | ▶ NEXT |
-| S11 | Requirements integration — evaluate FAR concept sufficiency (partial when risk-control unknown); gap-driven interview recommendation | AFK | S9, S10 | pending |
+| S10 | Risk control & capability — risk_control_profiles (bearer/exposure/decision/control/capability/financial capacity), evidence-linked, mismatches preserved + risk table | AFK | S1, S2, S9 | ✅ DONE |
+| S11 | Requirements integration — evaluate FAR concept sufficiency (partial when risk-control unknown); gap-driven interview recommendation | AFK | S9, S10 | ▶ NEXT |
 | S12 | Draft integration — FAR sections from structured evidence, traceable (DraftSection pattern) | AFK | S9, S10 | pending |
 | S13 | Risks integration — unsupported risk allocation, capability gap, functional inconsistency, contract-vs-conduct mismatch, missing-interview findings | AFK | S9, S10 | pending |
 
@@ -203,3 +203,14 @@ of every Class 2 commit (staged files are explicit). `.claude/settings.json` and
     unknown stays unknown ✓ · no unsupported conclusions ✓ · characterization can be `undetermined` ✓.
   - v1 aggregates by (engagement, transaction); entity-level filtering is a noted follow-on (CanonicalFact has no
     entity column — entity lives in the canonical_key via resolution).
+
+- [ ] **S10 — Risk control & capability** — BUILT, full-suite gate running.
+  - New `risk_control_profiles` table (models.py: transaction_id + risk_type + the six §12 role columns +
+    status; unique per (engagement, transaction, risk); create_all covers it). `app/risk_control.py`:
+    `compute_status(bearer, control, capability)` → **deterministic** `potential_mismatch` (bearer diverges from
+    control/capability), `aligned`, or `undetermined`; `upsert_risk_control` (recomputes on update, preserves the
+    conflict §32). `POST`/`GET /engagements/{id}/risk-control` (the §40 risk table).
+  - **Verification:** `test_risk_control.py` **2 passed** (status mismatch/aligned/undetermined; six roles
+    preserved incl. financial capacity; upsert recomputes). **Full backend suite 298 passed** (296 + 2).
+    Acceptance (Risk control, §60): all six roles representable ✓ · deterministic mismatch status ✓ · conflicts
+    remain visible ✓.

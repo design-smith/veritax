@@ -41,6 +41,7 @@ from .routers import (
     org_chart,
     pipeline,
     requirements,
+    risk_control,
     risks,
     search,
     sources,
@@ -186,6 +187,7 @@ for _router in (
     org_chart.router,
     invoices.router,
     far.router,
+    risk_control.router,
 ):
     app.include_router(_router, dependencies=[Depends(get_current_user)])
 

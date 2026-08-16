@@ -1083,6 +1083,32 @@ class OrgRole(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
+class RiskControlProfile(Base):
+    """Per (transaction, risk) control record (Class 2 §11-12, §40): who bears the risk contractually, who is
+    economically exposed, who decides, who controls it, who is capable, and who has financial capacity — with a
+    deterministic mismatch status. Conflicts are PRESERVED (§32), not auto-resolved. Entity ids are opaque."""
+
+    __tablename__ = "risk_control_profiles"
+    __table_args__ = (
+        UniqueConstraint("engagement_id", "transaction_id", "risk_type", name="uq_risk_control_profile"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
+    engagement_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("engagements.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    transaction_id: Mapped[str | None] = mapped_column(Text, nullable=True)
+    risk_type: Mapped[str] = mapped_column(Text, nullable=False)
+    contractual_bearer_entity_id: Mapped[str | None] = mapped_column(Text, nullable=True)
+    exposed_entity_id: Mapped[str | None] = mapped_column(Text, nullable=True)
+    decision_maker_entity_id: Mapped[str | None] = mapped_column(Text, nullable=True)
+    control_entity_id: Mapped[str | None] = mapped_column(Text, nullable=True)
+    capability_entity_id: Mapped[str | None] = mapped_column(Text, nullable=True)
+    financial_capacity_entity_id: Mapped[str | None] = mapped_column(Text, nullable=True)
+    status: Mapped[str] = mapped_column(Text, nullable=False, default="undetermined")  # aligned|potential_mismatch|undetermined
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
 # Seed data for the connector registry (all available, none wired yet).
 CONNECTOR_SEED: list[dict] = [
     {"provider": "sap", "display_name": "SAP", "category": ConnectorCategory.accounting},

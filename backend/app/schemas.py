@@ -536,3 +536,37 @@ class InvoiceRecord(BaseModel):
 
 class InvoiceIngest(BaseModel):
     invoices: list[InvoiceRecord]
+
+
+# Risk control & capability (Class 2 §11-12, §40).
+class RiskControlInput(BaseModel):
+    transaction_id: str | None = None
+    risk_type: str
+    contractual_bearer_entity_id: str | None = None
+    exposed_entity_id: str | None = None
+    decision_maker_entity_id: str | None = None
+    control_entity_id: str | None = None
+    capability_entity_id: str | None = None
+    financial_capacity_entity_id: str | None = None
+
+
+class RiskControlIngest(BaseModel):
+    items: list[RiskControlInput]
+
+
+class RiskControlRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: uuid.UUID
+    transaction_id: str | None
+    risk_type: str
+    contractual_bearer_entity_id: str | None
+    exposed_entity_id: str | None
+    decision_maker_entity_id: str | None
+    control_entity_id: str | None
+    capability_entity_id: str | None
+    financial_capacity_entity_id: str | None
+    status: str
+
+
+class RiskControlResponse(BaseModel):
+    risks: list[RiskControlRead]
