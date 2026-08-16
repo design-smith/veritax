@@ -38,8 +38,8 @@ those are evidence-backed + rule-driven (§45).
 | S4 | Guided functional interview (Planning) — scope→controlled question modules→answers→list/screen/findings | AFK | S1, S3 | ✅ DONE |
 | S5 | Interview extraction — responses → validated functional facts (§46 gate) → canonicalization | AFK | S2, S3 | ✅ DONE (response path; transcript-file + LLM extractor = noted follow-ons) |
 | S6 | TP questionnaire integration — import responses → same functional evidence model (not a silo) | AFK | S1, S2 | ✅ DONE |
-| S7 | Org-chart intelligence — key roles + reporting lines as scoped evidence; supports but never proves control | AFK | S2 | ▶ NEXT |
-| S8 | Invoice evidence — basic transaction-existence facts, properly scoped; cannot establish FAR | AFK | S2 | pending |
+| S7 | Org-chart intelligence — key roles + reporting lines as scoped evidence; supports but never proves control | AFK | S2 | ✅ DONE |
+| S8 | Invoice evidence — basic transaction-existence facts, properly scoped; cannot establish FAR | AFK | S2 | ▶ NEXT |
 | S9 | FAR builder — aggregate facts → per entity/txn FAR profile + deterministic characterization (undetermined allowed) + evidence-strength hierarchy | AFK | S1, S2, S5 | pending |
 | S10 | Risk control & capability — risk_control_profiles (bearer/exposure/decision/control/capability/financial capacity), evidence-linked, mismatches preserved + risk table | AFK | S1, S2, S9 | pending |
 | S11 | Requirements integration — evaluate FAR concept sufficiency (partial when risk-control unknown); gap-driven interview recommendation | AFK | S9, S10 | pending |
@@ -164,3 +164,16 @@ of every Class 2 commit (staged files are explicit). `.claude/settings.json` and
   - **Verification:** `test_questionnaire.py` 1 + `test_interview_extraction.py` 2 = **3 passed** (questionnaire
     answers → same functional model; not a separate store). **Full backend suite 290 passed** (289 + 1).
     Acceptance (Questionnaires, §60): answers enter the same evidence model ✓ · not a separate FAR silo ✓.
+
+- [ ] **S7 — Org-chart intelligence** — BUILT, full-suite gate running.
+  - Ponytail fork call: reporting relationships are a graph → a dedicated lean `org_roles` table (models.py:
+    person_name/job_title/entity_id/department/`reports_to_role_id` self-FK/location/management_level/scope_level
+    `local_entity`; `create_all` handles it, prod DDL trivial). New `routers/org_chart.py`: POST
+    `/engagements/{id}/org-chart` (structured roles → resolves reporting edges by title/name within the batch) +
+    GET the graph. **§25 honoured:** org-chart ingest emits NO functional facts and never sets risk control —
+    supporting evidence only, for S9/S10 to read (weighted below interviews §31).
+  - **Verification:** `test_org_chart.py` **3 passed** (reporting graph resolved + scoped; org chart alone creates
+    zero ExtractedFacts; graph readable). **Full backend suite 293 passed** (290 + 3). Acceptance (Org charts,
+    §60): key roles + reporting relationships preserved ✓ · scoped ✓ · does not independently prove risk control ✓.
+  - **Follow-on (honest):** extracting roles from an uploaded org-chart FILE reuses this table but needs the
+    document-extraction dispatch (same gap as the S5 transcript-file); structured ingest is the v1 path.

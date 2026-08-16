@@ -36,6 +36,7 @@ from .routers import (
     engagements,
     facts,
     interviews,
+    org_chart,
     pipeline,
     requirements,
     risks,
@@ -180,6 +181,7 @@ for _router in (
     requirements.router,
     risks.router,
     interviews.router,
+    org_chart.router,
 ):
     app.include_router(_router, dependencies=[Depends(get_current_user)])
 

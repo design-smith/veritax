@@ -1057,6 +1057,32 @@ class InterviewResponse(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
+class OrgRole(Base):
+    """A key role + reporting line from an org chart (Class 2 §24-25). SCOPED supporting evidence only — org
+    charts support but never PROVE risk control (§25); S9/S10 weight this below interviews (§31)."""
+
+    __tablename__ = "org_roles"
+
+    id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
+    engagement_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("engagements.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    document_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("documents.id", ondelete="SET NULL"), nullable=True   # source org-chart doc, if any
+    )
+    person_name: Mapped[str | None] = mapped_column(Text, nullable=True)
+    job_title: Mapped[str] = mapped_column(Text, nullable=False)
+    entity_id: Mapped[uuid.UUID | None] = mapped_column(nullable=True)
+    department: Mapped[str | None] = mapped_column(Text, nullable=True)
+    reports_to_role_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("org_roles.id", ondelete="SET NULL"), nullable=True   # reporting edge (§25)
+    )
+    location: Mapped[str | None] = mapped_column(Text, nullable=True)
+    management_level: Mapped[str | None] = mapped_column(Text, nullable=True)
+    scope_level: Mapped[str] = mapped_column(Text, nullable=False, default="local_entity")  # §47
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
 # Seed data for the connector registry (all available, none wired yet).
 CONNECTOR_SEED: list[dict] = [
     {"provider": "sap", "display_name": "SAP", "category": ConnectorCategory.accounting},

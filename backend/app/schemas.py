@@ -486,3 +486,36 @@ class QuestionnaireIngest(BaseModel):
     transaction_ids: list[str] = []
     fiscal_period: str | None = None
     items: list[QuestionnaireItem]
+
+
+# Org-chart intelligence (Class 2 §24-25) — key roles + reporting lines as scoped SUPPORTING evidence.
+class OrgRoleInput(BaseModel):
+    person_name: str | None = None
+    job_title: str
+    entity_id: uuid.UUID | None = None
+    department: str | None = None
+    reports_to: str | None = None   # a job_title or person_name within the batch (resolved to an edge)
+    location: str | None = None
+    management_level: str | None = None
+
+
+class OrgChartIngest(BaseModel):
+    document_id: uuid.UUID | None = None
+    roles: list[OrgRoleInput]
+
+
+class OrgRoleRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: uuid.UUID
+    person_name: str | None
+    job_title: str
+    entity_id: uuid.UUID | None
+    department: str | None
+    reports_to_role_id: uuid.UUID | None
+    location: str | None
+    management_level: str | None
+    scope_level: str
+
+
+class OrgChartResponse(BaseModel):
+    roles: list[OrgRoleRead]
