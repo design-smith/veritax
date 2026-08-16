@@ -1,0 +1,15 @@
+{
+  "version": 1,
+  "functions": {
+    "commercial": ["sales", "marketing", "customer_relationship_management", "pricing", "contract_negotiation", "market_development", "distribution", "procurement"],
+    "operational": ["manufacturing", "production_planning", "quality_control", "logistics", "inventory_management", "warehousing", "customer_support", "service_delivery"],
+    "corporate_shared": ["finance", "accounting", "hr", "legal", "it", "administration", "management"],
+    "intellectual_property": ["research", "development", "enhancement", "maintenance", "protection", "exploitation"],
+    "treasury_financing": ["funding", "cash_management", "fx_management", "credit_assessment", "debt_management", "guarantee_management"]
+  },
+  "assets": ["tangible_operating_assets", "inventory", "manufacturing_equipment", "real_estate", "technology", "software", "patents", "trademarks", "customer_relationships", "market_intangibles", "workforce_in_place", "financial_assets", "data", "other_intangibles"],
+  "risks": ["market_risk", "inventory_risk", "credit_risk", "foreign_exchange_risk", "product_liability_risk", "warranty_risk", "capacity_risk", "operational_risk", "regulatory_risk", "rnd_risk", "ip_risk", "financing_risk", "liquidity_risk", "customer_concentration_risk", "supply_chain_risk"],
+  "asset_relationships": ["owned_by", "used_by", "developed_by", "maintained_by", "controlled_by"],
+  "capabilities": ["contractual_assumption", "economic_exposure", "decision_making", "risk_control", "capability", "financial_capacity"],
+  "characterizations": ["routine_service_provider", "limited_risk_distributor", "full_fledged_distributor", "contract_manufacturer", "full_fledged_manufacturer", "ip_owner", "entrepreneur", "financing_entity", "shared_service_center", "principal", "other", "undetermined"]
+}

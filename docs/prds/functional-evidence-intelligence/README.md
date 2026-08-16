@@ -24,8 +24,8 @@ those are evidence-backed + rule-driven (§45).
 
 | # | Title | Type | Blocked by | Status |
 |---|-------|------|-----------|--------|
-| S1 | FAR ontology — controlled, versioned functions/assets/risks/capabilities/characterizations + validators | AFK | — | ▶ IN PROGRESS |
-| S2 | Functional fact model — functional assertions enter the existing fact pipeline (fact shape §7, scope §47, period §48, provenance) | AFK (risk centre) | S1 | pending |
+| S1 | FAR ontology — controlled, versioned functions/assets/risks/capabilities/characterizations + validators | AFK | — | ✅ DONE |
+| S2 | Functional fact model — functional assertions enter the existing fact pipeline (fact shape §7, scope §47, period §48, provenance) | AFK (risk centre) | S1 | ▶ NEXT |
 | S3 | Interview data model — interviews / questions / responses + provenance chain; raw answer immutable | AFK | — | pending |
 | S4 | Guided functional interview (Planning) — scope→controlled question modules→answers→list/screen/findings | AFK | S1, S3 | pending |
 | S5 | Interview extraction — responses → validated functional facts (§46 gate) → canonicalization; + transcript upload | AFK | S2, S3 | pending |
@@ -60,4 +60,19 @@ of every Class 2 commit (staged files are explicit). `.claude/settings.json` and
 
 ## Status / verification log
 
-- [ ] **S1 — FAR ontology** — IN PROGRESS.
+- [x] **S1 — FAR ontology** — DONE (purely additive; under `backend/app/functional/` so it deploys with `app`).
+  - `app/functional/data/far_ontology.json` (versioned) + `app/functional/ontology.py`: `functions()` (35, grouped
+    into commercial/operational/corporate_shared/intellectual_property/treasury_financing), `assets()`, `risks()`,
+    `capabilities()` (the six §11 role dimensions — modeled separately from risk assumption), `characterizations()`
+    (incl. `undetermined`); `valid_function/asset/risk/capability/characterization`; `valid_far_value(fact_type,
+    value)` dispatching a functional fact's `far_type` to the right taxonomy (the bridge into S2).
+  - **Verification:** `pytest tests/test_functional_ontology.py` **4 passed** (versioned; functions taxonomy +
+    categories no-drift; asset/risk/capability/characterization membership incl. rejects; `valid_far_value`
+    dispatch incl. wrong-taxonomy + unknown-fact_type → False). `app + app.functional` import clean; no existing
+    file modified → the 273-suite is unaffected; no frontend change (backend-only slice).
+  - Acceptance (Functional ontology, §60): functions ✓ · assets ✓ · risks ✓ · capability separate from risk
+    assumption ✓ · versioned ✓.
+
+- **▶ Continuing to S2** — functional fact model: extend `ExtractedFact`/`CanonicalFact` with `far_type` /
+  `transaction_id` / `value` / `evidence_type`, validate functional facts against the S1 ontology, behaviour-
+  preserving for existing facts, gated on the full backend suite. Risk centre — done in its own turn.
