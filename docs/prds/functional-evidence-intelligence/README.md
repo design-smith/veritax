@@ -92,4 +92,14 @@ of every Class 2 commit (staged files are explicit). `.claude/settings.json` and
     evidence model ✓ · far_type validated vs ontology, unsupported not promoted ✓ · provenance preserved ✓ ·
     behaviour-preserving for existing facts ✓.
 
-- **▶ Continuing to S3** — interview data model (interviews / questions / responses + provenance chain).
+- [ ] **S3 — Interview data model** — BUILT, full-suite gate running (purely additive: 3 new tables).
+  - `models.py`: `FunctionalInterview` (engagement + entity + participant name/title/role + `transaction_ids`
+    JSONB + `fiscal_period` + `interview_date` + `status` §53 + `created_by`), `InterviewQuestion`
+    (question_key/text/category/sequence + `parent_question_id` self-FK for §17 follow-ups), `InterviewResponse`
+    (`response_raw` immutable §18 + summary + locator). Provenance chain response→question→interview→participant.
+  - **Migration:** `create_all` in `init_db` creates the 3 tables (tests + deploy); no ALTER needed.
+  - **Verification:** `test_interview_model.py` **3 passed** (chain + provenance; follow-up parent link;
+    completion states not_started/in_progress/completed/completed_with_gaps). Full backend suite = the gate (running).
+
+- **▶ Continuing to S4** — guided functional interview (Planning workflow) — first slice with real frontend
+  (question modules → answers → list/screen/findings); tsc + build required.

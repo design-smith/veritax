@@ -986,6 +986,69 @@ class RegulatoryOverride(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
+class FunctionalInterview(Base):
+    """A scoped functional interview (Class 2 §13-15, §43) — an active Planning capability, not just an upload.
+    Scoped to engagement + entity + transaction(s) + participant + role + fiscal period (§14)."""
+
+    __tablename__ = "functional_interviews"
+
+    id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
+    engagement_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("engagements.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    entity_id: Mapped[uuid.UUID | None] = mapped_column(nullable=True)          # the interviewed local entity
+    participant_name: Mapped[str] = mapped_column(Text, nullable=False)
+    participant_title: Mapped[str | None] = mapped_column(Text, nullable=True)
+    participant_role: Mapped[str | None] = mapped_column(Text, nullable=True)   # §15 role_category
+    transaction_ids: Mapped[list] = mapped_column(JSONB, nullable=False, default=list)  # §14 transaction(s) covered
+    fiscal_period: Mapped[str | None] = mapped_column(Text, nullable=True)      # §14/§48
+    interview_date: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # §53: not_started | in_progress | completed | completed_with_gaps
+    status: Mapped[str] = mapped_column(Text, nullable=False, default="not_started")
+    created_by: Mapped[uuid.UUID | None] = mapped_column(nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    questions: Mapped[list[InterviewQuestion]] = relationship(
+        cascade="all, delete-orphan", lazy="selectin", order_by="InterviewQuestion.sequence"
+    )
+
+
+class InterviewQuestion(Base):
+    __tablename__ = "interview_questions"
+
+    id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
+    interview_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("functional_interviews.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    question_key: Mapped[str] = mapped_column(Text, nullable=False)             # controlled question-module key (§16)
+    question_text: Mapped[str] = mapped_column(Text, nullable=False)
+    question_category: Mapped[str | None] = mapped_column(Text, nullable=True)
+    sequence: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    parent_question_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("interview_questions.id", ondelete="SET NULL"), nullable=True   # follow-ups (§17)
+    )
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    responses: Mapped[list[InterviewResponse]] = relationship(
+        cascade="all, delete-orphan", lazy="selectin", order_by="InterviewResponse.created_at"
+    )
+
+
+class InterviewResponse(Base):
+    """A raw interview answer. `response_raw` is immutable evidence (§18); structured facts derive from it in S5."""
+
+    __tablename__ = "interview_responses"
+
+    id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
+    question_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("interview_questions.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    response_raw: Mapped[str] = mapped_column(Text, nullable=False)             # immutable (§18)
+    response_summary: Mapped[str | None] = mapped_column(Text, nullable=True)
+    locator: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
 # Seed data for the connector registry (all available, none wired yet).
 CONNECTOR_SEED: list[dict] = [
     {"provider": "sap", "display_name": "SAP", "category": ConnectorCategory.accounting},
