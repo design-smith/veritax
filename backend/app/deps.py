@@ -10,6 +10,7 @@ from .assessment import Assessor
 from .auth import AuthError, AuthUser, verify_token
 from .drafting import Drafter, ResearchDrafter
 from .embeddings import Embedder
+from .interview_extraction import InterviewExtractor
 from .models import Engagement
 from .risks import RiskAnalyzer
 from .storage import Storage
@@ -72,6 +73,10 @@ def get_drafter(request: Request) -> Drafter:
 
 def get_research_drafter(request: Request) -> ResearchDrafter:
     return request.app.state.research_drafter
+
+
+def get_interview_extractor(request: Request) -> InterviewExtractor:
+    return request.app.state.interview_extractor
 
 
 def get_risk_analyzer(request: Request) -> RiskAnalyzer:

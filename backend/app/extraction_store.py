@@ -32,7 +32,7 @@ class RunResult:
 
 class RunInput(BaseModel):
     engagement_id: uuid.UUID
-    document_id: uuid.UUID
+    document_id: uuid.UUID | None = None   # None = interview-sourced (S5)
     schema_key: str
     schema_version: str
     classification_type: str
@@ -60,10 +60,12 @@ class ExtractedFactInput(BaseModel):
     far_type: str | None = None            # Class 2 §7: function/asset/risk value (validated at promotion)
     transaction_id: str | None = None
     evidence_type: str | None = None
+    interview_response_id: uuid.UUID | None = None   # S5: interview-sourced provenance (no document)
 
 
 class FactSourceInput(BaseModel):
-    document_id: uuid.UUID
+    document_id: uuid.UUID | None = None            # None = interview-sourced (S5)
+    interview_response_id: uuid.UUID | None = None
     page: int | None = None
     locator: str
     quote: str
@@ -113,9 +115,10 @@ async def create_extraction_run(session: AsyncSession, data: RunInput) -> Extrac
     schema_entry(data.schema_key)
     run = ExtractionRun(**data.model_dump())
     session.add(run)
-    doc = await session.get(Document, data.document_id)
-    if doc is not None:
-        doc.extraction_status = data.status
+    if data.document_id is not None:
+        doc = await session.get(Document, data.document_id)
+        if doc is not None:
+            doc.extraction_status = data.status
     await session.flush()
     return run
 
@@ -154,7 +157,7 @@ async def get_or_create_extraction_run(session: AsyncSession, data: RunInput) ->
 async def add_extracted_fact(
     session: AsyncSession,
     extraction_run_id: uuid.UUID,
-    document_id: uuid.UUID,
+    document_id: uuid.UUID | None,   # None = interview-sourced (S5)
     data: ExtractedFactInput,
     *,
     sources: list[FactSourceInput],

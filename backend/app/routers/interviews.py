@@ -11,8 +11,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from ..auth import AuthUser
-from ..deps import assert_owner, get_current_user, get_session, require_engagement_owner
+from ..deps import assert_owner, get_current_user, get_interview_extractor, get_session, require_engagement_owner
 from ..functional import select_questions
+from ..interview_extraction import InterviewExtractor, run_interview_extraction
 from ..models import Engagement, FunctionalInterview, InterviewQuestion, InterviewResponse
 from ..schemas import (
     InterviewCreate,
@@ -118,6 +119,21 @@ async def add_response(
     await session.commit()
     await session.refresh(resp)
     return InterviewResponseRead.model_validate(resp)
+
+
+@router.post("/interviews/{interview_id}/extract")
+async def extract_interview(
+    interview_id: uuid.UUID,
+    session: AsyncSession = Depends(get_session),
+    user: AuthUser = Depends(get_current_user),
+    extractor: InterviewExtractor = Depends(get_interview_extractor),
+) -> dict:
+    """Turn the interview's captured responses into §46-validated functional facts (deterministic; §45)."""
+    interview = await _load(session, interview_id)
+    await assert_owner(session, interview.engagement_id, user)
+    created = await run_interview_extraction(session, extractor, interview_id)
+    await session.commit()
+    return {"facts_created": created}
 
 
 @router.get("/interviews/{interview_id}/findings", response_model=InterviewFindings)

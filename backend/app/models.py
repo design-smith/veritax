@@ -349,8 +349,8 @@ class ExtractionRun(Base):
     engagement_id: Mapped[uuid.UUID] = mapped_column(
         ForeignKey("engagements.id", ondelete="CASCADE"), nullable=False, index=True
     )
-    document_id: Mapped[uuid.UUID] = mapped_column(
-        ForeignKey("documents.id", ondelete="CASCADE"), nullable=False, index=True
+    document_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("documents.id", ondelete="CASCADE"), nullable=True, index=True   # null = interview-sourced (S5)
     )
     schema_key: Mapped[str] = mapped_column(Text, nullable=False)
     schema_version: Mapped[str] = mapped_column(Text, nullable=False)
@@ -389,8 +389,8 @@ class ExtractedFact(Base):
     extraction_run_id: Mapped[uuid.UUID] = mapped_column(
         ForeignKey("extraction_runs.id", ondelete="CASCADE"), nullable=False, index=True
     )
-    document_id: Mapped[uuid.UUID] = mapped_column(
-        ForeignKey("documents.id", ondelete="CASCADE"), nullable=False, index=True
+    document_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("documents.id", ondelete="CASCADE"), nullable=True, index=True   # null = interview-sourced (S5)
     )
     schema_key: Mapped[str] = mapped_column(Text, nullable=False)
     schema_version: Mapped[str] = mapped_column(Text, nullable=False)
@@ -409,6 +409,10 @@ class ExtractedFact(Base):
     far_type: Mapped[str | None] = mapped_column(Text, nullable=True)
     transaction_id: Mapped[str | None] = mapped_column(Text, nullable=True)
     evidence_type: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # S5: interview-sourced facts have no document; provenance points at the interview response instead (§19).
+    interview_response_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("interview_responses.id", ondelete="SET NULL"), nullable=True, index=True
+    )
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     sources: Mapped[list[FactSource]] = relationship(
@@ -539,8 +543,12 @@ class FactSource(Base):
     fact_id: Mapped[uuid.UUID] = mapped_column(
         ForeignKey("extracted_facts.id", ondelete="CASCADE"), nullable=False, index=True
     )
-    document_id: Mapped[uuid.UUID] = mapped_column(
-        ForeignKey("documents.id", ondelete="CASCADE"), nullable=False, index=True
+    document_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("documents.id", ondelete="CASCADE"), nullable=True, index=True   # null = interview-sourced (S5)
+    )
+    # S5: interview-sourced provenance points at the interview response (§19) instead of a document.
+    interview_response_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("interview_responses.id", ondelete="SET NULL"), nullable=True, index=True
     )
     page: Mapped[int | None] = mapped_column(Integer, nullable=True)
     locator: Mapped[str] = mapped_column(Text, nullable=False)

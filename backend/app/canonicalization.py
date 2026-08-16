@@ -84,9 +84,13 @@ async def promote_canonical_facts(session: AsyncSession, engagement_id: uuid.UUI
 
 async def _canonical_key(session: AsyncSession, fact: ExtractedFact) -> str | None:
     run = await session.get(ExtractionRun, fact.extraction_run_id)
-    doc = await session.get(Document, fact.document_id)
-    if run is None or doc is None or not run.active or run.status not in PROMOTABLE_RUN_STATUSES or not doc.is_active:
+    if run is None or not run.active or run.status not in PROMOTABLE_RUN_STATUSES:
         return None
+    # Document-sourced facts require an active document; interview-sourced facts (document_id None) skip that.
+    if fact.document_id is not None:
+        doc = await session.get(Document, fact.document_id)
+        if doc is None or not doc.is_active:
+            return None
     if not await _has_valid_provenance(session, fact):
         return None
     try:
@@ -124,15 +128,19 @@ async def _canonical_key(session: AsyncSession, fact: ExtractedFact) -> str | No
 
 
 async def _has_valid_provenance(session: AsyncSession, fact: ExtractedFact) -> bool:
-    source = (
-        await session.execute(
-            select(FactSource).where(
-                FactSource.fact_id == fact.id,
-                FactSource.document_id == fact.document_id,
-            )
-        )
-    ).scalars().first()
-    return source is not None and bool(source.locator.strip()) and bool(source.quote.strip())
+    sources = (
+        await session.execute(select(FactSource).where(FactSource.fact_id == fact.id))
+    ).scalars().all()
+    for source in sources:
+        if not (source.locator.strip() and source.quote.strip()):
+            continue
+        # Document facts: the source must point at the fact's document (unchanged). Interview facts
+        # (document_id None): the source must point at an interview response (§19).
+        if fact.document_id is not None and source.document_id == fact.document_id:
+            return True
+        if fact.document_id is None and source.interview_response_id is not None:
+            return True
+    return False
 
 
 async def _link_source(session: AsyncSession, canonical_fact_id: uuid.UUID, extracted_fact_id: uuid.UUID) -> bool:

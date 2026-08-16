@@ -15,6 +15,7 @@ from app.db import init_db
 from app.deps import get_current_user
 from app.drafting import FakeDrafter, FakeResearchDrafter
 from app.embeddings import FakeEmbedder
+from app.interview_extraction import FakeInterviewExtractor
 from app.main import app
 from app.matching import FakeClassifiedDocumentsProvider
 from app.models import Base
@@ -73,6 +74,7 @@ async def _wire(engine, *, override_auth: bool) -> None:
     app.state.drafter = FakeDrafter()
     app.state.research_drafter = FakeResearchDrafter()
     app.state.risk_analyzer = FakeRiskAnalyzer()
+    app.state.interview_extractor = FakeInterviewExtractor()
     app.state.classification_fallback = None
     app.state.classified_docs_provider = FakeClassifiedDocumentsProvider({})
     if override_auth:

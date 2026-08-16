@@ -36,8 +36,8 @@ those are evidence-backed + rule-driven (§45).
 | S2 | Functional fact model — functional assertions enter the existing fact pipeline (fact shape §7, scope §47, period §48, provenance) | AFK (risk centre) | S1 | ✅ DONE |
 | S3 | Interview data model — interviews / questions / responses + provenance chain; raw answer immutable | AFK | — | ✅ DONE |
 | S4 | Guided functional interview (Planning) — scope→controlled question modules→answers→list/screen/findings | AFK | S1, S3 | ✅ DONE |
-| S5 | Interview extraction — responses → validated functional facts (§46 gate) → canonicalization; + transcript upload | AFK | S2, S3 | ▶ NEXT |
-| S6 | TP questionnaire integration — import responses → same functional evidence model (not a silo) | AFK | S1, S2 | pending |
+| S5 | Interview extraction — responses → validated functional facts (§46 gate) → canonicalization | AFK | S2, S3 | ✅ DONE (response path; transcript-file + LLM extractor = noted follow-ons) |
+| S6 | TP questionnaire integration — import responses → same functional evidence model (not a silo) | AFK | S1, S2 | ▶ NEXT |
 | S7 | Org-chart intelligence — key roles + reporting lines as scoped evidence; supports but never proves control | AFK | S2 | pending |
 | S8 | Invoice evidence — basic transaction-existence facts, properly scoped; cannot establish FAR | AFK | S2 | pending |
 | S9 | FAR builder — aggregate facts → per entity/txn FAR profile + deterministic characterization (undetermined allowed) + evidence-strength hierarchy | AFK | S1, S2, S5 | pending |
@@ -133,3 +133,24 @@ of every Class 2 commit (staged files are explicit). `.claude/settings.json` and
     interview for entity/transaction ✓ · questions adapt to participant role + transaction type ✓ · raw answers
     preserved ✓ · question/response provenance ✓ · completion states incl. completed_with_gaps ✓. (Uploaded
     transcript *processing* into facts is S5.)
+
+- [ ] **S5 — Interview extraction** — BUILT (response path), full-suite gate running. Option A implemented.
+  - Schema (Option A): `document_id` now NULLABLE on `extracted_facts`/`extraction_runs`/`fact_sources`;
+    `interview_response_id` added to `extracted_facts` + `fact_sources`. Canonicalization accepts EITHER document
+    or interview-response provenance; **document facts stay byte-identical** (behaviour-preserving). init_db
+    idempotent DDL: `ALTER TABLE extracted_facts|extraction_runs|fact_sources ALTER COLUMN document_id DROP NOT
+    NULL` + `ALTER TABLE extracted_facts|fact_sources ADD COLUMN IF NOT EXISTS interview_response_id uuid`.
+  - `app/interview_extraction.py`: `InterviewExtractor` Protocol + deterministic `KeywordInterviewExtractor`
+    (v1, §45 deterministic-first; injected via main/deps/conftest — offline, no paid API) +
+    `run_interview_extraction` (per response → candidates → §46 gate `functional_fact_ok` → ExtractedFact
+    `schema_key='functional'`, `document_id=None`, `interview_response_id` set, `evidence_type='functional_interview'`
+    + FactSource quote=response, locator=question → `promote_canonical_facts`). `POST /interviews/{id}/extract`.
+  - **Verification:** `test_interview_extraction.py` 2 + `test_canonical_facts.py` 4 + `test_functional_facts.py` 3
+    = **9 passed** (interview facts promote with interview provenance; ungrounded far_type rejected §46; existing
+    document facts unchanged). **Full backend suite 289 passed** (287 + 2; existing 287 unchanged =
+    behaviour-preserving). Acceptance (§46/§18-19): interview-derived facts have question/response provenance ✓ ·
+    unsupported far_type not promoted ✓ · one evidence model (no silo) ✓.
+  - **Honest scope note:** the RESPONSE→fact path (PRD §59 slice-4 core) is done. Two follow-ons remain and are
+    NOT claimed done: (1) transcript-**file** extraction (§20/§60 "uploaded transcripts can be processed") — the
+    upload works, but file→facts needs the document-extraction dispatch (only `financial_table` is wired today);
+    it reuses this extractor. (2) An LLM extractor (higher recall) behind the same Protocol.

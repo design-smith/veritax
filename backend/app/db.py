@@ -99,6 +99,11 @@ async def init_db(eng=engine) -> None:
                 await conn.execute(text(f"ALTER TABLE {_tbl} ADD COLUMN IF NOT EXISTS far_type text"))
                 await conn.execute(text(f"ALTER TABLE {_tbl} ADD COLUMN IF NOT EXISTS transaction_id text"))
                 await conn.execute(text(f"ALTER TABLE {_tbl} ADD COLUMN IF NOT EXISTS evidence_type text"))
+            # Class 2 S5: interview-sourced facts have no document — document_id nullable + response provenance.
+            for _tbl in ("extracted_facts", "extraction_runs", "fact_sources"):
+                await conn.execute(text(f"ALTER TABLE {_tbl} ALTER COLUMN document_id DROP NOT NULL"))
+            for _tbl in ("extracted_facts", "fact_sources"):
+                await conn.execute(text(f"ALTER TABLE {_tbl} ADD COLUMN IF NOT EXISTS interview_response_id uuid"))
             await conn.execute(text(
                 "ALTER TABLE risk_runs ADD COLUMN IF NOT EXISTS status_updated_at "
                 "timestamp with time zone DEFAULT now()"
