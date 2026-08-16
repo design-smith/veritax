@@ -40,8 +40,8 @@ those are evidence-backed + rule-driven (§45).
 | S6 | TP questionnaire integration — import responses → same functional evidence model (not a silo) | AFK | S1, S2 | ✅ DONE |
 | S7 | Org-chart intelligence — key roles + reporting lines as scoped evidence; supports but never proves control | AFK | S2 | ✅ DONE |
 | S8 | Invoice evidence — basic transaction-existence facts, properly scoped; cannot establish FAR | AFK | S2 | ✅ DONE |
-| S9 | FAR builder — aggregate facts → per entity/txn FAR profile + deterministic characterization (undetermined allowed) + evidence-strength hierarchy | AFK | S1, S2, S5 | ▶ NEXT |
-| S10 | Risk control & capability — risk_control_profiles (bearer/exposure/decision/control/capability/financial capacity), evidence-linked, mismatches preserved + risk table | AFK | S1, S2, S9 | pending |
+| S9 | FAR builder — aggregate facts → per entity/txn FAR profile + deterministic characterization (undetermined allowed) + evidence-strength hierarchy | AFK | S1, S2, S5 | ✅ DONE |
+| S10 | Risk control & capability — risk_control_profiles (bearer/exposure/decision/control/capability/financial capacity), evidence-linked, mismatches preserved + risk table | AFK | S1, S2, S9 | ▶ NEXT |
 | S11 | Requirements integration — evaluate FAR concept sufficiency (partial when risk-control unknown); gap-driven interview recommendation | AFK | S9, S10 | pending |
 | S12 | Draft integration — FAR sections from structured evidence, traceable (DraftSection pattern) | AFK | S9, S10 | pending |
 | S13 | Risks integration — unsupported risk allocation, capability gap, functional inconsistency, contract-vs-conduct mismatch, missing-interview findings | AFK | S9, S10 | pending |
@@ -189,3 +189,17 @@ of every Class 2 commit (staged files are explicit). `.claude/settings.json` and
     cannot independently establish FAR ✓.
   - Follow-on (honest): extraction from an uploaded invoice FILE reuses `ingest_invoice` once the doc dispatch is
     wired; structured ingest is the v1 path.
+
+- [ ] **S9 — FAR builder + deterministic characterization** — BUILT, full-suite gate running (pivotal slice).
+  - `app/far_builder.py` (pure): `build_far_profile(session, engagement_id, transaction_id=)` aggregates affirmed
+    canonical FUNCTIONAL facts into functions/assets/risks_assumed/risks_controlled/capabilities, deduped, each
+    **traceable** to its canonical-fact ids (§29), recording evidence_types (for §31). `derive_characterization`
+    → deterministic §30 value (LRD / full-fledged distributor / routine service provider / contract vs
+    full-fledged manufacturer / ip_owner / financing_entity) or **`undetermined`** when insufficient (§30/§46; no
+    LLM, no fabrication). `GET /engagements/{id}/far?transaction_id=` returns {profile, characterization}.
+  - **Verification:** `test_far_builder.py` **2 passed** (characterization deterministic incl. undetermined +
+    all §30 branches; aggregation deduped + traceable; endpoint → limited_risk_distributor). **Full backend suite
+    296 passed** (294 + 2). Acceptance (FAR, §60): FAR per transaction ✓ · every conclusion traceable ✓ ·
+    unknown stays unknown ✓ · no unsupported conclusions ✓ · characterization can be `undetermined` ✓.
+  - v1 aggregates by (engagement, transaction); entity-level filtering is a noted follow-on (CanonicalFact has no
+    entity column — entity lives in the canonical_key via resolution).
