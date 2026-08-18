@@ -54,7 +54,7 @@ quartiles/adjustments, reconcile, alter rows, or decide whether a number is in a
 | S13 | TP adjustment — illustrative adjustment to practitioner target, approval state, never auto-post; UI | AFK | S12 | ✅ DONE |
 | S14 | Requirements integration — evaluate economic-analysis capabilities (not doc presence) + panel | AFK | S9, S12 | ✅ DONE |
 | S15 | Draft integration — Economic Analysis section from structured results (numbers never invented) | AFK | S12 | ✅ DONE |
-| S16 | Risks integration — reconciliation gap / unsupported exclusion / stale benchmark / method mismatch / out-of-range / missing segmentation | AFK | S9, S12, S13 | ▶ NEXT |
+| S16 | Risks integration — reconciliation gap / unsupported exclusion / stale benchmark / method mismatch / out-of-range / missing segmentation | AFK | S9, S12, S13 | ✅ DONE |
 
 **DAG:** S1 (design, parallel) · S2 → {S3, S4, S5, S6} · S6 → {S7, S9} · S7 → S8 · {S6,S7,S8} → S10 → S11 → S12 → S13 · {S9,S12} → S14 · S12 → S15 · {S9,S12,S13} → S16.
 
@@ -390,3 +390,20 @@ TNMM (§81).
     generically). **Full backend suite 381 passed** (377 + 4).
   - Acceptance (S15): Economic Analysis section renders from structured results ✓ · generated numbers cannot
     differ from stored analysis ✓ · claims traceable to source calculations ✓ · non-gating w/ honest fallback ✓.
+
+- [x] **S16 — Risks integration (FINAL slice)** — BUILT, full-suite gate running. Mirrors `functional_risks` /
+    `regulatory_risks` exactly.
+  - `financial_risks.py::financial_findings(session, engagement_id, jurisdiction)` → `risks.Finding` list (§55),
+    deterministic, each names its basis: reconciliation gap (unreconciled `FinancialReconciliation`), unsupported
+    exclusion (`exclude_*` adjustment with no reason), stale benchmark (`BenchmarkResult.freshness_status` in
+    review_required/incompatible), statistical-method mismatch (stored method ≠ jurisdiction's
+    `benchmarking_method`), out-of-range (position below/above), missing segmentation (economic summary partial +
+    no segment). Returns `[]` with no Class 3 data — existing risk runs unaffected.
+  - `routers/risks.py::run_analysis`: merged alongside the LLM + regulatory + functional findings; log line
+    extended with `financial=%d`. Offline/deterministic; no paid API.
+  - **Verification:** `test_financial_risks.py` **5 passed** (no-data → []; reconciliation gap; unsupported
+    exclusion; out-of-range; missing segmentation — each names its basis) + **`test_risks.py` 7 unchanged**
+    (financial findings stay empty for a plain engagement). No frontend change (risks render generically).
+    **Full backend suite 386 passed** (381 + 5).
+  - Acceptance (S16): each finding type emitted where evidence supports it ✓ · each names its basis ✓ ·
+    deterministic ✓ · merged into `run_analysis` ✓.

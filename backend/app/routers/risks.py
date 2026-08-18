@@ -33,6 +33,7 @@ from ..models import (
 )
 from ..regulatory_risks import regulatory_findings
 from ..functional_risks import functional_findings
+from ..financial_risks import financial_findings
 from ..risks import RiskAnalyzer
 from ..schemas import RiskEvidenceRead, RiskFindingRead, RiskResponse, RiskSummary
 
@@ -333,14 +334,19 @@ async def run_analysis(session_factory: async_sessionmaker, analyzer: RiskAnalyz
             # contract-vs-conduct mismatch, capability gap, unsupported risk allocation, incomplete functional
             # analysis. Each names its functional basis; only emits where the evidence supports it.
             func_findings = await functional_findings(session, engagement_id, jurisdiction)
-            findings = list(findings) + reg_findings + func_findings
+            # Deterministic financial findings (PRD Class 3, S16) — reconciliation gaps, unsupported exclusions,
+            # stale benchmark, statistical-method mismatch, out-of-range, missing segmentation. Only emits where
+            # Class 3 evidence exists (an engagement without financial analysis yields none).
+            fin_findings = await financial_findings(session, engagement_id, jurisdiction)
+            findings = list(findings) + reg_findings + func_findings + fin_findings
             log.info(
-                "risks.job.analysis_complete engagement_id=%s jurisdiction=%s findings=%d (regulatory=%d functional=%d) duration_ms=%d",
+                "risks.job.analysis_complete engagement_id=%s jurisdiction=%s findings=%d (regulatory=%d functional=%d financial=%d) duration_ms=%d",
                 _short_id(engagement_id),
                 jurisdiction,
                 len(findings),
                 len(reg_findings),
                 len(func_findings),
+                len(fin_findings),
                 _elapsed_ms(analysis_started_at),
             )
 
