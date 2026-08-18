@@ -368,16 +368,16 @@ export default function Page({ enableTour = false }: { enableTour?: boolean } = 
     for (const kind of PLANNING_SOURCES) {   // insertion order: financials, agreements, public, interview
       const kindSources = eng.sources.filter(s => (s.kind as SourceId) === kind)
       if (kindSources.length === 0) continue
-      t += 350
+      t += 450
       at(t, () => setSources(prev => new Set(prev).add(kind)))   // tick the class checkbox
       for (const src of kindSources) {
-        if (src.url) { const url = src.url; t += 300; at(t, () => setWebsiteUrl(url)) }
+        if (src.url) { const url = src.url; t += 400; at(t, () => setWebsiteUrl(url)) }
         if (src.origin === "connected") {
           const row: PlanningSourceRow = { id: src.id, kind, origin: src.origin, connector_provider: src.connector_provider, url: src.url }
-          t += 300; at(t, () => setPlanningSourceRows(prev => (prev.some(r => r.id === row.id) ? prev : [...prev, row])))
+          t += 400; at(t, () => setPlanningSourceRows(prev => (prev.some(r => r.id === row.id) ? prev : [...prev, row])))
         }
         for (const doc of src.documents) {
-          t += 300
+          t += 400
           at(t, () => setPlanningDocuments(prev => ({ ...prev, [kind]: [...(prev[kind] ?? []), doc] })))
         }
       }

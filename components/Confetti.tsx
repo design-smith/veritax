@@ -28,10 +28,10 @@ export default function Confetti({ onDone }: { onDone: () => void }) {
     <div aria-hidden style={{ position: "fixed", inset: 0, zIndex: 10001, pointerEvents: "none", overflow: "hidden" }}>
       {pieces.map((p, i) => (
         <span key={i} style={{
-          position: "absolute", top: "-24px", left: `${p.left}%`,
+          position: "absolute", bottom: "-24px", left: `${p.left}%`,
           width: p.size, height: p.round ? p.size : p.size * 1.6,
           background: p.color, borderRadius: p.round ? "50%" : 2,
-          animation: `vt-confetti-fall ${p.dur}s cubic-bezier(0.2, 0.6, 0.4, 1) ${p.delay}s forwards`,
+          animation: `vt-confetti-rise ${p.dur}s cubic-bezier(0.2, 0.6, 0.4, 1) ${p.delay}s forwards`,
         }} />
       ))}
     </div>,

@@ -754,8 +754,8 @@
   .vt-tour-ring { animation: none; }
 }
 
-/* Confetti burst when the walkthrough finishes. */
-@keyframes vt-confetti-fall {
-  0%   { transform: translateY(-10vh) rotate(0deg); opacity: 1; }
-  100% { transform: translateY(110vh) rotate(620deg); opacity: 0.9; }
+/* Confetti burst when the walkthrough finishes — rises up from the bottom. */
+@keyframes vt-confetti-rise {
+  0%   { transform: translateY(0) rotate(0deg); opacity: 1; }
+  100% { transform: translateY(-120vh) rotate(620deg); opacity: 0.9; }
 }
