@@ -597,6 +597,36 @@ export interface TNMMAnalysisRead {
   far_characterization: string | null
   calculation: TNMMCalculation | null
 }
+export interface BenchmarkComparable {
+  id: string
+  company_name: string
+  country: string | null
+  accepted: boolean
+  rejection_reason: string | null
+  pli_values: number[]
+  financial_values: Record<string, unknown> | null
+  years: unknown[] | null
+}
+export interface BenchmarkSetRead {
+  id: string
+  analysis_id: string
+  source: string
+  search_date: string | null
+  periods: unknown[]
+  geographic_scope: string | null
+  industry_scope: string | null
+  search_strategy: string | null
+  accepted_count: number
+  rejected_count: number
+  comparables: BenchmarkComparable[]
+}
+export interface ComparableInput {
+  company_name: string
+  country?: string
+  accepted: boolean
+  rejection_reason?: string
+  pli_values: number[]
+}
 export const SEGMENT_RULE_FIELDS = ["account_code", "account_name", "cost_center", "business_unit"] as const
 export const SEGMENT_RULE_OPERATORS = ["equals", "in", "contains"] as const
 export interface FinancialReconciliationRead {
@@ -934,6 +964,18 @@ const realApi = {
 
   computeTnmmAnalysis: (analysisId: string): Promise<TNMMAnalysisRead> =>
     afetch(`${BASE}/tnmm-analyses/${analysisId}/compute`, { method: "POST" }).then(r => parse<TNMMAnalysisRead>(r)),
+
+  // Class 3 — benchmark import
+  listBenchmarkSets: (analysisId: string): Promise<BenchmarkSetRead[]> =>
+    afetch(`${BASE}/tnmm-analyses/${analysisId}/benchmark-sets`).then(r => parse<BenchmarkSetRead[]>(r)),
+
+  importBenchmarkSet: (analysisId: string, body: { source: string; search_date?: string; periods?: unknown[]; geographic_scope?: string; industry_scope?: string; search_strategy?: string; comparables: ComparableInput[] }): Promise<BenchmarkSetRead> =>
+    afetch(`${BASE}/tnmm-analyses/${analysisId}/benchmark-sets`, {
+      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
+    }).then(r => parse<BenchmarkSetRead>(r)),
+
+  deleteBenchmarkSet: (setId: string): Promise<void> =>
+    afetch(`${BASE}/benchmark-sets/${setId}`, { method: "DELETE" }).then(parseVoid),
 }
 
 // On the public /demo route, serve canned data from lib/demo-api instead of the network so the real

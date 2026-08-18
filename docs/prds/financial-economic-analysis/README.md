@@ -49,8 +49,8 @@ quartiles/adjustments, reconcile, alter rows, or decide whether a number is in a
 | S8 | Allocations — shared-cost split by base + provenance; allocation UI | AFK | S7 | ✅ DONE |
 | S9 | Financial reconciliation — FS→TB→Segment, configurable tolerance, deterministic status; tie-out UI | AFK | S6 | ✅ DONE |
 | S10 | TNMM core — tested party (practitioner-selected, links FAR) + PLI registry (deterministic) + calc + lifecycle; TNMM UI | AFK | S6, S7, S8 | ✅ DONE |
-| S11 | Benchmark import — comparables + accepted/rejected + rejection log; benchmark UI | AFK | S10 | ▶ NEXT |
-| S12 | Arm's-length range & conclusion (jurisdiction-aware) — REUSE Class 1 engine; within/below/above; conclusion UI | AFK | S11, S10 | pending |
+| S11 | Benchmark import — comparables + accepted/rejected + rejection log; benchmark UI | AFK | S10 | ✅ DONE |
+| S12 | Arm's-length range & conclusion (jurisdiction-aware) — REUSE Class 1 engine; within/below/above; conclusion UI | AFK | S11, S10 | ▶ NEXT |
 | S13 | TP adjustment — illustrative adjustment to practitioner target, approval state, never auto-post; UI | AFK | S12 | pending |
 | S14 | Requirements integration — evaluate economic-analysis capabilities (not doc presence) + panel | AFK | S9, S12 | pending |
 | S15 | Draft integration — Economic Analysis section from structured results (numbers never invented) | AFK | S12 | pending |
@@ -301,3 +301,18 @@ TNMM (§81).
   - Acceptance (S10): a controlled transaction references a TNMM analysis w/ explicit tested party + segment +
     PLI ✓ · tested-party selection practitioner-driven, rationale links FAR ✓ · PLI deterministic at full
     precision, inputs inspectable + traceable ✓ · segment→TNMM reconciliation exercisable (via S9 segment_total) ✓.
+
+- [x] **S11 — Benchmark import** — BUILT, full-suite gate running. USER-VISIBLE (Benchmark view).
+  - `models.py`: `BenchmarkSet` (analysis_id, source, search_date, periods, geographic/industry scope, search
+    strategy) + `BenchmarkComparable` (company/country, accepted, rejection_reason, pli_values, financial_values,
+    years). New tables via create_all. Import preserves the FULL population — accepted AND rejected with reasons
+    (§38, the audit trail); automated DB search is a non-goal (§39/§81), v1 imports a practitioner set via JSON.
+  - `routers/financials.py`: POST/GET/GET-one/DELETE `/tnmm-analyses/{id}/benchmark-sets` (+ `/benchmark-sets/{id}`),
+    with accepted/rejected counts in the read. Frontend: a Benchmark view — pick a TNMM analysis, stage
+    comparables (company/accepted/rejection reason/PLIs) → import a set, and view accepted vs rejected with the
+    rejection log.
+  - **Verification:** `test_financial_benchmark.py` **3 passed** (import preserves full population + rejection
+    reasons; list + detail include rejects; delete). `tsc` + `pnpm build` clean. **Full backend suite 365
+    passed** (362 + 3).
+  - Acceptance (S11): a benchmark study/comparable set imported + linked ✓ · accepted vs rejected distinguishable
+    with reasons ✓ · population + rejection log viewable ✓.

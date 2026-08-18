@@ -1325,6 +1325,47 @@ class TNMMCalculation(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
+class BenchmarkSet(Base):
+    """An imported comparable-company set for a TNMM analysis (Class 3 §36-39). Structured evidence — the full
+    population (accepted AND rejected) is preserved with rejection reasons (§38). Automated DB search is a
+    non-goal (§39/§81); v1 imports a practitioner-supplied set."""
+
+    __tablename__ = "benchmark_sets"
+
+    id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
+    analysis_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("tnmm_analyses.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    source: Mapped[str] = mapped_column(Text, nullable=False)   # database / study name
+    search_date: Mapped[str | None] = mapped_column(Text, nullable=True)
+    periods: Mapped[list] = mapped_column(JSONB, nullable=False, default=list)
+    geographic_scope: Mapped[str | None] = mapped_column(Text, nullable=True)
+    industry_scope: Mapped[str | None] = mapped_column(Text, nullable=True)
+    search_strategy: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class BenchmarkComparable(Base):
+    """A comparable in a benchmark set (§37). `accepted` distinguishes the final set from rejects; a reject keeps
+    its `rejection_reason` (§38 — the audit trail matters)."""
+
+    __tablename__ = "benchmark_comparables"
+    __table_args__ = (Index("ix_benchmark_comparables_set", "benchmark_set_id"),)
+
+    id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
+    benchmark_set_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("benchmark_sets.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    company_name: Mapped[str] = mapped_column(Text, nullable=False)
+    country: Mapped[str | None] = mapped_column(Text, nullable=True)
+    accepted: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    rejection_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+    pli_values: Mapped[list] = mapped_column(JSONB, nullable=False, default=list)   # per-year PLI observations
+    financial_values: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    years: Mapped[list | None] = mapped_column(JSONB, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
 class FinancialColumnMapping(Base):
     """A saved, versioned column mapping (Class 3 §14) keyed by user + header signature, so a repeat engagement
     with the same source format reuses last time's mapping. Stores {canonical_field: source_header}."""

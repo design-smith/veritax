@@ -9,7 +9,8 @@ import { useCallback, useEffect, useRef, useState } from "react"
 import { FileSpreadsheet, Layers, Calculator, BarChart3, Flag, Info, Upload, Loader2, Columns3, Sparkles, AlertTriangle, Plus, Trash2 } from "lucide-react"
 import { api, FINANCIAL_CLASSIFICATIONS, SEGMENT_RULE_FIELDS, SEGMENT_RULE_OPERATORS, FINANCIAL_ADJUSTMENT_TYPES, FINANCIAL_ALLOCATION_BASES, FINANCIAL_PLI_TYPES,
   type FinancialDatasetRead, type FinancialRowRead, type FinancialMappingRead,
-  type FinancialSegmentRead, type SegmentPnL, type FinancialReconciliationRead, type TNMMAnalysisRead } from "@/lib/api"
+  type FinancialSegmentRead, type SegmentPnL, type FinancialReconciliationRead, type TNMMAnalysisRead,
+  type BenchmarkSetRead, type ComparableInput } from "@/lib/api"
 
 export type WorkbenchView = "financials" | "segmentation" | "tnmm" | "benchmark" | "conclusion"
 
@@ -75,7 +76,9 @@ export default function EconomicWorkbench({ engagementId }: { engagementId: stri
               ? <SegmentationView engagementId={engagementId} />
               : view === "tnmm"
                 ? <TnmmView engagementId={engagementId} />
-                : <Placeholder {...PLACEHOLDER[view]} />}
+                : view === "benchmark"
+                  ? <BenchmarkView engagementId={engagementId} />
+                  : <Placeholder {...PLACEHOLDER[view]} />}
         </div>
 
         <aside style={{ width: "18rem", flexShrink: 0, borderLeft: "1px solid var(--color-border-subtle)", padding: "1.25rem", overflow: "auto", background: "var(--color-surface)" }}>
@@ -750,6 +753,111 @@ function TnmmView({ engagementId }: { engagementId: string }) {
           )}
         </div>
       ))}
+    </div>
+  )
+}
+
+function BenchmarkView({ engagementId }: { engagementId: string }) {
+  const [analyses, setAnalyses] = useState<TNMMAnalysisRead[]>([])
+  const [analysisId, setAnalysisId] = useState("")
+  const [sets, setSets] = useState<BenchmarkSetRead[]>([])
+  const [source, setSource] = useState("")
+  const [draft, setDraft] = useState<ComparableInput[]>([])
+  // comparable builder
+  const [cName, setCName] = useState("")
+  const [cAccepted, setCAccepted] = useState(true)
+  const [cReason, setCReason] = useState("")
+  const [cPli, setCPli] = useState("")
+
+  const refreshAnalyses = useCallback(async () => {
+    const an = await api.listTnmmAnalyses(engagementId)
+    setAnalyses(an)
+    setAnalysisId(prev => prev || (an[0]?.id ?? ""))
+  }, [engagementId])
+  useEffect(() => { void refreshAnalyses() }, [refreshAnalyses])
+
+  const refreshSets = useCallback(async () => {
+    if (!analysisId) { setSets([]); return }
+    setSets(await api.listBenchmarkSets(analysisId))
+  }, [analysisId])
+  useEffect(() => { void refreshSets() }, [refreshSets])
+
+  function addComparable() {
+    if (!cName.trim()) return
+    const pli = cPli.split(",").map(s => parseFloat(s.trim())).filter(n => !Number.isNaN(n))
+    setDraft(d => [...d, { company_name: cName.trim(), accepted: cAccepted, rejection_reason: cAccepted ? undefined : (cReason.trim() || undefined), pli_values: pli }])
+    setCName(""); setCReason(""); setCPli(""); setCAccepted(true)
+  }
+  async function importSet() {
+    if (!analysisId || !source.trim() || draft.length === 0) return
+    await api.importBenchmarkSet(analysisId, { source: source.trim(), comparables: draft })
+    setSource(""); setDraft([])
+    await refreshSets()
+  }
+  async function del(id: string) { await api.deleteBenchmarkSet(id); await refreshSets() }
+
+  return (
+    <div style={{ maxWidth: "56rem", margin: "0 auto", display: "flex", flexDirection: "column", gap: "1rem" }}>
+      <div style={{ display: "flex", gap: "0.5rem", alignItems: "center" }}>
+        <span style={{ fontSize: "var(--font-text-xs-size)", color: "var(--color-text-tertiary)" }}>Analysis</span>
+        <select value={analysisId} onChange={e => setAnalysisId(e.target.value)} style={miniSelect}>
+          <option value="">select…</option>
+          {analyses.map(a => <option key={a.id} value={a.id}>{a.pli_type.replace(/_/g, " ")} · {a.tested_party_entity_id ?? "—"}</option>)}
+        </select>
+      </div>
+
+      {!analysisId
+        ? <Placeholder title="No TNMM analysis" body="Create a TNMM analysis first, then import a comparable set for it here." />
+        : (
+          <>
+            {sets.map(bs => (
+              <div key={bs.id} style={{ border: "1px solid var(--color-border)", borderRadius: "0.75rem", overflow: "hidden", background: "var(--color-surface)" }}>
+                <div style={{ display: "flex", alignItems: "center", gap: "0.5rem", padding: "0.875rem 1.125rem", borderBottom: "1px solid var(--color-border-subtle)" }}>
+                  <span style={{ fontSize: "var(--font-text-sm-size)", fontWeight: "var(--font-weight-semibold)", color: "var(--color-text)" }}>{bs.source}</span>
+                  <span style={{ fontSize: "var(--font-text-xs-size)", color: "var(--color-text-tertiary)" }}>· {bs.accepted_count} accepted · {bs.rejected_count} rejected</span>
+                  <button type="button" onClick={() => void del(bs.id)} style={{ marginLeft: "auto", border: "none", background: "transparent", cursor: "pointer", color: "var(--color-text-tertiary)" }} title="Remove set"><Trash2 size={13} /></button>
+                </div>
+                <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "var(--font-text-xs-size)" }}>
+                  <thead><tr style={{ color: "var(--color-text-tertiary)", textAlign: "left" }}>{["Company", "Country", "Status", "PLIs", "Rejection reason"].map(h => <th key={h} style={{ padding: "0.5rem 1.125rem", fontWeight: "var(--font-weight-medium)", borderBottom: "1px solid var(--color-border-subtle)" }}>{h}</th>)}</tr></thead>
+                  <tbody>
+                    {bs.comparables.map(c => (
+                      <tr key={c.id} style={{ color: "var(--color-text-secondary)" }}>
+                        <td style={{ padding: "0.4375rem 1.125rem", borderBottom: "1px solid var(--color-border-subtle)" }}>{c.company_name}</td>
+                        <td style={{ padding: "0.4375rem 1.125rem", borderBottom: "1px solid var(--color-border-subtle)" }}>{c.country ?? "—"}</td>
+                        <td style={{ padding: "0.4375rem 1.125rem", borderBottom: "1px solid var(--color-border-subtle)", color: c.accepted ? "var(--color-text-success-soft, #1a7f37)" : "var(--color-text-tertiary)" }}>{c.accepted ? "accepted" : "rejected"}</td>
+                        <td style={{ padding: "0.4375rem 1.125rem", borderBottom: "1px solid var(--color-border-subtle)", fontVariantNumeric: "tabular-nums" }}>{c.pli_values.map(v => fmtPct(v)).join(", ") || "—"}</td>
+                        <td style={{ padding: "0.4375rem 1.125rem", borderBottom: "1px solid var(--color-border-subtle)", color: "var(--color-text-tertiary)" }}>{c.rejection_reason ?? "—"}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            ))}
+
+            {/* Import builder */}
+            <div style={{ border: "1px dashed var(--color-border)", borderRadius: "0.75rem", padding: "1rem 1.125rem", background: "var(--color-surface)" }}>
+              <div style={{ display: "flex", gap: "0.375rem", flexWrap: "wrap", alignItems: "center" }}>
+                <input value={source} onChange={e => setSource(e.target.value)} placeholder="source (e.g. Orbis)" style={{ ...miniSelect, width: "10rem" }} />
+                <span style={{ fontSize: "var(--font-text-xs-size)", color: "var(--color-text-tertiary)" }}>{draft.length} comparable(s) staged</span>
+                <button type="button" onClick={importSet} style={{ ...toolbarBtn, marginLeft: "auto" }} disabled={!source.trim() || draft.length === 0}><Plus size={13} /> Import set</button>
+              </div>
+              <div style={{ display: "flex", gap: "0.375rem", flexWrap: "wrap", alignItems: "center", marginTop: "0.625rem" }}>
+                <input value={cName} onChange={e => setCName(e.target.value)} placeholder="company" style={{ ...miniSelect, width: "9rem" }} />
+                <label style={{ display: "inline-flex", alignItems: "center", gap: "0.25rem", fontSize: "var(--font-text-xs-size)", color: "var(--color-text-secondary)" }}>
+                  <input type="checkbox" checked={cAccepted} onChange={e => setCAccepted(e.target.checked)} /> accepted
+                </label>
+                {!cAccepted && <input value={cReason} onChange={e => setCReason(e.target.value)} placeholder="rejection reason" style={{ ...miniSelect, width: "11rem" }} />}
+                <input value={cPli} onChange={e => setCPli(e.target.value)} placeholder="PLIs (comma, e.g. 0.041,0.049)" style={{ ...miniSelect, width: "13rem" }} />
+                <button type="button" onClick={addComparable} style={toolbarBtn}><Plus size={13} /> Add comparable</button>
+              </div>
+              {draft.length > 0 && (
+                <div style={{ marginTop: "0.5rem", fontSize: "var(--font-text-xs-size)", color: "var(--color-text-tertiary)" }}>
+                  Staged: {draft.map((d, i) => `${d.company_name}${d.accepted ? "" : " (rejected)"}`).join(", ")}
+                </div>
+              )}
+            </div>
+          </>
+        )}
     </div>
   )
 }

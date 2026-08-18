@@ -47,6 +47,8 @@ from ..financial_store import create_dataset, dataset_summary, dataset_total, re
 from ..financial_tnmm import PLI_TYPES, compute_pli
 from ..ingest import get_or_create_uploaded_source, store_upload
 from ..models import (
+    BenchmarkComparable,
+    BenchmarkSet,
     Engagement,
     FinancialAdjustment,
     FinancialAllocation,
@@ -974,3 +976,134 @@ async def compute_tnmm_analysis(
     ))
     await session.commit()
     return await _analysis_read(session, a)
+
+
+# ── Benchmark import (S11, §36-39, §70) ───────────────────────────────────────
+class ComparableIn(BaseModel):
+    company_name: str
+    country: str | None = None
+    accepted: bool = True
+    rejection_reason: str | None = None
+    pli_values: list[float] = []
+    financial_values: dict | None = None
+    years: list | None = None
+
+
+class BenchmarkSetCreate(BaseModel):
+    source: str
+    search_date: str | None = None
+    periods: list = []
+    geographic_scope: str | None = None
+    industry_scope: str | None = None
+    search_strategy: str | None = None
+    comparables: list[ComparableIn] = []
+
+
+class ComparableRead(BaseModel):
+    id: uuid.UUID
+    company_name: str
+    country: str | None
+    accepted: bool
+    rejection_reason: str | None
+    pli_values: list[float]
+    financial_values: dict | None
+    years: list | None
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class BenchmarkSetRead(BaseModel):
+    id: uuid.UUID
+    analysis_id: uuid.UUID
+    source: str
+    search_date: str | None
+    periods: list
+    geographic_scope: str | None
+    industry_scope: str | None
+    search_strategy: str | None
+    accepted_count: int
+    rejected_count: int
+    comparables: list[ComparableRead] = []
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+async def _benchmark_read(session: AsyncSession, bs: BenchmarkSet, *, include_comparables: bool = True) -> BenchmarkSetRead:
+    comps = (await session.execute(
+        select(BenchmarkComparable).where(BenchmarkComparable.benchmark_set_id == bs.id)
+        .order_by(BenchmarkComparable.company_name)
+    )).scalars().all()
+    return BenchmarkSetRead(
+        id=bs.id, analysis_id=bs.analysis_id, source=bs.source, search_date=bs.search_date,
+        periods=list(bs.periods or []), geographic_scope=bs.geographic_scope, industry_scope=bs.industry_scope,
+        search_strategy=bs.search_strategy,
+        accepted_count=sum(1 for c in comps if c.accepted), rejected_count=sum(1 for c in comps if not c.accepted),
+        comparables=[ComparableRead.model_validate(c) for c in comps] if include_comparables else [],
+    )
+
+
+async def _owned_benchmark_set(session: AsyncSession, set_id: uuid.UUID, user: AuthUser) -> BenchmarkSet:
+    bs = await session.get(BenchmarkSet, set_id)
+    if bs is None:
+        raise HTTPException(status_code=404, detail="benchmark set not found")
+    analysis = await session.get(TNMMAnalysis, bs.analysis_id)
+    await assert_owner(session, analysis.engagement_id, user)
+    return bs
+
+
+@router.post("/tnmm-analyses/{analysis_id}/benchmark-sets", response_model=BenchmarkSetRead, status_code=201)
+async def import_benchmark_set(
+    analysis_id: uuid.UUID,
+    body: BenchmarkSetCreate,
+    session: AsyncSession = Depends(get_session),
+    user: AuthUser = Depends(get_current_user),
+) -> BenchmarkSetRead:
+    analysis = await _owned_analysis(session, analysis_id, user)
+    bs = BenchmarkSet(
+        analysis_id=analysis.id, source=body.source, search_date=body.search_date, periods=body.periods,
+        geographic_scope=body.geographic_scope, industry_scope=body.industry_scope,
+        search_strategy=body.search_strategy,
+    )
+    session.add(bs)
+    await session.flush()
+    for c in body.comparables:   # preserve the FULL population — accepted AND rejected (§38)
+        session.add(BenchmarkComparable(
+            benchmark_set_id=bs.id, company_name=c.company_name, country=c.country, accepted=c.accepted,
+            rejection_reason=c.rejection_reason, pli_values=c.pli_values, financial_values=c.financial_values,
+            years=c.years,
+        ))
+    await session.commit()
+    return await _benchmark_read(session, bs)
+
+
+@router.get("/tnmm-analyses/{analysis_id}/benchmark-sets", response_model=list[BenchmarkSetRead])
+async def list_benchmark_sets(
+    analysis_id: uuid.UUID,
+    session: AsyncSession = Depends(get_session),
+    user: AuthUser = Depends(get_current_user),
+) -> list[BenchmarkSetRead]:
+    analysis = await _owned_analysis(session, analysis_id, user)
+    sets = (await session.execute(
+        select(BenchmarkSet).where(BenchmarkSet.analysis_id == analysis.id).order_by(BenchmarkSet.created_at)
+    )).scalars().all()
+    return [await _benchmark_read(session, bs) for bs in sets]
+
+
+@router.get("/benchmark-sets/{set_id}", response_model=BenchmarkSetRead)
+async def get_benchmark_set(
+    set_id: uuid.UUID,
+    session: AsyncSession = Depends(get_session),
+    user: AuthUser = Depends(get_current_user),
+) -> BenchmarkSetRead:
+    return await _benchmark_read(session, await _owned_benchmark_set(session, set_id, user))
+
+
+@router.delete("/benchmark-sets/{set_id}", status_code=204)
+async def delete_benchmark_set(
+    set_id: uuid.UUID,
+    session: AsyncSession = Depends(get_session),
+    user: AuthUser = Depends(get_current_user),
+) -> None:
+    bs = await _owned_benchmark_set(session, set_id, user)
+    await session.delete(bs)
+    await session.commit()
