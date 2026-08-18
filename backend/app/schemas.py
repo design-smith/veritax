@@ -224,6 +224,13 @@ class FunctionalAnalysisRead(BaseModel):
     gaps: list[str] = []
 
 
+class EconomicAnalysisRead(BaseModel):
+    """Deterministic economic-analysis sufficiency for Requirements (Class 3 §50-51)."""
+    status: str                       # present | partial | unknown
+    capabilities: dict[str, bool]
+    gaps: list[str] = []
+
+
 class CoverageResponse(BaseModel):
     jurisdiction: str
     summary: CoverageSummary
@@ -231,6 +238,7 @@ class CoverageResponse(BaseModel):
     skipped_documents: list[SkippedDocumentRead] = []
     regulatory: list[RegulatoryContextRead] = []  # jurisdiction rules from the registry (empty if none defined)
     functional_analysis: FunctionalAnalysisRead | None = None  # Class 2 §34: FAR-concept sufficiency
+    economic_analysis: EconomicAnalysisRead | None = None  # Class 3 §50-51: economic-analysis capability sufficiency
 
 
 class DraftCitationRead(BaseModel):

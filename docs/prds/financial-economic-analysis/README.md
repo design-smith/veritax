@@ -52,8 +52,8 @@ quartiles/adjustments, reconcile, alter rows, or decide whether a number is in a
 | S11 | Benchmark import — comparables + accepted/rejected + rejection log; benchmark UI | AFK | S10 | ✅ DONE |
 | S12 | Arm's-length range & conclusion (jurisdiction-aware) — REUSE Class 1 engine; within/below/above; conclusion UI | AFK | S11, S10 | ✅ DONE |
 | S13 | TP adjustment — illustrative adjustment to practitioner target, approval state, never auto-post; UI | AFK | S12 | ✅ DONE |
-| S14 | Requirements integration — evaluate economic-analysis capabilities (not doc presence) + panel | AFK | S9, S12 | ▶ NEXT |
-| S15 | Draft integration — Economic Analysis section from structured results (numbers never invented) | AFK | S12 | pending |
+| S14 | Requirements integration — evaluate economic-analysis capabilities (not doc presence) + panel | AFK | S9, S12 | ✅ DONE |
+| S15 | Draft integration — Economic Analysis section from structured results (numbers never invented) | AFK | S12 | ▶ NEXT |
 | S16 | Risks integration — reconciliation gap / unsupported exclusion / stale benchmark / method mismatch / out-of-range / missing segmentation | AFK | S9, S12, S13 | pending |
 
 **DAG:** S1 (design, parallel) · S2 → {S3, S4, S5, S6} · S6 → {S7, S9} · S7 → S8 · {S6,S7,S8} → S10 → S11 → S12 → S13 · {S9,S12} → S14 · S12 → S15 · {S9,S12,S13} → S16.
@@ -352,3 +352,20 @@ TNMM (§81).
     `tsc` + `pnpm build` clean. **Full backend suite 374 passed** (370 + 4).
   - Acceptance (S13): potential adjustment to an explicit practitioner-chosen target ✓ · reproducible w/ basis +
     currency ✓ · practitioner approval required ✓ · no auto-post/legal conclusion ✓.
+
+- [x] **S14 — Requirements integration** — BUILT, full-suite gate running. USER-VISIBLE (Economic analysis panel).
+    Mirrors the Class 2 functional-analysis pattern.
+  - `economic_coverage.py::economic_analysis_summary` — deterministic (not an LLM score) capability evaluation
+    from the Class 3 structured objects: tested_party_identified / financial_segment_available / pli_defined /
+    benchmark_available / range_calculated / benchmark_current / financial_result_reconciled / arm_length_
+    conclusion_available → present / partial / unknown + specific gaps (§51). A benchmark PDF's mere existence
+    never makes it present. Attached to `CoverageResponse.economic_analysis` (mirrors `functional_analysis`) in
+    `routers/coverage.py`; `EconomicAnalysisRead` schema.
+  - Frontend: an Economic analysis panel on the Requirements view (status + "N/M capabilities met" + gaps), typed
+    in `lib/api.ts` + `lib/demo-api.ts`.
+  - **Verification:** `test_economic_coverage.py` **3 passed** (unknown w/o analysis; partial when benchmark
+    missing; present when all capabilities met + rides the coverage response) + `test_coverage.py` 14 regression.
+    `tsc` + `pnpm build` clean. **Full backend suite 377 passed** (374 + 3).
+  - Acceptance (S14): Requirements evaluate economic-analysis capabilities (not benchmark-PDF existence) ✓ ·
+    missing segmentation / failed reconciliation / stale benchmark drive Partial/Missing ✓ · panel surfaces
+    status + gaps ✓.

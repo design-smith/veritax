@@ -675,6 +675,23 @@ export default function RequirementsStep({ engagementId, jurisdictions, onContin
               ))}
             </div>
           ) : null}
+          {coverage?.economic_analysis && coverage.economic_analysis.status !== "unknown" ? (
+            <div style={{
+              margin: "0 0 1rem", padding: "0.75rem 0.875rem",
+              border: "1px solid var(--color-border)", borderRadius: "var(--radius-md)",
+              background: "var(--color-background-secondary)",
+            }}>
+              <p style={{ fontSize: "var(--font-text-xs-size)", textTransform: "uppercase", letterSpacing: "0.04em", color: "var(--color-text-tertiary)", margin: "0 0 0.5rem" }}>
+                Economic analysis · <span style={{ color: coverage.economic_analysis.status === "present" ? "var(--color-text-success-soft)" : "var(--color-text-caution-soft)" }}>{coverage.economic_analysis.status}</span>
+              </p>
+              <p style={{ fontSize: "var(--font-text-sm-size)", color: "var(--color-text-secondary)", margin: "0 0 0.375rem" }}>
+                {Object.values(coverage.economic_analysis.capabilities).filter(Boolean).length}/{Object.keys(coverage.economic_analysis.capabilities).length} capabilities met
+              </p>
+              {coverage.economic_analysis.gaps.map((g, i) => (
+                <p key={i} style={{ margin: 0, fontSize: "var(--font-text-xs-size)", color: "var(--color-text-caution-soft)" }}>! {g}</p>
+              ))}
+            </div>
+          ) : null}
           {coverage?.regulatory?.length ? (
             <div style={{
               margin: "0 0 1rem", padding: "0.75rem 0.875rem",

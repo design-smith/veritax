@@ -199,6 +199,7 @@ export interface CoverageResponse {
   skipped_documents: { document_id: string; filename: string; reason: string }[]
   regulatory: RegulatoryContext[]
   functional_analysis: FunctionalAnalysis | null
+  economic_analysis: EconomicAnalysis | null
 }
 
 export interface FunctionalAnalysis {
@@ -207,6 +208,12 @@ export interface FunctionalAnalysis {
   assets_count: number
   risks_count: number
   risk_control: { resolved: number; total: number; unresolved: string[] }
+  gaps: string[]
+}
+
+export interface EconomicAnalysis {
+  status: "present" | "partial" | "unknown"
+  capabilities: Record<string, boolean>
   gaps: string[]
 }
 

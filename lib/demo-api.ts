@@ -428,6 +428,7 @@ function coverage(jur: string, presentCount: number): CoverageResponse {
     skipped_documents: [],
     regulatory: [],
     functional_analysis: null,
+    economic_analysis: null,
   }
 }
 
