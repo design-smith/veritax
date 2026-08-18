@@ -534,6 +534,17 @@ export interface SegmentPnLLine {
   row_count: number
   total: number
 }
+export interface SegmentAdjustment {
+  id: string
+  financial_row_id: string | null
+  account_ref: string | null
+  adjustment_type: string
+  original_amount: number | null
+  adjustment_amount: number
+  reason: string | null
+  created_by: string | null
+  created_at: string | null
+}
 export interface SegmentPnL {
   segment_id: string
   name: string
@@ -542,7 +553,11 @@ export interface SegmentPnL {
   operating_result: number
   total: number
   row_count: number
+  adjustments: SegmentAdjustment[]
+  adjustments_total: number
+  adjusted_operating_result: number
 }
+export const FINANCIAL_ADJUSTMENT_TYPES = ["exclude_non_operating", "reclassify", "gaap_adjustment", "topside_adjustment", "manual_adjustment", "tp_true_up"] as const
 export const SEGMENT_RULE_FIELDS = ["account_code", "account_name", "cost_center", "business_unit"] as const
 export const SEGMENT_RULE_OPERATORS = ["equals", "in", "contains"] as const
 export interface FinancialRowsPage {
@@ -817,6 +832,14 @@ const realApi = {
 
   getSegmentRows: (segmentId: string, limit = 100, offset = 0): Promise<FinancialRowsPage> =>
     afetch(`${BASE}/financial-segments/${segmentId}/rows?limit=${limit}&offset=${offset}`).then(r => parse<FinancialRowsPage>(r)),
+
+  addSegmentAdjustment: (segmentId: string, body: { adjustment_type: string; adjustment_amount: number; account_ref?: string; original_amount?: number; reason?: string }): Promise<SegmentAdjustment> =>
+    afetch(`${BASE}/financial-segments/${segmentId}/adjustments`, {
+      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
+    }).then(r => parse<SegmentAdjustment>(r)),
+
+  deleteSegmentAdjustment: (adjustmentId: string): Promise<void> =>
+    afetch(`${BASE}/financial-adjustments/${adjustmentId}`, { method: "DELETE" }).then(parseVoid),
 }
 
 // On the public /demo route, serve canned data from lib/demo-api instead of the network so the real

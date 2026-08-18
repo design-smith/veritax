@@ -29,15 +29,25 @@ from ..financial_classification import CLASSIFICATIONS, ClassificationSuggester
 from ..financial_intake import CANONICAL_FIELDS, detect_columns, header_signature, parse_financial_file
 from ..financial_mapping import ColumnMappingSuggester, find_saved_mapping, save_mapping
 from ..financial_segments import (
+    ADJUSTMENT_TYPES,
     RULE_ACTIONS,
     RULE_FIELDS,
     RULE_OPERATORS,
+    segment_adjustments,
     segment_pnl,
     segment_rows,
 )
 from ..financial_store import create_dataset, dataset_summary, reapply_mapping
 from ..ingest import get_or_create_uploaded_source, store_upload
-from ..models import Engagement, FinancialDataset, FinancialRow, FinancialSegment, SegmentRule, SourceKind
+from ..models import (
+    Engagement,
+    FinancialAdjustment,
+    FinancialDataset,
+    FinancialRow,
+    FinancialSegment,
+    SegmentRule,
+    SourceKind,
+)
 from ..storage import Storage
 
 router = APIRouter(tags=["financials"])
@@ -537,3 +547,74 @@ async def get_segment_rows(
         dataset_id=seg.id, total=total, limit=limit, offset=offset,
         rows=[RowRead.model_validate(r) for r in rows],
     )
+
+
+# ── Adjustments (S7, §20-21, §61, §75) ────────────────────────────────────────
+class AdjustmentCreate(BaseModel):
+    adjustment_type: str
+    adjustment_amount: float
+    financial_row_id: uuid.UUID | None = None
+    account_ref: str | None = None
+    original_amount: float | None = None
+    reason: str | None = None
+
+
+class AdjustmentRead(BaseModel):
+    id: uuid.UUID
+    segment_id: uuid.UUID
+    financial_row_id: uuid.UUID | None
+    account_ref: str | None
+    adjustment_type: str
+    original_amount: float | None
+    adjustment_amount: float
+    reason: str | None
+    created_by: uuid.UUID | None
+    created_at: datetime | None
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+@router.post("/financial-segments/{segment_id}/adjustments", response_model=AdjustmentRead, status_code=201)
+async def add_adjustment(
+    segment_id: uuid.UUID,
+    body: AdjustmentCreate,
+    session: AsyncSession = Depends(get_session),
+    user: AuthUser = Depends(get_current_user),
+) -> AdjustmentRead:
+    seg = await _owned_segment(session, segment_id, user)
+    if body.adjustment_type not in ADJUSTMENT_TYPES:
+        raise HTTPException(status_code=422, detail=f"unknown adjustment type: {body.adjustment_type}")
+    adj = FinancialAdjustment(
+        segment_id=seg.id, financial_row_id=body.financial_row_id, account_ref=body.account_ref,
+        adjustment_type=body.adjustment_type, original_amount=body.original_amount,
+        adjustment_amount=body.adjustment_amount, reason=body.reason, created_by=user.id,
+    )
+    session.add(adj)
+    await session.commit()
+    await session.refresh(adj)
+    return AdjustmentRead.model_validate(adj)
+
+
+@router.get("/financial-segments/{segment_id}/adjustments", response_model=list[AdjustmentRead])
+async def list_adjustments(
+    segment_id: uuid.UUID,
+    session: AsyncSession = Depends(get_session),
+    user: AuthUser = Depends(get_current_user),
+) -> list[AdjustmentRead]:
+    seg = await _owned_segment(session, segment_id, user)
+    return [AdjustmentRead.model_validate(a) for a in await segment_adjustments(session, seg)]
+
+
+@router.delete("/financial-adjustments/{adjustment_id}", status_code=204)
+async def delete_adjustment(
+    adjustment_id: uuid.UUID,
+    session: AsyncSession = Depends(get_session),
+    user: AuthUser = Depends(get_current_user),
+) -> None:
+    adj = await session.get(FinancialAdjustment, adjustment_id)
+    if adj is None:
+        raise HTTPException(status_code=404, detail="adjustment not found")
+    seg = await session.get(FinancialSegment, adj.segment_id)
+    await assert_owner(session, seg.engagement_id, user)
+    await session.delete(adj)
+    await session.commit()

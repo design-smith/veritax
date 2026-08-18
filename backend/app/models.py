@@ -1208,6 +1208,30 @@ class SegmentRule(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
+class FinancialAdjustment(Base):
+    """An amount adjustment layered on a segment's P&L (Class 3 §20-21, §61, §75): exclusions, GAAP/topside
+    restatements, manual entries, TP true-ups. NEVER mutates the raw financial_rows — the original stays intact
+    and every adjustment carries original/adjustment/reason/user/timestamp (§56 audit)."""
+
+    __tablename__ = "financial_adjustments"
+    __table_args__ = (Index("ix_financial_adjustments_segment", "segment_id"),)
+
+    id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
+    segment_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("financial_segments.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    financial_row_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("financial_rows.id", ondelete="SET NULL"), nullable=True
+    )
+    account_ref: Mapped[str | None] = mapped_column(Text, nullable=True)  # free-text target when not a specific row
+    adjustment_type: Mapped[str] = mapped_column(Text, nullable=False)    # exclude_non_operating|gaap_adjustment|...
+    original_amount: Mapped[float | None] = mapped_column(Numeric, nullable=True)
+    adjustment_amount: Mapped[float] = mapped_column(Numeric, nullable=False)
+    reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_by: Mapped[uuid.UUID | None] = mapped_column(nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
 class FinancialColumnMapping(Base):
     """A saved, versioned column mapping (Class 3 §14) keyed by user + header signature, so a repeat engagement
     with the same source format reuses last time's mapping. Stores {canonical_field: source_header}."""

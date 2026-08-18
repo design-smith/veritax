@@ -45,8 +45,8 @@ quartiles/adjustments, reconcile, alter rows, or decide whether a number is in a
 | S4 | Validation & diagnostics — invalid rows retained + flagged, never dropped; diagnostics UI | AFK | S2 | ✅ DONE |
 | S5 | Account classification (operating/non-operating/…; deterministic + LLM-assisted) + override w/ audit | AFK | S2 | ✅ DONE |
 | S6 | Segments + segmented P&L — segment container, direct mapping, include/exclude; drill-down; segmentation editor | AFK | S2 | ✅ DONE |
-| S7 | Adjustments (exclude/GAAP/topside/manual) — auditable, raw immutable; workpaper UI | AFK | S6 | ▶ NEXT |
-| S8 | Allocations — shared-cost split by base + provenance; allocation UI | AFK | S7 | pending |
+| S7 | Adjustments (exclude/GAAP/topside/manual) — auditable, raw immutable; workpaper UI | AFK | S6 | ✅ DONE |
+| S8 | Allocations — shared-cost split by base + provenance; allocation UI | AFK | S7 | ▶ NEXT |
 | S9 | Financial reconciliation — FS→TB→Segment, configurable tolerance, deterministic status; tie-out UI | AFK | S6 | pending |
 | S10 | TNMM core — tested party (practitioner-selected, links FAR) + PLI registry (deterministic) + calc + lifecycle; TNMM UI | AFK | S6, S7, S8 | pending |
 | S11 | Benchmark import — comparables + accepted/rejected + rejection log; benchmark UI | AFK | S10 | pending |
@@ -231,3 +231,19 @@ TNMM (§81).
   - Decision (ponytail): rule-based membership over explicit row-membership (survives new rows, subsumes direct
     mapping). Precise Revenue/COGS/operating-margin under a chosen PLI is S10; S6 gives the classification rollup +
     net operating result.
+
+- [x] **S7 — Adjustments** — BUILT, full-suite gate running. USER-VISIBLE (adjustment workpaper in the segment).
+  - `models.py`: `FinancialAdjustment` (segment_id, financial_row_id nullable, account_ref, adjustment_type ∈
+    exclude_non_operating/reclassify/gaap_adjustment/topside_adjustment/manual_adjustment/tp_true_up,
+    original_amount, adjustment_amount, reason, created_by, created_at). New table via create_all. Adjustments are
+    AMOUNT adjustments layered on a segment's P&L — raw `financial_rows` are NEVER mutated (§9,§75).
+  - `financial_segments.py`: `segment_pnl` now returns `adjustments` + `adjustments_total` +
+    `adjusted_operating_result` (base operating result + Σ adjustment_amount). `routers/financials.py`:
+    POST/GET/DELETE `/financial-segments/{id}/adjustments` (POST validates the type, stamps created_by + created_at).
+  - Frontend: an auditable workpaper in the segment detail (Account | Original | Treatment | Adjustment | Reason,
+    §61) with an add form + delete, and an Adjusted operating result line under the P&L.
+  - **Verification:** `test_financial_adjustments.py` **4 passed** (adjustment recorded w/ audit incl.
+    created_by/at + reflected in the adjusted result; raw rows never mutated; delete reverts; unknown type 422) +
+    S6 regression 5. `tsc` + `pnpm build` clean. **Full backend suite 346 passed** (342 + 4).
+  - Acceptance (S7): adjustments record original/adjustment/adjusted + reason/user/timestamp ✓ · raw never
+    modified ✓ · adjusted P&L reflects them ✓ · workpaper shows original + treatment + reason ✓.

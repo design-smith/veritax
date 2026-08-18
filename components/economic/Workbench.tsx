@@ -7,7 +7,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react"
 import { FileSpreadsheet, Layers, Calculator, BarChart3, Flag, Info, Upload, Loader2, Columns3, Sparkles, AlertTriangle, Plus, Trash2 } from "lucide-react"
-import { api, FINANCIAL_CLASSIFICATIONS, SEGMENT_RULE_FIELDS, SEGMENT_RULE_OPERATORS,
+import { api, FINANCIAL_CLASSIFICATIONS, SEGMENT_RULE_FIELDS, SEGMENT_RULE_OPERATORS, FINANCIAL_ADJUSTMENT_TYPES,
   type FinancialDatasetRead, type FinancialRowRead, type FinancialMappingRead,
   type FinancialSegmentRead, type SegmentPnL } from "@/lib/api"
 
@@ -399,6 +399,10 @@ function SegmentDetail({ segmentId }: { segmentId: string }) {
   const [value, setValue] = useState("")
   const [action, setAction] = useState("include")
   const [reason, setReason] = useState("")
+  const [adjType, setAdjType] = useState<string>(FINANCIAL_ADJUSTMENT_TYPES[0])
+  const [adjAccount, setAdjAccount] = useState("")
+  const [adjAmount, setAdjAmount] = useState("")
+  const [adjReason, setAdjReason] = useState("")
 
   const refresh = useCallback(async () => {
     const [s, p] = await Promise.all([api.getFinancialSegment(segmentId), api.getSegmentPnl(segmentId)])
@@ -415,6 +419,18 @@ function SegmentDetail({ segmentId }: { segmentId: string }) {
     await refresh()
   }
   async function delRule(id: string) { await api.deleteSegmentRule(id); await refresh() }
+
+  async function addAdj() {
+    const amt = parseFloat(adjAmount)
+    if (Number.isNaN(amt)) return
+    await api.addSegmentAdjustment(segmentId, {
+      adjustment_type: adjType, adjustment_amount: amt,
+      account_ref: adjAccount.trim() || undefined, reason: adjReason.trim() || undefined,
+    })
+    setAdjAccount(""); setAdjAmount(""); setAdjReason("")
+    await refresh()
+  }
+  async function delAdj(id: string) { await api.deleteSegmentAdjustment(id); await refresh() }
 
   if (!seg || !pnl) return <p style={{ fontSize: "var(--font-text-sm-size)", color: "var(--color-text-tertiary)" }}>Loading…</p>
 
@@ -460,6 +476,20 @@ function SegmentDetail({ segmentId }: { segmentId: string }) {
               <td />
               <td style={{ padding: "0.5rem 1.125rem", textAlign: "right", fontVariantNumeric: "tabular-nums" }}>{fmtNum(pnl.operating_result)} {pnl.currency ?? ""}</td>
             </tr>
+            {pnl.adjustments.length > 0 && (
+              <>
+                <tr style={{ color: "var(--color-text-secondary)" }}>
+                  <td style={{ padding: "0.4375rem 1.125rem" }}>Adjustments</td>
+                  <td style={{ padding: "0.4375rem 1.125rem", color: "var(--color-text-tertiary)" }}>{pnl.adjustments.length}</td>
+                  <td style={{ padding: "0.4375rem 1.125rem", textAlign: "right", fontVariantNumeric: "tabular-nums" }}>{fmtNum(pnl.adjustments_total)}</td>
+                </tr>
+                <tr style={{ color: "var(--color-text)", fontWeight: "var(--font-weight-semibold)", borderTop: "2px solid var(--color-border)" }}>
+                  <td style={{ padding: "0.5rem 1.125rem" }}>Adjusted operating result</td>
+                  <td />
+                  <td style={{ padding: "0.5rem 1.125rem", textAlign: "right", fontVariantNumeric: "tabular-nums" }}>{fmtNum(pnl.adjusted_operating_result)} {pnl.currency ?? ""}</td>
+                </tr>
+              </>
+            )}
           </tbody>
         </table>
         {showRows && rows && (
@@ -478,6 +508,38 @@ function SegmentDetail({ segmentId }: { segmentId: string }) {
             </tbody>
           </table>
         )}
+      </div>
+
+      {/* Adjustment workpaper (§61) — auditable amount adjustments; raw rows are never mutated (§75) */}
+      <div style={{ border: "1px solid var(--color-border)", borderRadius: "0.75rem", overflow: "hidden", background: "var(--color-surface)" }}>
+        <div style={{ padding: "0.875rem 1.125rem", borderBottom: "1px solid var(--color-border-subtle)", fontSize: "var(--font-text-sm-size)", fontWeight: "var(--font-weight-semibold)", color: "var(--color-text)" }}>Adjustment workpaper</div>
+        <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "var(--font-text-xs-size)" }}>
+          <thead><tr style={{ color: "var(--color-text-tertiary)", textAlign: "left" }}>{["Account", "Original", "Treatment", "Adjustment", "Reason", ""].map((h, i) => <th key={i} style={{ padding: "0.5rem 1.125rem", fontWeight: "var(--font-weight-medium)", borderBottom: "1px solid var(--color-border-subtle)" }}>{h}</th>)}</tr></thead>
+          <tbody>
+            {pnl.adjustments.map(a => (
+              <tr key={a.id} style={{ color: "var(--color-text-secondary)" }}>
+                <td style={{ padding: "0.4375rem 1.125rem", borderBottom: "1px solid var(--color-border-subtle)" }}>{a.account_ref ?? "—"}</td>
+                <td style={{ padding: "0.4375rem 1.125rem", borderBottom: "1px solid var(--color-border-subtle)", textAlign: "right", fontVariantNumeric: "tabular-nums" }}>{a.original_amount === null ? "—" : fmtNum(a.original_amount)}</td>
+                <td style={{ padding: "0.4375rem 1.125rem", borderBottom: "1px solid var(--color-border-subtle)" }}>{a.adjustment_type.replace(/_/g, " ")}</td>
+                <td style={{ padding: "0.4375rem 1.125rem", borderBottom: "1px solid var(--color-border-subtle)", textAlign: "right", fontVariantNumeric: "tabular-nums" }}>{fmtNum(a.adjustment_amount)}</td>
+                <td style={{ padding: "0.4375rem 1.125rem", borderBottom: "1px solid var(--color-border-subtle)", color: "var(--color-text-tertiary)" }}>{a.reason ?? "—"}</td>
+                <td style={{ padding: "0.4375rem 1.125rem", borderBottom: "1px solid var(--color-border-subtle)" }}>
+                  <button type="button" onClick={() => void delAdj(a.id)} style={{ border: "none", background: "transparent", cursor: "pointer", color: "var(--color-text-tertiary)" }} title="Remove adjustment"><Trash2 size={13} /></button>
+                </td>
+              </tr>
+            ))}
+            {pnl.adjustments.length === 0 && (
+              <tr><td colSpan={6} style={{ padding: "0.625rem 1.125rem", color: "var(--color-text-tertiary)" }}>No adjustments — the raw figures stand.</td></tr>
+            )}
+          </tbody>
+        </table>
+        <div style={{ display: "flex", gap: "0.375rem", flexWrap: "wrap", alignItems: "center", padding: "0.75rem 1.125rem", borderTop: "1px solid var(--color-border-subtle)" }}>
+          <select value={adjType} onChange={e => setAdjType(e.target.value)} style={miniSelect}>{FINANCIAL_ADJUSTMENT_TYPES.map(t => <option key={t} value={t}>{t.replace(/_/g, " ")}</option>)}</select>
+          <input value={adjAccount} onChange={e => setAdjAccount(e.target.value)} placeholder="account / target" style={{ ...miniSelect, width: "9rem" }} />
+          <input value={adjAmount} onChange={e => setAdjAmount(e.target.value)} placeholder="amount (+/-)" inputMode="decimal" style={{ ...miniSelect, width: "7rem" }} />
+          <input value={adjReason} onChange={e => setAdjReason(e.target.value)} placeholder="reason" style={{ ...miniSelect, width: "12rem" }} />
+          <button type="button" onClick={addAdj} style={toolbarBtn}><Plus size={13} /> Add adjustment</button>
+        </div>
       </div>
     </div>
   )
