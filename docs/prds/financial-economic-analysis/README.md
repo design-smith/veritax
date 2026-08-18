@@ -41,8 +41,8 @@ quartiles/adjustments, reconcile, alter rows, or decide whether a number is in a
 |---|-------|------|-----------|--------|
 | S1 | Financial Workbench design + shell — in-Draft Economic Analysis surface (nav + main + side panel), visual language | HITL (design review) | — | ✅ DONE |
 | S2 | Financial dataset intake — upload XLSX/CSV → immutable datasets + rows w/ provenance; scale-ready (bulk + columnar); Financials view | AFK | S1 | ✅ DONE |
-| S3 | Column mapping + saved mappings (deterministic + LLM-assisted suggestions) + mapping UI | AFK | S2 | ▶ NEXT |
-| S4 | Validation & diagnostics — invalid rows retained + flagged, never dropped; diagnostics UI | AFK | S2 | pending |
+| S3 | Column mapping + saved mappings (deterministic + LLM-assisted suggestions) + mapping UI | AFK | S2 | ✅ DONE |
+| S4 | Validation & diagnostics — invalid rows retained + flagged, never dropped; diagnostics UI | AFK | S2 | ▶ NEXT |
 | S5 | Account classification (operating/non-operating/…; deterministic + LLM-assisted) + override w/ audit | AFK | S2 | pending |
 | S6 | Segments + segmented P&L — segment container, direct mapping, include/exclude; drill-down; segmentation editor | AFK | S2 | pending |
 | S7 | Adjustments (exclude/GAAP/topside/manual) — auditable, raw immutable; workpaper UI | AFK | S6 | pending |
@@ -140,3 +140,31 @@ TNMM (§81).
   - Decision (ponytail): bulk-insert + Postgres SQL aggregation (the user's sanctioned "bulk load + SQL
     aggregation" scale path); DuckDB/Polars columnar processing deferred until a slice needs in-memory analytics
     over huge sets. Real per-client column mapping (aliases/saved/LLM) is S3.
+
+- [x] **S3 — Column mapping + saved mappings** — DONE. USER-VISIBLE (mapping editor in the Financials view).
+  - `financial_intake.py`: `derive_from_mapping(raw, mapping)` (re-derive canonical fields from the immutable raw
+    cells) + `header_signature(headers)` (order-independent, normalized). `financial_store.py`: `create_dataset`
+    now derives rows from an effective mapping; `reapply_mapping` bulk-UPDATEs rows from raw on a remap (no
+    re-upload — the payoff of preserving raw, §9).
+  - `financial_mapping.py`: saved-mapping helpers (`find_saved_mapping`/`save_mapping`, versioned by user +
+    signature, §14) + an injectable `ColumnMappingSuggester` seam with a deterministic offline default
+    (`KeywordColumnMappingSuggester`, token-overlap); an LLM-backed suggester is a drop-in via `app.state`
+    (mirrors the Class 2 extractor seam) so suggestions stay validated-only and tests stay offline (§13, §74).
+    New `FinancialColumnMapping` table (create_all); `column_mapping` JSONB on `financial_datasets` (idempotent
+    ALTER in init_db).
+  - `routers/financials.py`: upload reuses a saved mapping when the header signature matches (else default
+    detection); `GET/PUT /financial-datasets/{id}/mapping` (review + override → re-derive rows, optional
+    versioned save); `GET .../mapping/suggestions` (validated-only, never auto-applied). Suggester injected in
+    main.py + conftest.
+  - Frontend: a Columns mapping editor in the workbench Financials view — per-field header selects, a Suggest
+    button (fills unmapped fields, requires Apply), and Apply → rows re-derive live.
+  - **Verification:** `test_financial_mapping.py` **6 passed** (override remaps rows from raw w/o re-upload;
+    saved mapping reused on matching headers; versioning latest-wins; suggestions validated-only; deterministic
+    detection regression; invalid mapping 422) + `test_financials.py` 7 (S2 regression). `tsc` + `pnpm build`
+    clean. **Full backend suite 323 passed** (317 + 6).
+  - Acceptance (S3): columns map to canonical fields, reviewable/overridable ✓ · deterministic detection
+    resolves known/aliased ✓ · LLM mappings are suggestions requiring validation ✓ · saved mappings versioned +
+    reused on schema match ✓.
+  - Honest: the "LLM-assisted" suggester ships as a deterministic token-overlap matcher behind the injectable
+    seam (offline, free, decent for short header names), consistent with the Class 2 v1 extractor; a real
+    LLM-backed suggester is a drop-in via `app.state.column_mapping_suggester`.

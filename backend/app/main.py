@@ -25,6 +25,7 @@ from .drafting import (
 )
 from .embeddings import FakeEmbedder, VoyageEmbedder
 from .interview_extraction import KeywordInterviewExtractor
+from .financial_mapping import KeywordColumnMappingSuggester
 from .jobs import pipeline_worker_loop
 from .risks import AnthropicRiskAnalyzer, DeepSeekRiskAnalyzer, FakeRiskAnalyzer
 from .matching import ClassificationBackedProvider
@@ -131,6 +132,8 @@ async def lifespan(app: FastAPI):
     )
     # Interview → functional-fact extraction is deterministic (keyword-based) in v1 (§45); no paid API.
     app.state.interview_extractor = KeywordInterviewExtractor()
+    # Column-mapping suggestions (Class 3 §13) — deterministic default behind an injectable seam (LLM drop-in).
+    app.state.column_mapping_suggester = KeywordColumnMappingSuggester()
     # Requirement matching reads classified documents from the classification store.
     app.state.classified_docs_provider = ClassificationBackedProvider()
     worker = asyncio.create_task(pipeline_worker_loop(app))

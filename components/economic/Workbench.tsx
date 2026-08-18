@@ -6,8 +6,8 @@
 // source-linked rows). Later slices fill Segmentation / TNMM / Benchmark / Conclusion.
 
 import { useCallback, useEffect, useRef, useState } from "react"
-import { FileSpreadsheet, Layers, Calculator, BarChart3, Flag, Info, Upload, Loader2 } from "lucide-react"
-import { api, type FinancialDatasetRead, type FinancialRowRead } from "@/lib/api"
+import { FileSpreadsheet, Layers, Calculator, BarChart3, Flag, Info, Upload, Loader2, Columns3, Sparkles } from "lucide-react"
+import { api, type FinancialDatasetRead, type FinancialRowRead, type FinancialMappingRead } from "@/lib/api"
 
 export type WorkbenchView = "financials" | "segmentation" | "tnmm" | "benchmark" | "conclusion"
 
@@ -29,6 +29,12 @@ const PLACEHOLDER: Record<Exclude<WorkbenchView, "financials">, { title: string;
 const DATASET_TYPES = ["trial_balance", "general_ledger", "segmented_pl", "financial_statements", "management_accounts", "invoice_population"]
 const fmtType = (t: string) => t.replace(/_/g, " ")
 const fmtNum = (n: number | null) => (n === null ? "—" : n.toLocaleString(undefined, { maximumFractionDigits: 2 }))
+
+const toolbarBtn: React.CSSProperties = {
+  display: "inline-flex", alignItems: "center", gap: "0.375rem", height: "1.75rem", padding: "0 0.625rem",
+  borderRadius: "var(--control-radius-md)", border: "1px solid var(--color-border)", cursor: "pointer",
+  background: "var(--color-surface)", color: "var(--color-text-secondary)", fontSize: "var(--font-text-xs-size)", fontWeight: "var(--font-weight-medium)",
+}
 
 export default function EconomicWorkbench({ engagementId }: { engagementId: string }) {
   const [view, setView] = useState<WorkbenchView>("financials")
@@ -159,12 +165,44 @@ function FinancialsView({ engagementId }: { engagementId: string }) {
 
 function DatasetCard({ ds, open, onToggle }: { ds: FinancialDatasetRead; open: boolean; onToggle: () => void }) {
   const [rows, setRows] = useState<FinancialRowRead[] | null>(null)
+  const [mapping, setMapping] = useState<FinancialMappingRead | null>(null)
+  const [draft, setDraft] = useState<Record<string, string>>({})
+  const [showMapping, setShowMapping] = useState(false)
+  const [busy, setBusy] = useState(false)
+
+  const loadRows = useCallback(() => {
+    void api.getFinancialRows(ds.id, 50, 0).then(p => setRows(p.rows)).catch(() => setRows([]))
+  }, [ds.id])
 
   useEffect(() => {
-    if (open && rows === null) {
-      void api.getFinancialRows(ds.id, 50, 0).then(p => setRows(p.rows)).catch(() => setRows([]))
+    if (!open) return
+    if (rows === null) loadRows()
+    if (mapping === null) {
+      void api.getFinancialMapping(ds.id).then(m => { setMapping(m); setDraft({ ...m.effective }) }).catch(() => {})
     }
-  }, [open, rows, ds.id])
+  }, [open, rows, mapping, ds.id, loadRows])
+
+  async function suggest() {
+    try {
+      const s = await api.getFinancialMappingSuggestions(ds.id)
+      setDraft(prev => {
+        const next = { ...prev }
+        for (const [f, h] of Object.entries(s.suggestions)) if (!next[f]) next[f] = h
+        return next
+      })
+      setShowMapping(true)
+    } catch { /* suggestions are optional */ }
+  }
+
+  async function apply() {
+    setBusy(true)
+    try {
+      const clean = Object.fromEntries(Object.entries(draft).filter(([, v]) => v))
+      await api.updateFinancialMapping(ds.id, clean)
+      loadRows()
+      const m = await api.getFinancialMapping(ds.id); setMapping(m); setDraft({ ...m.effective })
+    } finally { setBusy(false) }
+  }
 
   return (
     <div style={{ border: "1px solid var(--color-border)", borderRadius: "0.75rem", overflow: "hidden", background: "var(--color-surface)" }}>
@@ -192,6 +230,42 @@ function DatasetCard({ ds, open, onToggle }: { ds: FinancialDatasetRead; open: b
 
       {open && (
         <div style={{ borderTop: "1px solid var(--color-border-subtle)", overflow: "auto" }}>
+          {/* Column-mapping toolbar */}
+          <div style={{ display: "flex", alignItems: "center", gap: "0.5rem", padding: "0.625rem 1.125rem", borderBottom: "1px solid var(--color-border-subtle)" }}>
+            <button type="button" onClick={() => setShowMapping(v => !v)} style={toolbarBtn}>
+              <Columns3 size={13} /> Columns
+            </button>
+            <button type="button" onClick={suggest} style={toolbarBtn} title="Suggest a mapping for unmapped columns (you confirm before it applies)">
+              <Sparkles size={13} /> Suggest
+            </button>
+          </div>
+
+          {showMapping && mapping && (
+            <div style={{ padding: "0.875rem 1.125rem", borderBottom: "1px solid var(--color-border-subtle)", background: "var(--color-background)" }}>
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(15rem, 1fr))", gap: "0.5rem 1rem" }}>
+                {mapping.canonical_fields.map(field => (
+                  <label key={field} style={{ display: "flex", alignItems: "center", gap: "0.5rem", fontSize: "var(--font-text-xs-size)", color: "var(--color-text-secondary)" }}>
+                    <span style={{ width: "6.5rem", flexShrink: 0 }}>{field.replace(/_/g, " ")}</span>
+                    <select value={draft[field] ?? ""} onChange={e => setDraft(prev => ({ ...prev, [field]: e.target.value }))} style={{
+                      flex: 1, minWidth: 0, height: "1.75rem", padding: "0 0.375rem", borderRadius: "var(--radius-sm)",
+                      border: "1px solid var(--color-border)", background: "var(--color-surface)", color: "var(--color-text)", fontSize: "var(--font-text-xs-size)",
+                    }}>
+                      <option value="">— unmapped —</option>
+                      {mapping.headers.map(h => <option key={h} value={h}>{h}</option>)}
+                    </select>
+                  </label>
+                ))}
+              </div>
+              <button type="button" onClick={apply} disabled={busy} style={{
+                marginTop: "0.75rem", display: "inline-flex", alignItems: "center", gap: "0.375rem", height: "var(--control-size-sm, 1.75rem)", padding: "0 0.75rem",
+                borderRadius: "var(--control-radius-md)", border: "none", cursor: busy ? "not-allowed" : "pointer",
+                background: "var(--color-background-primary-solid)", color: "var(--color-text-inverse)", fontSize: "var(--font-text-xs-size)", fontWeight: "var(--font-weight-medium)",
+              }}>
+                {busy ? <Loader2 size={13} className="animate-spin" /> : null} Apply mapping
+              </button>
+            </div>
+          )}
+
           {rows === null
             ? <p style={{ padding: "0.875rem 1.125rem", margin: 0, fontSize: "var(--font-text-xs-size)", color: "var(--color-text-tertiary)" }}>Loading rows…</p>
             : (

@@ -79,6 +79,10 @@ def get_interview_extractor(request: Request) -> InterviewExtractor:
     return request.app.state.interview_extractor
 
 
+def get_column_mapping_suggester(request: Request):
+    return request.app.state.column_mapping_suggester
+
+
 def get_risk_analyzer(request: Request) -> RiskAnalyzer:
     return request.app.state.risk_analyzer
 

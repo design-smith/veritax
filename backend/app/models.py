@@ -1129,6 +1129,7 @@ class FinancialDataset(Base):
     period: Mapped[str | None] = mapped_column(Text, nullable=True)
     currency: Mapped[str | None] = mapped_column(Text, nullable=True)
     columns: Mapped[list] = mapped_column(JSONB, nullable=False, default=list)   # detected header columns (raw)
+    column_mapping: Mapped[dict | None] = mapped_column(JSONB, nullable=True)    # effective {canonical_field: header} (S3)
     schema_version: Mapped[str] = mapped_column(Text, nullable=False, default="1")
     status: Mapped[str] = mapped_column(Text, nullable=False, default="ready")   # §64 lifecycle (v1: ready)
     row_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
@@ -1157,6 +1158,22 @@ class FinancialRow(Base):
     period: Mapped[str | None] = mapped_column(Text, nullable=True)
     source_locator: Mapped[str] = mapped_column(Text, nullable=False)    # "<sheet>!Row <n>" (§11)
     raw: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict)  # original cells by header — immutable (§9)
+
+
+class FinancialColumnMapping(Base):
+    """A saved, versioned column mapping (Class 3 §14) keyed by user + header signature, so a repeat engagement
+    with the same source format reuses last time's mapping. Stores {canonical_field: source_header}."""
+
+    __tablename__ = "financial_column_mappings"
+    __table_args__ = (Index("ix_financial_column_mappings_lookup", "user_id", "signature"),)
+
+    id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
+    user_id: Mapped[uuid.UUID] = mapped_column(nullable=False)     # the practitioner/firm that owns the mapping
+    signature: Mapped[str] = mapped_column(Text, nullable=False)   # header_signature(headers)
+    label: Mapped[str | None] = mapped_column(Text, nullable=True)
+    mapping: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict)
+    version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
 # Seed data for the connector registry (all available, none wired yet).

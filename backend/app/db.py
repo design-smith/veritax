@@ -125,6 +125,10 @@ async def init_db(eng=engine) -> None:
                 "CREATE INDEX IF NOT EXISTS ix_coverage_supplements_target_requirement_id "
                 "ON coverage_supplements (target_requirement_id)"
             ))
+            # Class 3 S3: the effective column mapping on a financial dataset (saved-mappings table via create_all).
+            await conn.execute(text(
+                "ALTER TABLE financial_datasets ADD COLUMN IF NOT EXISTS column_mapping jsonb"
+            ))
             log.info("db init: idempotent column updates ready")
 
         async with async_sessionmaker(eng, expire_on_commit=False)() as session:

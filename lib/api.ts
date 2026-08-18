@@ -503,6 +503,18 @@ export interface FinancialRowsPage {
   offset: number
   rows: FinancialRowRead[]
 }
+export interface FinancialMappingRead {
+  dataset_id: string
+  headers: string[]
+  canonical_fields: string[]
+  detected: Record<string, string>
+  effective: Record<string, string>
+}
+export interface FinancialMappingSuggestions {
+  dataset_id: string
+  unmapped_fields: string[]
+  suggestions: Record<string, string>
+}
 
 const realApi = {
   health: async (): Promise<HealthResponse> => {
@@ -708,6 +720,19 @@ const realApi = {
     afetch(`${BASE}/financial-datasets/${datasetId}/rows?limit=${limit}&offset=${offset}`).then(r =>
       parse<FinancialRowsPage>(r),
     ),
+
+  getFinancialMapping: (datasetId: string): Promise<FinancialMappingRead> =>
+    afetch(`${BASE}/financial-datasets/${datasetId}/mapping`).then(r => parse<FinancialMappingRead>(r)),
+
+  updateFinancialMapping: (datasetId: string, mapping: Record<string, string>, save = false, label?: string): Promise<FinancialDatasetRead> =>
+    afetch(`${BASE}/financial-datasets/${datasetId}/mapping`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ mapping, save, label }),
+    }).then(r => parse<FinancialDatasetRead>(r)),
+
+  getFinancialMappingSuggestions: (datasetId: string): Promise<FinancialMappingSuggestions> =>
+    afetch(`${BASE}/financial-datasets/${datasetId}/mapping/suggestions`).then(r => parse<FinancialMappingSuggestions>(r)),
 }
 
 // On the public /demo route, serve canned data from lib/demo-api instead of the network so the real

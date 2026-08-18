@@ -7,6 +7,7 @@ suggestions is S3 (§12-14). Never fabricates a value: an unparseable amount sta
 from __future__ import annotations
 
 import csv
+import hashlib
 import io
 from dataclasses import dataclass
 
@@ -71,6 +72,38 @@ def parse_amount(v: object) -> float | None:
     except ValueError:
         return None
     return -n if neg else n
+
+
+def derive_from_mapping(raw: dict, mapping: dict[str, str]) -> dict:
+    """Canonical field values from the immutable raw cells, given {canonical_field: source_header}.
+
+    This is what makes a remap cheap (§9): rows are re-derived from `raw` when the mapping changes — no re-upload.
+    """
+    def cell(field: str) -> str | None:
+        header = mapping.get(field)
+        if not header:
+            return None
+        v = raw.get(header)
+        s = None if v is None else str(v).strip()
+        return s or None
+
+    amount_header = mapping.get("amount")
+    return {
+        "account_code": cell("account_code"),
+        "account_name": cell("account_name"),
+        "amount": parse_amount(raw.get(amount_header)) if amount_header else None,
+        "currency": cell("currency"),
+        "cost_center": cell("cost_center"),
+        "business_unit": cell("business_unit"),
+        "counterparty": cell("counterparty"),
+        "period": cell("period"),
+    }
+
+
+def header_signature(headers: list[str]) -> str:
+    """Stable signature of a header set (order-independent, normalized) — the key for reusing a saved mapping."""
+    norm = "|".join(sorted(h for h in (_norm(x) for x in headers) if h))
+    return hashlib.sha256(norm.encode("utf-8")).hexdigest()[:32]
 
 
 @dataclass

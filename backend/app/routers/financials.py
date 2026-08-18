@@ -15,9 +15,17 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..auth import AuthUser
-from ..deps import assert_owner, get_current_user, get_session, get_storage, require_engagement_owner
-from ..financial_intake import parse_financial_file
-from ..financial_store import create_dataset, dataset_summary
+from ..deps import (
+    assert_owner,
+    get_column_mapping_suggester,
+    get_current_user,
+    get_session,
+    get_storage,
+    require_engagement_owner,
+)
+from ..financial_intake import CANONICAL_FIELDS, detect_columns, header_signature, parse_financial_file
+from ..financial_mapping import ColumnMappingSuggester, find_saved_mapping, save_mapping
+from ..financial_store import create_dataset, dataset_summary, reapply_mapping
 from ..ingest import get_or_create_uploaded_source, store_upload
 from ..models import Engagement, FinancialDataset, FinancialRow, SourceKind
 from ..storage import Storage
@@ -106,6 +114,7 @@ async def upload_financial_dataset(
     entity_id: str | None = Form(default=None),
     session: AsyncSession = Depends(get_session),
     storage: Storage = Depends(get_storage),
+    user: AuthUser = Depends(get_current_user),
     _owner: Engagement = Depends(require_engagement_owner),
 ) -> DatasetRead:
     data = await file.read()
@@ -121,9 +130,13 @@ async def upload_financial_dataset(
     source = await get_or_create_uploaded_source(session, engagement_id, SourceKind.financials)
     doc = await store_upload(session, storage, engagement_id, source.id, filename, file.content_type, data)
 
+    # Reuse a saved mapping for this source format if one exists (§14), else default detection (S3).
+    saved = await find_saved_mapping(session, user.id, header_signature(parsed.headers))
+    effective = saved if saved is not None else parsed.detected
+
     ds = await create_dataset(
         session, engagement_id, parsed, document_id=doc.id, dataset_type=dataset_type,
-        source_filename=filename, entity_id=entity_id, period=period,
+        source_filename=filename, mapping=effective, entity_id=entity_id, period=period,
     )
     await session.commit()
     return await _to_read(session, ds, detected=parsed.detected)
@@ -168,4 +181,81 @@ async def get_financial_rows(
     return RowsPage(
         dataset_id=ds.id, total=ds.row_count, limit=limit, offset=offset,
         rows=[RowRead.model_validate(r) for r in rows],
+    )
+
+
+class MappingRead(BaseModel):
+    dataset_id: uuid.UUID
+    headers: list[str]
+    canonical_fields: list[str]
+    detected: dict[str, str]    # default deterministic detection
+    effective: dict[str, str]   # the mapping currently applied to the rows
+
+
+class MappingUpdate(BaseModel):
+    mapping: dict[str, str]
+    save: bool = False
+    label: str | None = None
+
+
+class SuggestionsRead(BaseModel):
+    dataset_id: uuid.UUID
+    unmapped_fields: list[str]
+    suggestions: dict[str, str]   # {canonical_field: source_header} — a SUGGESTION only, never auto-applied
+
+
+def _validate_mapping(mapping: dict[str, str], headers: list[str]) -> None:
+    unknown_fields = [f for f in mapping if f not in CANONICAL_FIELDS]
+    if unknown_fields:
+        raise HTTPException(status_code=422, detail=f"unknown canonical field(s): {', '.join(unknown_fields)}")
+    bad_headers = [h for h in mapping.values() if h not in headers]
+    if bad_headers:
+        raise HTTPException(status_code=422, detail=f"mapping references missing column(s): {', '.join(bad_headers)}")
+
+
+@router.get("/financial-datasets/{dataset_id}/mapping", response_model=MappingRead)
+async def get_mapping(
+    dataset_id: uuid.UUID,
+    session: AsyncSession = Depends(get_session),
+    user: AuthUser = Depends(get_current_user),
+) -> MappingRead:
+    ds = await _owned_dataset(session, dataset_id, user)
+    headers = list(ds.columns or [])
+    return MappingRead(
+        dataset_id=ds.id, headers=headers, canonical_fields=list(CANONICAL_FIELDS),
+        detected=detect_columns(headers), effective=dict(ds.column_mapping or {}),
+    )
+
+
+@router.put("/financial-datasets/{dataset_id}/mapping", response_model=DatasetRead)
+async def update_mapping(
+    dataset_id: uuid.UUID,
+    body: MappingUpdate,
+    session: AsyncSession = Depends(get_session),
+    user: AuthUser = Depends(get_current_user),
+) -> DatasetRead:
+    ds = await _owned_dataset(session, dataset_id, user)
+    headers = list(ds.columns or [])
+    _validate_mapping(body.mapping, headers)
+    await reapply_mapping(session, ds, body.mapping)   # re-derive rows from immutable raw (§9 — no re-upload)
+    if body.save:
+        await save_mapping(session, user.id, header_signature(headers), body.mapping, body.label)
+    await session.commit()
+    return await _to_read(session, ds, detected=detect_columns(headers))
+
+
+@router.get("/financial-datasets/{dataset_id}/mapping/suggestions", response_model=SuggestionsRead)
+async def suggest_mapping(
+    dataset_id: uuid.UUID,
+    session: AsyncSession = Depends(get_session),
+    user: AuthUser = Depends(get_current_user),
+    suggester: ColumnMappingSuggester = Depends(get_column_mapping_suggester),
+) -> SuggestionsRead:
+    ds = await _owned_dataset(session, dataset_id, user)
+    headers = list(ds.columns or [])
+    effective = dict(ds.column_mapping or {})
+    unmapped = [f for f in CANONICAL_FIELDS if f not in effective]
+    # Suggestion ONLY — never auto-applied; the practitioner accepts it via PUT /mapping (§13, §74).
+    return SuggestionsRead(
+        dataset_id=ds.id, unmapped_fields=unmapped, suggestions=suggester.suggest(headers, unmapped),
     )
