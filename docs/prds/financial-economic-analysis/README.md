@@ -44,8 +44,8 @@ quartiles/adjustments, reconcile, alter rows, or decide whether a number is in a
 | S3 | Column mapping + saved mappings (deterministic + LLM-assisted suggestions) + mapping UI | AFK | S2 | ✅ DONE |
 | S4 | Validation & diagnostics — invalid rows retained + flagged, never dropped; diagnostics UI | AFK | S2 | ✅ DONE |
 | S5 | Account classification (operating/non-operating/…; deterministic + LLM-assisted) + override w/ audit | AFK | S2 | ✅ DONE |
-| S6 | Segments + segmented P&L — segment container, direct mapping, include/exclude; drill-down; segmentation editor | AFK | S2 | ▶ NEXT |
-| S7 | Adjustments (exclude/GAAP/topside/manual) — auditable, raw immutable; workpaper UI | AFK | S6 | pending |
+| S6 | Segments + segmented P&L — segment container, direct mapping, include/exclude; drill-down; segmentation editor | AFK | S2 | ✅ DONE |
+| S7 | Adjustments (exclude/GAAP/topside/manual) — auditable, raw immutable; workpaper UI | AFK | S6 | ▶ NEXT |
 | S8 | Allocations — shared-cost split by base + provenance; allocation UI | AFK | S7 | pending |
 | S9 | Financial reconciliation — FS→TB→Segment, configurable tolerance, deterministic status; tie-out UI | AFK | S6 | pending |
 | S10 | TNMM core — tested party (practitioner-selected, links FAR) + PLI registry (deterministic) + calc + lifecycle; TNMM UI | AFK | S6, S7, S8 | pending |
@@ -210,3 +210,24 @@ TNMM (§81).
     **Full backend suite 337 passed** (330 + 7).
   - Acceptance (S5): rows carry a classification from the controlled enum ✓ · deterministic rules classify known
     accounts, LLM only suggests ambiguous ✓ · practitioner reclassify with preserved audit ✓.
+
+- [x] **S6 — Segments + segmented P&L** — BUILT, full-suite gate running. USER-VISIBLE (Segmentation view live).
+  - `models.py`: `FinancialSegment` (engagement/entity/name/period/currency/transaction_ids/status) + `SegmentRule`
+    (field ∈ account_code/account_name/cost_center/business_unit, operator ∈ equals/in/contains, value, action
+    include/exclude, reason). New tables via create_all. Rule-based membership subsumes §18 direct mapping +
+    inclusion/exclusion; rules never mutate rows (§9).
+  - `financial_segments.py`: `segment_row_filter` builds a SQL condition `(any include) AND NOT (any exclude)`;
+    `segment_pnl` is a SQL rollup grouped by the S5 classification (net signed sum + count per class + net
+    operating result, §24); `segment_rows` returns matched rows for drill-down. Membership spans the engagement's
+    datasets, optionally filtered by the segment's period.
+  - `routers/financials.py`: segment CRUD + rule add/delete (validated) + `GET /financial-segments/{id}/pnl` +
+    `.../rows` (drill). Frontend: a Segmentation view — segment tabs + create, an include/exclude rule builder
+    (field/operator/value/reason) with delete, the segmented P&L, and drill-to-rows.
+  - **Verification:** `test_financial_segments.py` **5 passed** (include/exclude-with-reason P&L; drill rows +
+    originals preserved; multiple segments per entity; empty-without-include; invalid-rule 422). `tsc` +
+    `pnpm build` clean. **Full backend suite 342 passed** (337 + 5).
+  - Acceptance (S6): multiple segments per entity ✓ · accounts assigned directly + excluded each with a reason ✓ ·
+    segmented P&L renders + drills to accounts ✓ · original values preserved ✓.
+  - Decision (ponytail): rule-based membership over explicit row-membership (survives new rows, subsumes direct
+    mapping). Precise Revenue/COGS/operating-margin under a chosen PLI is S10; S6 gives the classification rollup +
+    net operating result.

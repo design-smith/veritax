@@ -28,9 +28,16 @@ from ..deps import (
 from ..financial_classification import CLASSIFICATIONS, ClassificationSuggester
 from ..financial_intake import CANONICAL_FIELDS, detect_columns, header_signature, parse_financial_file
 from ..financial_mapping import ColumnMappingSuggester, find_saved_mapping, save_mapping
+from ..financial_segments import (
+    RULE_ACTIONS,
+    RULE_FIELDS,
+    RULE_OPERATORS,
+    segment_pnl,
+    segment_rows,
+)
 from ..financial_store import create_dataset, dataset_summary, reapply_mapping
 from ..ingest import get_or_create_uploaded_source, store_upload
-from ..models import Engagement, FinancialDataset, FinancialRow, SourceKind
+from ..models import Engagement, FinancialDataset, FinancialRow, FinancialSegment, SegmentRule, SourceKind
 from ..storage import Storage
 
 router = APIRouter(tags=["financials"])
@@ -357,3 +364,176 @@ async def suggest_classifications(
         for r in rows
     ]
     return ClassificationSuggestionsRead(dataset_id=ds.id, suggestions=out)
+
+
+# ── Segments + segmented P&L (S6, §16-18, §24) ────────────────────────────────
+class SegmentCreate(BaseModel):
+    name: str
+    entity_id: str | None = None
+    period: str | None = None
+    currency: str | None = None
+    transaction_ids: list[str] = []
+
+
+class SegmentRuleCreate(BaseModel):
+    field: str
+    operator: str
+    value: str
+    action: str = "include"
+    reason: str | None = None
+
+
+class SegmentRuleRead(BaseModel):
+    id: uuid.UUID
+    field: str
+    operator: str
+    value: str
+    action: str
+    reason: str | None = None
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class SegmentRead(BaseModel):
+    id: uuid.UUID
+    engagement_id: uuid.UUID
+    entity_id: str | None
+    name: str
+    period: str | None
+    currency: str | None
+    transaction_ids: list[str]
+    status: str
+    rules: list[SegmentRuleRead] = []
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+async def _owned_segment(session: AsyncSession, segment_id: uuid.UUID, user: AuthUser) -> FinancialSegment:
+    seg = await session.get(FinancialSegment, segment_id)
+    if seg is None:
+        raise HTTPException(status_code=404, detail="financial segment not found")
+    await assert_owner(session, seg.engagement_id, user)
+    return seg
+
+
+async def _segment_read(session: AsyncSession, seg: FinancialSegment) -> SegmentRead:
+    rules = (await session.execute(
+        select(SegmentRule).where(SegmentRule.segment_id == seg.id).order_by(SegmentRule.created_at)
+    )).scalars().all()
+    return SegmentRead(
+        id=seg.id, engagement_id=seg.engagement_id, entity_id=seg.entity_id, name=seg.name,
+        period=seg.period, currency=seg.currency, transaction_ids=list(seg.transaction_ids or []),
+        status=seg.status, rules=[SegmentRuleRead.model_validate(r) for r in rules],
+    )
+
+
+@router.post("/engagements/{engagement_id}/financial-segments", response_model=SegmentRead, status_code=201)
+async def create_segment(
+    engagement_id: uuid.UUID,
+    body: SegmentCreate,
+    session: AsyncSession = Depends(get_session),
+    _owner: Engagement = Depends(require_engagement_owner),
+) -> SegmentRead:
+    seg = FinancialSegment(
+        engagement_id=engagement_id, name=body.name, entity_id=body.entity_id, period=body.period,
+        currency=body.currency, transaction_ids=body.transaction_ids,
+    )
+    session.add(seg)
+    await session.commit()
+    return await _segment_read(session, seg)
+
+
+@router.get("/engagements/{engagement_id}/financial-segments", response_model=list[SegmentRead])
+async def list_segments(
+    engagement_id: uuid.UUID,
+    session: AsyncSession = Depends(get_session),
+    _owner: Engagement = Depends(require_engagement_owner),
+) -> list[SegmentRead]:
+    segs = (await session.execute(
+        select(FinancialSegment).where(FinancialSegment.engagement_id == engagement_id)
+        .order_by(FinancialSegment.created_at)
+    )).scalars().all()
+    return [await _segment_read(session, s) for s in segs]
+
+
+@router.get("/financial-segments/{segment_id}", response_model=SegmentRead)
+async def get_segment(
+    segment_id: uuid.UUID,
+    session: AsyncSession = Depends(get_session),
+    user: AuthUser = Depends(get_current_user),
+) -> SegmentRead:
+    return await _segment_read(session, await _owned_segment(session, segment_id, user))
+
+
+@router.delete("/financial-segments/{segment_id}", status_code=204)
+async def delete_segment(
+    segment_id: uuid.UUID,
+    session: AsyncSession = Depends(get_session),
+    user: AuthUser = Depends(get_current_user),
+) -> None:
+    seg = await _owned_segment(session, segment_id, user)
+    await session.delete(seg)
+    await session.commit()
+
+
+@router.post("/financial-segments/{segment_id}/rules", response_model=SegmentRead, status_code=201)
+async def add_segment_rule(
+    segment_id: uuid.UUID,
+    body: SegmentRuleCreate,
+    session: AsyncSession = Depends(get_session),
+    user: AuthUser = Depends(get_current_user),
+) -> SegmentRead:
+    seg = await _owned_segment(session, segment_id, user)
+    if body.field not in RULE_FIELDS:
+        raise HTTPException(status_code=422, detail=f"unknown field: {body.field}")
+    if body.operator not in RULE_OPERATORS:
+        raise HTTPException(status_code=422, detail=f"unknown operator: {body.operator}")
+    if body.action not in RULE_ACTIONS:
+        raise HTTPException(status_code=422, detail=f"unknown action: {body.action}")
+    session.add(SegmentRule(
+        segment_id=seg.id, field=body.field, operator=body.operator, value=body.value,
+        action=body.action, reason=body.reason,
+    ))
+    await session.commit()
+    return await _segment_read(session, seg)
+
+
+@router.delete("/segment-rules/{rule_id}", status_code=204)
+async def delete_segment_rule(
+    rule_id: uuid.UUID,
+    session: AsyncSession = Depends(get_session),
+    user: AuthUser = Depends(get_current_user),
+) -> None:
+    rule = await session.get(SegmentRule, rule_id)
+    if rule is None:
+        raise HTTPException(status_code=404, detail="segment rule not found")
+    seg = await session.get(FinancialSegment, rule.segment_id)
+    await assert_owner(session, seg.engagement_id, user)
+    await session.delete(rule)
+    await session.commit()
+
+
+@router.get("/financial-segments/{segment_id}/pnl")
+async def get_segment_pnl(
+    segment_id: uuid.UUID,
+    session: AsyncSession = Depends(get_session),
+    user: AuthUser = Depends(get_current_user),
+) -> dict:
+    seg = await _owned_segment(session, segment_id, user)
+    return await segment_pnl(session, seg)
+
+
+@router.get("/financial-segments/{segment_id}/rows", response_model=RowsPage)
+async def get_segment_rows(
+    segment_id: uuid.UUID,
+    limit: int = Query(default=100, le=1000),
+    offset: int = Query(default=0, ge=0),
+    session: AsyncSession = Depends(get_session),
+    user: AuthUser = Depends(get_current_user),
+) -> RowsPage:
+    seg = await _owned_segment(session, segment_id, user)
+    total, rows = await segment_rows(session, seg, limit=limit, offset=offset)
+    return RowsPage(
+        dataset_id=seg.id, total=total, limit=limit, offset=offset,
+        rows=[RowRead.model_validate(r) for r in rows],
+    )

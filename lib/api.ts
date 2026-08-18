@@ -510,6 +510,41 @@ export interface FinancialRowRead {
   classification_reason?: string | null
 }
 export const FINANCIAL_CLASSIFICATIONS = ["operating", "non_operating", "exceptional", "financing", "tax", "unallocated", "review_required"] as const
+export interface SegmentRuleRead {
+  id: string
+  field: string
+  operator: string
+  value: string
+  action: string
+  reason?: string | null
+}
+export interface FinancialSegmentRead {
+  id: string
+  engagement_id: string
+  entity_id: string | null
+  name: string
+  period: string | null
+  currency: string | null
+  transaction_ids: string[]
+  status: string
+  rules: SegmentRuleRead[]
+}
+export interface SegmentPnLLine {
+  classification: string
+  row_count: number
+  total: number
+}
+export interface SegmentPnL {
+  segment_id: string
+  name: string
+  currency: string | null
+  lines: SegmentPnLLine[]
+  operating_result: number
+  total: number
+  row_count: number
+}
+export const SEGMENT_RULE_FIELDS = ["account_code", "account_name", "cost_center", "business_unit"] as const
+export const SEGMENT_RULE_OPERATORS = ["equals", "in", "contains"] as const
 export interface FinancialRowsPage {
   dataset_id: string
   total: number
@@ -754,6 +789,34 @@ const realApi = {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ classification, reason }),
     }).then(r => parse<FinancialRowRead>(r)),
+
+  // Class 3 — segments
+  listFinancialSegments: (engagementId: string): Promise<FinancialSegmentRead[]> =>
+    afetch(`${BASE}/engagements/${engagementId}/financial-segments`).then(r => parse<FinancialSegmentRead[]>(r)),
+
+  createFinancialSegment: (engagementId: string, name: string, currency?: string): Promise<FinancialSegmentRead> =>
+    afetch(`${BASE}/engagements/${engagementId}/financial-segments`, {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name, currency }),
+    }).then(r => parse<FinancialSegmentRead>(r)),
+
+  getFinancialSegment: (segmentId: string): Promise<FinancialSegmentRead> =>
+    afetch(`${BASE}/financial-segments/${segmentId}`).then(r => parse<FinancialSegmentRead>(r)),
+
+  addSegmentRule: (segmentId: string, rule: { field: string; operator: string; value: string; action: string; reason?: string }): Promise<FinancialSegmentRead> =>
+    afetch(`${BASE}/financial-segments/${segmentId}/rules`, {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(rule),
+    }).then(r => parse<FinancialSegmentRead>(r)),
+
+  deleteSegmentRule: (ruleId: string): Promise<void> =>
+    afetch(`${BASE}/segment-rules/${ruleId}`, { method: "DELETE" }).then(parseVoid),
+
+  getSegmentPnl: (segmentId: string): Promise<SegmentPnL> =>
+    afetch(`${BASE}/financial-segments/${segmentId}/pnl`).then(r => parse<SegmentPnL>(r)),
+
+  getSegmentRows: (segmentId: string, limit = 100, offset = 0): Promise<FinancialRowsPage> =>
+    afetch(`${BASE}/financial-segments/${segmentId}/rows?limit=${limit}&offset=${offset}`).then(r => parse<FinancialRowsPage>(r)),
 }
 
 // On the public /demo route, serve canned data from lib/demo-api instead of the network so the real

@@ -6,8 +6,10 @@
 // source-linked rows). Later slices fill Segmentation / TNMM / Benchmark / Conclusion.
 
 import { useCallback, useEffect, useRef, useState } from "react"
-import { FileSpreadsheet, Layers, Calculator, BarChart3, Flag, Info, Upload, Loader2, Columns3, Sparkles, AlertTriangle } from "lucide-react"
-import { api, FINANCIAL_CLASSIFICATIONS, type FinancialDatasetRead, type FinancialRowRead, type FinancialMappingRead } from "@/lib/api"
+import { FileSpreadsheet, Layers, Calculator, BarChart3, Flag, Info, Upload, Loader2, Columns3, Sparkles, AlertTriangle, Plus, Trash2 } from "lucide-react"
+import { api, FINANCIAL_CLASSIFICATIONS, SEGMENT_RULE_FIELDS, SEGMENT_RULE_OPERATORS,
+  type FinancialDatasetRead, type FinancialRowRead, type FinancialMappingRead,
+  type FinancialSegmentRead, type SegmentPnL } from "@/lib/api"
 
 export type WorkbenchView = "financials" | "segmentation" | "tnmm" | "benchmark" | "conclusion"
 
@@ -35,6 +37,10 @@ const toolbarBtn: React.CSSProperties = {
   display: "inline-flex", alignItems: "center", gap: "0.375rem", height: "1.75rem", padding: "0 0.625rem",
   borderRadius: "var(--control-radius-md)", border: "1px solid var(--color-border)", cursor: "pointer",
   background: "var(--color-surface)", color: "var(--color-text-secondary)", fontSize: "var(--font-text-xs-size)", fontWeight: "var(--font-weight-medium)",
+}
+const miniSelect: React.CSSProperties = {
+  height: "1.75rem", padding: "0 0.375rem", borderRadius: "var(--radius-sm)", border: "1px solid var(--color-border)",
+  background: "var(--color-surface)", color: "var(--color-text)", fontSize: "var(--font-text-xs-size)",
 }
 
 export default function EconomicWorkbench({ engagementId }: { engagementId: string }) {
@@ -65,7 +71,9 @@ export default function EconomicWorkbench({ engagementId }: { engagementId: stri
         <div style={{ flex: 1, minWidth: 0, overflow: "auto", padding: "1.5rem 3.5rem" }}>
           {view === "financials"
             ? <FinancialsView engagementId={engagementId} />
-            : <Placeholder {...PLACEHOLDER[view]} />}
+            : view === "segmentation"
+              ? <SegmentationView engagementId={engagementId} />
+              : <Placeholder {...PLACEHOLDER[view]} />}
         </div>
 
         <aside style={{ width: "18rem", flexShrink: 0, borderLeft: "1px solid var(--color-border-subtle)", padding: "1.25rem", overflow: "auto", background: "var(--color-surface)" }}>
@@ -329,6 +337,148 @@ function DatasetCard({ ds, open, onToggle }: { ds: FinancialDatasetRead; open: b
             )}
         </div>
       )}
+    </div>
+  )
+}
+
+function SegmentationView({ engagementId }: { engagementId: string }) {
+  const [segments, setSegments] = useState<FinancialSegmentRead[] | null>(null)
+  const [selectedId, setSelectedId] = useState<string | null>(null)
+  const [newName, setNewName] = useState("")
+
+  const refresh = useCallback(async () => {
+    const list = await api.listFinancialSegments(engagementId)
+    setSegments(list)
+    setSelectedId(prev => prev ?? (list[0]?.id ?? null))
+  }, [engagementId])
+
+  useEffect(() => { void refresh() }, [refresh])
+
+  async function create() {
+    if (!newName.trim()) return
+    const seg = await api.createFinancialSegment(engagementId, newName.trim())
+    setNewName("")
+    await refresh()
+    setSelectedId(seg.id)
+  }
+
+  if (segments === null) return <p style={{ fontSize: "var(--font-text-sm-size)", color: "var(--color-text-tertiary)" }}>Loading…</p>
+
+  return (
+    <div style={{ maxWidth: "56rem", margin: "0 auto", display: "flex", flexDirection: "column", gap: "1rem" }}>
+      <div style={{ display: "flex", gap: "0.5rem", alignItems: "center", flexWrap: "wrap" }}>
+        {segments.map(s => (
+          <button key={s.id} type="button" onClick={() => setSelectedId(s.id)} style={{
+            padding: "0.3125rem 0.75rem", borderRadius: "9999px", border: "none", cursor: "pointer",
+            background: s.id === selectedId ? "var(--color-background-primary-solid)" : "var(--alpha-04)",
+            color: s.id === selectedId ? "var(--color-text-inverse)" : "var(--color-text-secondary)",
+            fontSize: "var(--font-text-xs-size)", fontWeight: "var(--font-weight-medium)",
+          }}>{s.name}</button>
+        ))}
+        <input value={newName} onChange={e => setNewName(e.target.value)} placeholder="New segment name"
+          onKeyDown={e => { if (e.key === "Enter") void create() }}
+          style={{ height: "var(--control-size-md)", padding: "0 0.625rem", borderRadius: "var(--control-radius-md)",
+            border: "1px solid var(--color-border)", background: "var(--color-surface)", color: "var(--color-text)", fontSize: "var(--font-text-sm-size)" }} />
+        <button type="button" onClick={create} style={toolbarBtn}><Plus size={13} /> Add segment</button>
+      </div>
+
+      {selectedId
+        ? <SegmentDetail key={selectedId} segmentId={selectedId} />
+        : <Placeholder title="No segment yet" body="Create a segment above, then add include/exclude rules to isolate the financial result for a controlled transaction or business unit." />}
+    </div>
+  )
+}
+
+function SegmentDetail({ segmentId }: { segmentId: string }) {
+  const [seg, setSeg] = useState<FinancialSegmentRead | null>(null)
+  const [pnl, setPnl] = useState<SegmentPnL | null>(null)
+  const [rows, setRows] = useState<FinancialRowRead[] | null>(null)
+  const [showRows, setShowRows] = useState(false)
+  const [field, setField] = useState<string>(SEGMENT_RULE_FIELDS[0])
+  const [operator, setOperator] = useState<string>(SEGMENT_RULE_OPERATORS[0])
+  const [value, setValue] = useState("")
+  const [action, setAction] = useState("include")
+  const [reason, setReason] = useState("")
+
+  const refresh = useCallback(async () => {
+    const [s, p] = await Promise.all([api.getFinancialSegment(segmentId), api.getSegmentPnl(segmentId)])
+    setSeg(s); setPnl(p)
+    if (showRows) setRows((await api.getSegmentRows(segmentId, 100, 0)).rows)
+  }, [segmentId, showRows])
+
+  useEffect(() => { void refresh() }, [refresh])
+
+  async function addRule() {
+    if (!value.trim()) return
+    await api.addSegmentRule(segmentId, { field, operator, value: value.trim(), action, reason: reason.trim() || undefined })
+    setValue(""); setReason("")
+    await refresh()
+  }
+  async function delRule(id: string) { await api.deleteSegmentRule(id); await refresh() }
+
+  if (!seg || !pnl) return <p style={{ fontSize: "var(--font-text-sm-size)", color: "var(--color-text-tertiary)" }}>Loading…</p>
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: "1rem" }}>
+      <div style={{ border: "1px solid var(--color-border)", borderRadius: "0.75rem", padding: "1rem 1.125rem", background: "var(--color-surface)" }}>
+        <div style={{ fontSize: "var(--font-text-xs-size)", fontWeight: "var(--font-weight-semibold)", textTransform: "uppercase", letterSpacing: "0.03em", color: "var(--color-text-secondary)", marginBottom: "0.625rem" }}>Membership rules</div>
+        {seg.rules.length === 0 && <p style={{ margin: "0 0 0.625rem", fontSize: "var(--font-text-xs-size)", color: "var(--color-text-tertiary)" }}>No rules yet — add an include rule to bring accounts into this segment.</p>}
+        {seg.rules.map(r => (
+          <div key={r.id} style={{ display: "flex", alignItems: "center", gap: "0.5rem", fontSize: "var(--font-text-xs-size)", color: "var(--color-text-secondary)", padding: "0.25rem 0" }}>
+            <span style={{ padding: "0.0625rem 0.375rem", borderRadius: "9999px", background: r.action === "exclude" ? "var(--color-background-caution-soft, #fff8e5)" : "var(--alpha-06)" }}>{r.action}</span>
+            <span>{r.field.replace(/_/g, " ")} {r.operator} “{r.value}”</span>
+            {r.reason && <span style={{ color: "var(--color-text-tertiary)" }}>· {r.reason}</span>}
+            <button type="button" onClick={() => void delRule(r.id)} style={{ marginLeft: "auto", border: "none", background: "transparent", cursor: "pointer", color: "var(--color-text-tertiary)" }} title="Remove rule"><Trash2 size={13} /></button>
+          </div>
+        ))}
+        <div style={{ display: "flex", gap: "0.375rem", flexWrap: "wrap", alignItems: "center", marginTop: "0.75rem" }}>
+          <select value={action} onChange={e => setAction(e.target.value)} style={miniSelect}><option value="include">include</option><option value="exclude">exclude</option></select>
+          <select value={field} onChange={e => setField(e.target.value)} style={miniSelect}>{SEGMENT_RULE_FIELDS.map(f => <option key={f} value={f}>{f.replace(/_/g, " ")}</option>)}</select>
+          <select value={operator} onChange={e => setOperator(e.target.value)} style={miniSelect}>{SEGMENT_RULE_OPERATORS.map(o => <option key={o} value={o}>{o}</option>)}</select>
+          <input value={value} onChange={e => setValue(e.target.value)} placeholder="value" style={{ ...miniSelect, width: "8rem" }} />
+          <input value={reason} onChange={e => setReason(e.target.value)} placeholder="reason (optional)" style={{ ...miniSelect, width: "12rem" }} />
+          <button type="button" onClick={addRule} style={toolbarBtn}><Plus size={13} /> Add rule</button>
+        </div>
+      </div>
+
+      <div style={{ border: "1px solid var(--color-border)", borderRadius: "0.75rem", overflow: "hidden", background: "var(--color-surface)" }}>
+        <div style={{ display: "flex", alignItems: "center", padding: "0.875rem 1.125rem", borderBottom: "1px solid var(--color-border-subtle)" }}>
+          <div style={{ fontSize: "var(--font-text-sm-size)", fontWeight: "var(--font-weight-semibold)", color: "var(--color-text)" }}>Segmented P&amp;L</div>
+          <button type="button" onClick={() => setShowRows(v => !v)} style={{ ...toolbarBtn, marginLeft: "auto" }}>{showRows ? "Hide" : "Drill to"} rows ({pnl.row_count})</button>
+        </div>
+        <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "var(--font-text-xs-size)" }}>
+          <tbody>
+            {pnl.lines.map(ln => (
+              <tr key={ln.classification} style={{ color: "var(--color-text-secondary)" }}>
+                <td style={{ padding: "0.4375rem 1.125rem", borderBottom: "1px solid var(--color-border-subtle)" }}>{ln.classification.replace(/_/g, " ")}</td>
+                <td style={{ padding: "0.4375rem 1.125rem", borderBottom: "1px solid var(--color-border-subtle)", color: "var(--color-text-tertiary)" }}>{ln.row_count} rows</td>
+                <td style={{ padding: "0.4375rem 1.125rem", borderBottom: "1px solid var(--color-border-subtle)", textAlign: "right", fontVariantNumeric: "tabular-nums" }}>{fmtNum(ln.total)}</td>
+              </tr>
+            ))}
+            <tr style={{ color: "var(--color-text)", fontWeight: "var(--font-weight-semibold)" }}>
+              <td style={{ padding: "0.5rem 1.125rem" }}>Operating result</td>
+              <td />
+              <td style={{ padding: "0.5rem 1.125rem", textAlign: "right", fontVariantNumeric: "tabular-nums" }}>{fmtNum(pnl.operating_result)} {pnl.currency ?? ""}</td>
+            </tr>
+          </tbody>
+        </table>
+        {showRows && rows && (
+          <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "var(--font-text-xs-size)", borderTop: "1px solid var(--color-border-subtle)" }}>
+            <thead><tr style={{ color: "var(--color-text-tertiary)", textAlign: "left" }}>{["Account", "Name", "Amount", "Class", "Source"].map(h => <th key={h} style={{ padding: "0.5rem 1.125rem", fontWeight: "var(--font-weight-medium)" }}>{h}</th>)}</tr></thead>
+            <tbody>
+              {rows.map(r => (
+                <tr key={r.id} style={{ color: "var(--color-text-secondary)" }}>
+                  <td style={{ padding: "0.4375rem 1.125rem" }}>{r.account_code ?? "—"}</td>
+                  <td style={{ padding: "0.4375rem 1.125rem" }}>{r.account_name ?? "—"}</td>
+                  <td style={{ padding: "0.4375rem 1.125rem", textAlign: "right", fontVariantNumeric: "tabular-nums" }}>{fmtNum(r.amount)}</td>
+                  <td style={{ padding: "0.4375rem 1.125rem" }}>{r.classification.replace(/_/g, " ")}</td>
+                  <td style={{ padding: "0.4375rem 1.125rem", color: "var(--color-text-tertiary)" }} title="Traces to the original source cell">{r.source_locator}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+      </div>
     </div>
   )
 }

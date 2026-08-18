@@ -1170,6 +1170,44 @@ class FinancialRow(Base):
     classification_overridden_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
 
+class FinancialSegment(Base):
+    """A financial segment (Class 3 §16-18): the slice of the entity's results relevant to a controlled
+    transaction / business segment. Membership is rule-based (segment_rules) over financial_rows; rules never
+    mutate rows (§9). One entity may have many segments (§76)."""
+
+    __tablename__ = "financial_segments"
+
+    id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
+    engagement_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("engagements.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    entity_id: Mapped[str | None] = mapped_column(Text, nullable=True)
+    name: Mapped[str] = mapped_column(Text, nullable=False)
+    period: Mapped[str | None] = mapped_column(Text, nullable=True)
+    currency: Mapped[str | None] = mapped_column(Text, nullable=True)
+    transaction_ids: Mapped[list] = mapped_column(JSONB, nullable=False, default=list)  # §77 one segment ↔ many txns
+    status: Mapped[str] = mapped_column(Text, nullable=False, default="active")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class SegmentRule(Base):
+    """A membership rule for a segment (§18): direct mapping + inclusion/exclusion, each with a reason (§56)."""
+
+    __tablename__ = "segment_rules"
+    __table_args__ = (Index("ix_segment_rules_segment", "segment_id"),)
+
+    id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
+    segment_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("financial_segments.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    field: Mapped[str] = mapped_column(Text, nullable=False)     # account_code|account_name|cost_center|business_unit
+    operator: Mapped[str] = mapped_column(Text, nullable=False)  # equals|in|contains
+    value: Mapped[str] = mapped_column(Text, nullable=False)
+    action: Mapped[str] = mapped_column(Text, nullable=False, default="include")  # include|exclude
+    reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
 class FinancialColumnMapping(Base):
     """A saved, versioned column mapping (Class 3 §14) keyed by user + header signature, so a repeat engagement
     with the same source format reuses last time's mapping. Stores {canonical_field: source_header}."""
