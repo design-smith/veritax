@@ -136,6 +136,17 @@ async def init_db(eng=engine) -> None:
             await conn.execute(text(
                 "ALTER TABLE financial_rows ADD COLUMN IF NOT EXISTS issues jsonb NOT NULL DEFAULT '[]'::jsonb"
             ))
+            # Class 3 S5: account classification + override audit.
+            await conn.execute(text(
+                "ALTER TABLE financial_rows ADD COLUMN IF NOT EXISTS classification text NOT NULL DEFAULT 'review_required'"
+            ))
+            await conn.execute(text(
+                "ALTER TABLE financial_rows ADD COLUMN IF NOT EXISTS classification_source text NOT NULL DEFAULT 'default'"
+            ))
+            for _col, _type in (("classification_original", "text"), ("classification_reason", "text"),
+                                ("classification_overridden_by", "uuid"),
+                                ("classification_overridden_at", "timestamp with time zone")):
+                await conn.execute(text(f"ALTER TABLE financial_rows ADD COLUMN IF NOT EXISTS {_col} {_type}"))
             log.info("db init: idempotent column updates ready")
 
         async with async_sessionmaker(eng, expire_on_commit=False)() as session:

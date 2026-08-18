@@ -83,6 +83,10 @@ def get_column_mapping_suggester(request: Request):
     return request.app.state.column_mapping_suggester
 
 
+def get_classification_suggester(request: Request):
+    return request.app.state.classification_suggester
+
+
 def get_risk_analyzer(request: Request) -> RiskAnalyzer:
     return request.app.state.risk_analyzer
 

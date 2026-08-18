@@ -8,6 +8,7 @@ build on this; here detection is default only.
 from __future__ import annotations
 
 import uuid
+from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile
 from pydantic import BaseModel, ConfigDict
@@ -17,12 +18,14 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from ..auth import AuthUser
 from ..deps import (
     assert_owner,
+    get_classification_suggester,
     get_column_mapping_suggester,
     get_current_user,
     get_session,
     get_storage,
     require_engagement_owner,
 )
+from ..financial_classification import CLASSIFICATIONS, ClassificationSuggester
 from ..financial_intake import CANONICAL_FIELDS, detect_columns, header_signature, parse_financial_file
 from ..financial_mapping import ColumnMappingSuggester, find_saved_mapping, save_mapping
 from ..financial_store import create_dataset, dataset_summary, reapply_mapping
@@ -76,6 +79,12 @@ class RowRead(BaseModel):
     source_locator: str
     raw: dict
     issues: list[str] = []
+    classification: str
+    classification_source: str
+    classification_original: str | None = None
+    classification_reason: str | None = None
+    classification_overridden_by: uuid.UUID | None = None
+    classification_overridden_at: datetime | None = None
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -273,3 +282,78 @@ async def suggest_mapping(
     return SuggestionsRead(
         dataset_id=ds.id, unmapped_fields=unmapped, suggestions=suggester.suggest(headers, unmapped),
     )
+
+
+# ── Account classification (S5, §19) ──────────────────────────────────────────
+class ClassificationUpdate(BaseModel):
+    classification: str
+    reason: str | None = None
+
+
+class ClassificationSuggestion(BaseModel):
+    row_id: uuid.UUID
+    account_code: str | None
+    account_name: str | None
+    current: str
+    suggestion: str | None
+
+
+class ClassificationSuggestionsRead(BaseModel):
+    dataset_id: uuid.UUID
+    suggestions: list[ClassificationSuggestion]
+
+
+async def _owned_row(session: AsyncSession, row_id: uuid.UUID, user: AuthUser) -> FinancialRow:
+    row = await session.get(FinancialRow, row_id)
+    if row is None:
+        raise HTTPException(status_code=404, detail="financial row not found")
+    ds = await session.get(FinancialDataset, row.dataset_id)
+    await assert_owner(session, ds.engagement_id, user)
+    return row
+
+
+@router.put("/financial-rows/{row_id}/classification", response_model=RowRead)
+async def override_classification(
+    row_id: uuid.UUID,
+    body: ClassificationUpdate,
+    session: AsyncSession = Depends(get_session),
+    user: AuthUser = Depends(get_current_user),
+) -> RowRead:
+    if body.classification not in CLASSIFICATIONS:
+        raise HTTPException(status_code=422, detail=f"unknown classification: {body.classification}")
+    row = await _owned_row(session, row_id, user)
+    if row.classification_original is None:
+        row.classification_original = row.classification   # preserve the pre-override value (audit)
+    row.classification = body.classification
+    row.classification_source = "override"
+    row.classification_reason = body.reason
+    row.classification_overridden_by = user.id
+    row.classification_overridden_at = datetime.now(timezone.utc)
+    await session.commit()
+    await session.refresh(row)
+    return RowRead.model_validate(row)
+
+
+@router.get("/financial-datasets/{dataset_id}/classification/suggestions", response_model=ClassificationSuggestionsRead)
+async def suggest_classifications(
+    dataset_id: uuid.UUID,
+    session: AsyncSession = Depends(get_session),
+    user: AuthUser = Depends(get_current_user),
+    suggester: ClassificationSuggester = Depends(get_classification_suggester),
+) -> ClassificationSuggestionsRead:
+    ds = await _owned_dataset(session, dataset_id, user)
+    # Only the ambiguous rows (needs-review / defaulted, never overridden) get a suggestion — validated-only (§74).
+    rows = (await session.execute(
+        select(FinancialRow).where(
+            FinancialRow.dataset_id == ds.id,
+            FinancialRow.classification_source.in_(("default",)),
+        ).order_by(FinancialRow.row_index)
+    )).scalars().all()
+    out = [
+        ClassificationSuggestion(
+            row_id=r.id, account_code=r.account_code, account_name=r.account_name,
+            current=r.classification, suggestion=suggester.suggest(r.account_code, r.account_name),
+        )
+        for r in rows
+    ]
+    return ClassificationSuggestionsRead(dataset_id=ds.id, suggestions=out)

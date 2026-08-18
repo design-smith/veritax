@@ -504,7 +504,12 @@ export interface FinancialRowRead {
   source_locator: string
   raw: Record<string, string>
   issues: string[]
+  classification: string
+  classification_source: string
+  classification_original?: string | null
+  classification_reason?: string | null
 }
+export const FINANCIAL_CLASSIFICATIONS = ["operating", "non_operating", "exceptional", "financing", "tax", "unallocated", "review_required"] as const
 export interface FinancialRowsPage {
   dataset_id: string
   total: number
@@ -742,6 +747,13 @@ const realApi = {
 
   getFinancialMappingSuggestions: (datasetId: string): Promise<FinancialMappingSuggestions> =>
     afetch(`${BASE}/financial-datasets/${datasetId}/mapping/suggestions`).then(r => parse<FinancialMappingSuggestions>(r)),
+
+  overrideRowClassification: (rowId: string, classification: string, reason?: string): Promise<FinancialRowRead> =>
+    afetch(`${BASE}/financial-rows/${rowId}/classification`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ classification, reason }),
+    }).then(r => parse<FinancialRowRead>(r)),
 }
 
 // On the public /demo route, serve canned data from lib/demo-api instead of the network so the real

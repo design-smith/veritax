@@ -12,6 +12,7 @@ import uuid
 from sqlalchemy import func, insert, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from .financial_classification import classify_account
 from .financial_intake import ParsedFinancials, derive_from_mapping
 from .financial_validation import validate_rows
 from .models import FinancialDataset, FinancialRow
@@ -41,13 +42,15 @@ async def create_dataset(
             d["period"] = d["period"] or period
         issues, summary = validate_rows([{**d, "raw": r.raw} for d, r in zip(derived, parsed.rows)], mapping)
         ds.diagnostics = summary
-        await session.execute(insert(FinancialRow), [
-            {
+        rows_to_insert = []
+        for d, r, iss in zip(derived, parsed.rows, issues):
+            cls, source = classify_account(d["account_code"], d["account_name"])
+            rows_to_insert.append({
                 "dataset_id": ds.id, "row_index": r.row_index, **d,
                 "source_locator": f"{locator_base}!Row {r.row_index}", "raw": r.raw, "issues": iss,
-            }
-            for d, r, iss in zip(derived, parsed.rows, issues)
-        ])
+                "classification": cls, "classification_source": source, "classification_original": cls,
+            })
+        await session.execute(insert(FinancialRow), rows_to_insert)
     else:
         _, ds.diagnostics = validate_rows([], mapping)
     return ds
@@ -58,18 +61,24 @@ async def reapply_mapping(session: AsyncSession, dataset: FinancialDataset, mapp
     re-upload). Bulk UPDATE by primary key (no per-row round trip)."""
     dataset.column_mapping = mapping
     rows = (await session.execute(
-        select(FinancialRow.id, FinancialRow.raw).where(FinancialRow.dataset_id == dataset.id)
+        select(FinancialRow.id, FinancialRow.raw, FinancialRow.classification_source)
+        .where(FinancialRow.dataset_id == dataset.id)
     )).all()
     derived = []
-    for _rid, raw in rows:
+    for _rid, raw, _src in rows:
         d = derive_from_mapping(raw, mapping)
         d["currency"] = d["currency"] or dataset.currency
         d["period"] = d["period"] or dataset.period
         derived.append(d)
-    issues, summary = validate_rows([{**d, "raw": raw} for d, (_rid, raw) in zip(derived, rows)], mapping)
+    issues, summary = validate_rows([{**d, "raw": raw} for d, (_rid, raw, _src) in zip(derived, rows)], mapping)
     dataset.diagnostics = summary
-    updates = [{"id": rid, **d, "issues": iss}
-               for d, (rid, _raw), iss in zip(derived, rows, issues)]
+    updates = []
+    for d, (rid, _raw, src), iss in zip(derived, rows, issues):
+        upd = {"id": rid, **d, "issues": iss}
+        if src != "override":   # preserve a practitioner override; re-classify only auto rows on a remap
+            cls, source = classify_account(d["account_code"], d["account_name"])
+            upd.update(classification=cls, classification_source=source, classification_original=cls)
+        updates.append(upd)
     if updates:
         await session.execute(update(FinancialRow), updates)
 

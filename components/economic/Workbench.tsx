@@ -7,7 +7,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react"
 import { FileSpreadsheet, Layers, Calculator, BarChart3, Flag, Info, Upload, Loader2, Columns3, Sparkles, AlertTriangle } from "lucide-react"
-import { api, type FinancialDatasetRead, type FinancialRowRead, type FinancialMappingRead } from "@/lib/api"
+import { api, FINANCIAL_CLASSIFICATIONS, type FinancialDatasetRead, type FinancialRowRead, type FinancialMappingRead } from "@/lib/api"
 
 export type WorkbenchView = "financials" | "segmentation" | "tnmm" | "benchmark" | "conclusion"
 
@@ -205,6 +205,11 @@ function DatasetCard({ ds, open, onToggle }: { ds: FinancialDatasetRead; open: b
     } finally { setBusy(false) }
   }
 
+  async function setClass(rowId: string, classification: string) {
+    setRows(prev => prev ? prev.map(r => r.id === rowId ? { ...r, classification, classification_source: "override" } : r) : prev)
+    try { await api.overrideRowClassification(rowId, classification) } catch { loadRows() }
+  }
+
   return (
     <div style={{ border: "1px solid var(--color-border)", borderRadius: "0.75rem", overflow: "hidden", background: "var(--color-surface)" }}>
       <button type="button" onClick={onToggle} style={{
@@ -289,7 +294,7 @@ function DatasetCard({ ds, open, onToggle }: { ds: FinancialDatasetRead; open: b
               <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "var(--font-text-xs-size)" }}>
                 <thead>
                   <tr style={{ color: "var(--color-text-tertiary)", textAlign: "left" }}>
-                    {["Account", "Name", "BU", "Amount", "Ccy", "Source", "Issues"].map(h => (
+                    {["Account", "Name", "BU", "Amount", "Ccy", "Class", "Source", "Issues"].map(h => (
                       <th key={h} style={{ padding: "0.5rem 1.125rem", fontWeight: "var(--font-weight-medium)", borderBottom: "1px solid var(--color-border-subtle)" }}>{h}</th>
                     ))}
                   </tr>
@@ -302,6 +307,15 @@ function DatasetCard({ ds, open, onToggle }: { ds: FinancialDatasetRead; open: b
                       <td style={{ padding: "0.4375rem 1.125rem", borderBottom: "1px solid var(--color-border-subtle)" }}>{r.business_unit ?? "—"}</td>
                       <td style={{ padding: "0.4375rem 1.125rem", borderBottom: "1px solid var(--color-border-subtle)", textAlign: "right", fontVariantNumeric: "tabular-nums" }}>{fmtNum(r.amount)}</td>
                       <td style={{ padding: "0.4375rem 1.125rem", borderBottom: "1px solid var(--color-border-subtle)" }}>{r.currency ?? "—"}</td>
+                      <td style={{ padding: "0.4375rem 1.125rem", borderBottom: "1px solid var(--color-border-subtle)" }}>
+                        <select value={r.classification} onChange={e => void setClass(r.id, e.target.value)}
+                          title={r.classification_source === "override" ? "Overridden by reviewer" : `Classified by ${r.classification_source}`}
+                          style={{ height: "1.5rem", padding: "0 0.25rem", borderRadius: "var(--radius-sm)", border: "1px solid var(--color-border)",
+                            background: r.classification_source === "override" ? "var(--color-background-primary-soft)" : "var(--color-surface)",
+                            color: "var(--color-text-secondary)", fontSize: "var(--font-text-xs-size)" }}>
+                          {FINANCIAL_CLASSIFICATIONS.map(c => <option key={c} value={c}>{c.replace(/_/g, " ")}</option>)}
+                        </select>
+                      </td>
                       <td style={{ padding: "0.4375rem 1.125rem", borderBottom: "1px solid var(--color-border-subtle)", color: "var(--color-text-tertiary)" }} title="Traces to the original source cell">{r.source_locator}</td>
                       <td style={{ padding: "0.4375rem 1.125rem", borderBottom: "1px solid var(--color-border-subtle)" }}>
                         {r.issues.length > 0

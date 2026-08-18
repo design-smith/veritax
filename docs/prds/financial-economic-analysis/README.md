@@ -43,8 +43,8 @@ quartiles/adjustments, reconcile, alter rows, or decide whether a number is in a
 | S2 | Financial dataset intake — upload XLSX/CSV → immutable datasets + rows w/ provenance; scale-ready (bulk + columnar); Financials view | AFK | S1 | ✅ DONE |
 | S3 | Column mapping + saved mappings (deterministic + LLM-assisted suggestions) + mapping UI | AFK | S2 | ✅ DONE |
 | S4 | Validation & diagnostics — invalid rows retained + flagged, never dropped; diagnostics UI | AFK | S2 | ✅ DONE |
-| S5 | Account classification (operating/non-operating/…; deterministic + LLM-assisted) + override w/ audit | AFK | S2 | ▶ NEXT |
-| S6 | Segments + segmented P&L — segment container, direct mapping, include/exclude; drill-down; segmentation editor | AFK | S2 | pending |
+| S5 | Account classification (operating/non-operating/…; deterministic + LLM-assisted) + override w/ audit | AFK | S2 | ✅ DONE |
+| S6 | Segments + segmented P&L — segment container, direct mapping, include/exclude; drill-down; segmentation editor | AFK | S2 | ▶ NEXT |
 | S7 | Adjustments (exclude/GAAP/topside/manual) — auditable, raw immutable; workpaper UI | AFK | S6 | pending |
 | S8 | Allocations — shared-cost split by base + provenance; allocation UI | AFK | S7 | pending |
 | S9 | Financial reconciliation — FS→TB→Segment, configurable tolerance, deterministic status; tie-out UI | AFK | S6 | pending |
@@ -189,3 +189,24 @@ TNMM (§81).
   - Honest (§15): date/period parsing, debit/credit sanity, and total tie-outs are follow-ons — the single-amount
     canonical model has no separate debit/credit columns and period is a free-form label; skipped to avoid
     false-positive flags rather than shipping brittle checks.
+
+- [x] **S5 — Account classification** — BUILT, full-suite gate running. USER-VISIBLE (per-row Class select in the
+  Financials view).
+  - `financial_classification.py::classify_account(code, name)` — deterministic-first keyword rules → operating /
+    non_operating / exceptional / financing / tax / unallocated / review_required + a `source`
+    (deterministic|default); named-but-unclassified → `review_required` (§19, no universal TP treatment
+    hard-coded). Injectable `ClassificationSuggester` seam + deterministic offline Fake for ambiguous accounts
+    (validated-only, LLM drop-in), injected via app.state + conftest (mirrors S3).
+  - `financial_rows` gains `classification` + `classification_source` + `classification_original` +
+    `classification_reason` + `classification_overridden_by/at` (idempotent ALTERs). Classification runs on upload
+    and re-runs on remap for auto rows; **a practitioner override is preserved across remaps** (§56 audit:
+    original/new/reason/user/timestamp).
+  - `routers/financials.py`: `PUT /financial-rows/{id}/classification` (override w/ audit; validates the enum) +
+    `GET /financial-datasets/{id}/classification/suggestions` (validated-only, only for defaulted rows).
+  - Frontend: a Class column in the rows table with a per-row override select (overridden rows visibly tinted).
+  - **Verification:** `test_financial_classification.py` **7 passed** (2 pure: deterministic signals, unknown/
+    blank; 5 integration: rows classified on upload, override records audit + preserves original, unknown-class
+    422, suggestions validated-only, remap preserves override) + S2–S4 regression 20. `tsc` + `pnpm build` clean.
+    **Full backend suite 337 passed** (330 + 7).
+  - Acceptance (S5): rows carry a classification from the controlled enum ✓ · deterministic rules classify known
+    accounts, LLM only suggests ambiguous ✓ · practitioner reclassify with preserved audit ✓.

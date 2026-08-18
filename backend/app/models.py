@@ -1160,6 +1160,14 @@ class FinancialRow(Base):
     source_locator: Mapped[str] = mapped_column(Text, nullable=False)    # "<sheet>!Row <n>" (§11)
     raw: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict)  # original cells by header — immutable (§9)
     issues: Mapped[list] = mapped_column(JSONB, nullable=False, default=list)  # validation issue codes (S4, §15)
+    # Account classification (S5, §19). `classification_original` preserves the deterministic result across an
+    # override so the audit trail keeps original/new/reason/user/timestamp.
+    classification: Mapped[str] = mapped_column(Text, nullable=False, default="review_required")
+    classification_source: Mapped[str] = mapped_column(Text, nullable=False, default="default")  # deterministic|default|override
+    classification_original: Mapped[str | None] = mapped_column(Text, nullable=True)
+    classification_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+    classification_overridden_by: Mapped[uuid.UUID | None] = mapped_column(nullable=True)
+    classification_overridden_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
 
 class FinancialColumnMapping(Base):
