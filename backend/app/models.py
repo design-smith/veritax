@@ -1109,6 +1109,56 @@ class RiskControlProfile(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
+class FinancialDataset(Base):
+    """A structured financial dataset (Class 3 §10) parsed from one uploaded file/sheet. The raw uploaded
+    Document stays immutable (§9); rows are the normalized layer and preserve their original cells in `raw`."""
+
+    __tablename__ = "financial_datasets"
+
+    id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
+    engagement_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("engagements.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    document_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("documents.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    entity_id: Mapped[str | None] = mapped_column(Text, nullable=True)   # opaque entity id/label (§5 resolution = follow-on)
+    dataset_type: Mapped[str] = mapped_column(Text, nullable=False)      # trial_balance|general_ledger|segmented_pl|...
+    source_filename: Mapped[str | None] = mapped_column(Text, nullable=True)
+    source_sheet: Mapped[str | None] = mapped_column(Text, nullable=True)
+    period: Mapped[str | None] = mapped_column(Text, nullable=True)
+    currency: Mapped[str | None] = mapped_column(Text, nullable=True)
+    columns: Mapped[list] = mapped_column(JSONB, nullable=False, default=list)   # detected header columns (raw)
+    schema_version: Mapped[str] = mapped_column(Text, nullable=False, default="1")
+    status: Mapped[str] = mapped_column(Text, nullable=False, default="ready")   # §64 lifecycle (v1: ready)
+    row_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class FinancialRow(Base):
+    """A canonical financial row (§11). Immutable normalized layer — the original cells are preserved in `raw`;
+    later adjustments live in separate rows (§9,§20), never as edits here. Bulk-inserted (no per-row ORM, §73)."""
+
+    __tablename__ = "financial_rows"
+    __table_args__ = (Index("ix_financial_rows_dataset", "dataset_id"),)
+
+    id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
+    dataset_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("financial_datasets.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    row_index: Mapped[int] = mapped_column(Integer, nullable=False)      # source row number (provenance, §9)
+    account_code: Mapped[str | None] = mapped_column(Text, nullable=True)
+    account_name: Mapped[str | None] = mapped_column(Text, nullable=True)
+    amount: Mapped[float | None] = mapped_column(Numeric, nullable=True)  # parsed; null if unparseable (S4 diagnoses)
+    currency: Mapped[str | None] = mapped_column(Text, nullable=True)
+    cost_center: Mapped[str | None] = mapped_column(Text, nullable=True)
+    business_unit: Mapped[str | None] = mapped_column(Text, nullable=True)
+    counterparty: Mapped[str | None] = mapped_column(Text, nullable=True)
+    period: Mapped[str | None] = mapped_column(Text, nullable=True)
+    source_locator: Mapped[str] = mapped_column(Text, nullable=False)    # "<sheet>!Row <n>" (§11)
+    raw: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict)  # original cells by header — immutable (§9)
+
+
 # Seed data for the connector registry (all available, none wired yet).
 CONNECTOR_SEED: list[dict] = [
     {"provider": "sap", "display_name": "SAP", "category": ConnectorCategory.accounting},

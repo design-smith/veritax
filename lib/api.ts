@@ -460,6 +460,50 @@ export interface InterviewCreate {
   fiscal_period?: string | null
 }
 
+// Class 3 — Financial & Economic Analysis
+export interface CurrencyTotal {
+  currency: string | null
+  row_count: number
+  total_amount: number | null
+}
+export interface FinancialDatasetRead {
+  id: string
+  engagement_id: string
+  document_id: string | null
+  entity_id: string | null
+  dataset_type: string
+  source_filename: string | null
+  source_sheet: string | null
+  period: string | null
+  currency: string | null
+  columns: string[]
+  detected_columns?: Record<string, string> | null
+  status: string
+  row_count: number
+  totals_by_currency: CurrencyTotal[]
+}
+export interface FinancialRowRead {
+  id: string
+  row_index: number
+  account_code: string | null
+  account_name: string | null
+  amount: number | null
+  currency: string | null
+  cost_center: string | null
+  business_unit: string | null
+  counterparty: string | null
+  period: string | null
+  source_locator: string
+  raw: Record<string, string>
+}
+export interface FinancialRowsPage {
+  dataset_id: string
+  total: number
+  limit: number
+  offset: number
+  rows: FinancialRowRead[]
+}
+
 const realApi = {
   health: async (): Promise<HealthResponse> => {
     let lastError: unknown = null
@@ -645,6 +689,25 @@ const realApi = {
 
   getInterviewFindings: (interviewId: string): Promise<InterviewFindings> =>
     afetch(`${BASE}/interviews/${interviewId}/findings`).then(r => parse<InterviewFindings>(r)),
+
+  // Class 3 — financial datasets
+  listFinancialDatasets: (engagementId: string): Promise<FinancialDatasetRead[]> =>
+    afetch(`${BASE}/engagements/${engagementId}/financial-datasets`).then(r => parse<FinancialDatasetRead[]>(r)),
+
+  uploadFinancialDataset: (engagementId: string, file: File, datasetType: string, period?: string): Promise<FinancialDatasetRead> => {
+    const fd = new FormData()
+    fd.append("file", file)
+    fd.append("dataset_type", datasetType)
+    if (period) fd.append("period", period)
+    return afetch(`${BASE}/engagements/${engagementId}/financial-datasets`, { method: "POST", body: fd }).then(r =>
+      parse<FinancialDatasetRead>(r),
+    )
+  },
+
+  getFinancialRows: (datasetId: string, limit = 100, offset = 0): Promise<FinancialRowsPage> =>
+    afetch(`${BASE}/financial-datasets/${datasetId}/rows?limit=${limit}&offset=${offset}`).then(r =>
+      parse<FinancialRowsPage>(r),
+    ),
 }
 
 // On the public /demo route, serve canned data from lib/demo-api instead of the network so the real

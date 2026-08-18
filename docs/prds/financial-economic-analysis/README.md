@@ -40,8 +40,8 @@ quartiles/adjustments, reconcile, alter rows, or decide whether a number is in a
 | # | Title | Type | Blocked by | Status |
 |---|-------|------|-----------|--------|
 | S1 | Financial Workbench design + shell — in-Draft Economic Analysis surface (nav + main + side panel), visual language | HITL (design review) | — | ✅ DONE |
-| S2 | Financial dataset intake — upload XLSX/CSV → immutable datasets + rows w/ provenance; scale-ready (bulk + columnar); Financials view | AFK | S1 | ▶ NEXT |
-| S3 | Column mapping + saved mappings (deterministic + LLM-assisted suggestions) + mapping UI | AFK | S2 | pending |
+| S2 | Financial dataset intake — upload XLSX/CSV → immutable datasets + rows w/ provenance; scale-ready (bulk + columnar); Financials view | AFK | S1 | ✅ DONE |
+| S3 | Column mapping + saved mappings (deterministic + LLM-assisted suggestions) + mapping UI | AFK | S2 | ▶ NEXT |
 | S4 | Validation & diagnostics — invalid rows retained + flagged, never dropped; diagnostics UI | AFK | S2 | pending |
 | S5 | Account classification (operating/non-operating/…; deterministic + LLM-assisted) + override w/ audit | AFK | S2 | pending |
 | S6 | Segments + segmented P&L — segment container, direct mapping, include/exclude; drill-down; segmentation editor | AFK | S2 | pending |
@@ -117,3 +117,26 @@ TNMM (§81).
   - Acceptance (S1): shell renders inside Draft with the 5-item nav + side panel ✓ · no new global step ✓ · zero
     backend dependency ✓ · tsc+build clean ✓ · design preview published ✓.
   - Open to design feedback (nav order/naming/layout) — cheap to apply to the shell + the surfaces that plug in.
+
+- [x] **S2 — Financial dataset intake** — DONE. USER-VISIBLE (Financials view live in the workbench).
+  - `models.py`: `FinancialDataset` (engagement/document/entity/dataset_type/period/currency/columns/status/
+    row_count) + `FinancialRow` (canonical fields + `source_locator` + `raw` JSONB of original cells). Immutable
+    normalized layer — the uploaded Document is never mutated (§9); later adjustments are separate rows (§20). New
+    tables via `create_all` (no ALTER).
+  - `financial_intake.py`: XLSX (openpyxl) + CSV (stdlib) parser; deterministic default column detection with an
+    `amount` fallback for TB/GL variants ("FY24 Actual", "Closing Balance"); accounting-negative parsing;
+    unparseable amounts stay `None` (never fabricated, §2/§15). `financial_store.py`: BULK insert via SQLAlchemy
+    Core (no per-row ORM) + SQL-aggregated summary (§73 scale path).
+  - `routers/financials.py`: upload (reuses `store_upload` + `SourceKind.financials` → immutable Document) +
+    list + rows drill-down (paginated). Registered in `main.py`.
+  - Frontend: live Financials view in `components/economic/Workbench.tsx` — upload (dataset-type select) →
+    dataset cards with SQL currency totals → expand to drill into source-linked rows (account/name/BU/amount/
+    currency/source_locator). `lib/api.ts` typed; `draft.tsx` passes `engagementId`.
+  - **Verification:** `test_financials.py` **7 passed** (provenance + detection; source Document immutable; CSV;
+    unparseable→null; 3000-row bulk load + pagination; unsupported-type 422; listing). **Full backend suite 317
+    passed** (310 + 7). `tsc` + `pnpm build` clean.
+  - Acceptance (S2): XLSX+CSV upload → rows with deterministic provenance ✓ · original source immutable ✓ · large
+    populations via bulk/SQL path ✓ · Financials view shows summary + drills to source-linked rows ✓.
+  - Decision (ponytail): bulk-insert + Postgres SQL aggregation (the user's sanctioned "bulk load + SQL
+    aggregation" scale path); DuckDB/Polars columnar processing deferred until a slice needs in-memory analytics
+    over huge sets. Real per-client column mapping (aliases/saved/LLM) is S3.

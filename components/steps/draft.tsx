@@ -646,7 +646,7 @@ export default function DraftStep({ engagementId, jurisdictions, entity, onConti
 
       {/* Body — the Economic Analysis workbench when toggled, else the document editor / progress */}
       {showWorkbench ? (
-        <EconomicWorkbench />
+        <EconomicWorkbench engagementId={engagementId} />
       ) : (
       <div style={{ flex: 1, minHeight: 0, display: "flex", flexDirection: "column" }}>
         {draft?.draft_mode === "fake" && (
