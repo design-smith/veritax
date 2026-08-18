@@ -48,8 +48,8 @@ quartiles/adjustments, reconcile, alter rows, or decide whether a number is in a
 | S7 | Adjustments (exclude/GAAP/topside/manual) — auditable, raw immutable; workpaper UI | AFK | S6 | ✅ DONE |
 | S8 | Allocations — shared-cost split by base + provenance; allocation UI | AFK | S7 | ✅ DONE |
 | S9 | Financial reconciliation — FS→TB→Segment, configurable tolerance, deterministic status; tie-out UI | AFK | S6 | ✅ DONE |
-| S10 | TNMM core — tested party (practitioner-selected, links FAR) + PLI registry (deterministic) + calc + lifecycle; TNMM UI | AFK | S6, S7, S8 | ▶ NEXT |
-| S11 | Benchmark import — comparables + accepted/rejected + rejection log; benchmark UI | AFK | S10 | pending |
+| S10 | TNMM core — tested party (practitioner-selected, links FAR) + PLI registry (deterministic) + calc + lifecycle; TNMM UI | AFK | S6, S7, S8 | ✅ DONE |
+| S11 | Benchmark import — comparables + accepted/rejected + rejection log; benchmark UI | AFK | S10 | ▶ NEXT |
 | S12 | Arm's-length range & conclusion (jurisdiction-aware) — REUSE Class 1 engine; within/below/above; conclusion UI | AFK | S11, S10 | pending |
 | S13 | TP adjustment — illustrative adjustment to practitioner target, approval state, never auto-post; UI | AFK | S12 | pending |
 | S14 | Requirements integration — evaluate economic-analysis capabilities (not doc presence) + panel | AFK | S9, S12 | pending |
@@ -281,3 +281,23 @@ TNMM (§81).
   - Acceptance (S9): deterministic w/ configurable tolerance ✓ · FS→TB and TB→Segment reconcile where data
     exists ✓ · differences classified not hidden ✓ · rounding vs material gap → different statuses ✓ · tie-out
     UI ✓.
+
+- [x] **S10 — TNMM core** — BUILT, full-suite gate running. USER-VISIBLE (TNMM view). The heart of the method.
+  - `financial_tnmm.py::compute_pli` — deterministic PLI registry (§33): operating_margin = op/revenue;
+    full_cost_markup = op/total_costs; berry_ratio + return_on_assets defined but return `None` (undetermined,
+    §46) when gross-profit/assets inputs are absent in v1. Never LLM (§74). `financial_segments.segment_tnmm_
+    inputs`: revenue = Σ operating rows amount>0; operating_profit = adjusted operating result; total_costs =
+    revenue − operating_profit (documented sign convention: income positive).
+  - `tnmm_analyses` + `tnmm_calculations` tables (create_all). Tested party is PRACTITIONER-selected (stamped
+    `tested_party_selected_by`, never LLM, §31); the analysis read surfaces the Class 2 FAR characterization
+    (`derive_characterization(build_far_profile(...))`) so the rationale is FAR-linked. Calc snapshot stores
+    inputs + pli_value + `calculation_version` (§35/§72, reproducible).
+  - `routers/financials.py`: POST/GET/PATCH `/tnmm-analyses` + `/compute` (recompute from the segment). Frontend:
+    a TNMM view — pick segment + PLI + tested party (rationale shows the FAR characterization) → compute →
+    deterministic PLI with inspectable inputs (revenue / total costs / operating profit) tracing to the segment.
+  - **Verification:** `test_financial_tnmm.py` **5 passed** (PLI formulas + undetermined; operating_margin
+    computed + traceable to the segment; FAR characterization surfaced; full_cost_markup + lifecycle; unknown-PLI
+    + missing-segment 422). `tsc` + `pnpm build` clean. **Full backend suite 362 passed** (357 + 5).
+  - Acceptance (S10): a controlled transaction references a TNMM analysis w/ explicit tested party + segment +
+    PLI ✓ · tested-party selection practitioner-driven, rationale links FAR ✓ · PLI deterministic at full
+    precision, inputs inspectable + traceable ✓ · segment→TNMM reconciliation exercisable (via S9 segment_total) ✓.

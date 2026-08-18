@@ -573,6 +573,30 @@ export interface SegmentPnL {
 }
 export const FINANCIAL_ADJUSTMENT_TYPES = ["exclude_non_operating", "reclassify", "gaap_adjustment", "topside_adjustment", "manual_adjustment", "tp_true_up"] as const
 export const FINANCIAL_ALLOCATION_BASES = ["revenue", "headcount", "fte", "direct_cost", "time_spent", "units", "transaction_volume", "custom"] as const
+export const FINANCIAL_PLI_TYPES = ["operating_margin", "full_cost_markup", "berry_ratio", "return_on_assets"] as const
+export interface TNMMCalculation {
+  revenue: number | null
+  total_costs: number | null
+  operating_profit: number | null
+  pli_value: number | null
+  calculation_version: string
+  created_at: string | null
+}
+export interface TNMMAnalysisRead {
+  id: string
+  engagement_id: string
+  transaction_id: string | null
+  tested_party_entity_id: string | null
+  tested_party_rationale: string | null
+  tested_party_selected_by: string | null
+  segment_id: string | null
+  pli_type: string
+  jurisdiction: string | null
+  period: string | null
+  status: string
+  far_characterization: string | null
+  calculation: TNMMCalculation | null
+}
 export const SEGMENT_RULE_FIELDS = ["account_code", "account_name", "cost_center", "business_unit"] as const
 export const SEGMENT_RULE_OPERATORS = ["equals", "in", "contains"] as const
 export interface FinancialReconciliationRead {
@@ -893,6 +917,23 @@ const realApi = {
 
   deleteReconciliation: (reconciliationId: string): Promise<void> =>
     afetch(`${BASE}/reconciliations/${reconciliationId}`, { method: "DELETE" }).then(parseVoid),
+
+  // Class 3 — TNMM
+  listTnmmAnalyses: (engagementId: string): Promise<TNMMAnalysisRead[]> =>
+    afetch(`${BASE}/engagements/${engagementId}/tnmm-analyses`).then(r => parse<TNMMAnalysisRead[]>(r)),
+
+  createTnmmAnalysis: (engagementId: string, body: { pli_type: string; segment_id?: string; tested_party_entity_id?: string; tested_party_rationale?: string; transaction_id?: string }): Promise<TNMMAnalysisRead> =>
+    afetch(`${BASE}/engagements/${engagementId}/tnmm-analyses`, {
+      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
+    }).then(r => parse<TNMMAnalysisRead>(r)),
+
+  patchTnmmAnalysis: (analysisId: string, body: { pli_type?: string; segment_id?: string; tested_party_entity_id?: string; tested_party_rationale?: string; status?: string }): Promise<TNMMAnalysisRead> =>
+    afetch(`${BASE}/tnmm-analyses/${analysisId}`, {
+      method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
+    }).then(r => parse<TNMMAnalysisRead>(r)),
+
+  computeTnmmAnalysis: (analysisId: string): Promise<TNMMAnalysisRead> =>
+    afetch(`${BASE}/tnmm-analyses/${analysisId}/compute`, { method: "POST" }).then(r => parse<TNMMAnalysisRead>(r)),
 }
 
 // On the public /demo route, serve canned data from lib/demo-api instead of the network so the real

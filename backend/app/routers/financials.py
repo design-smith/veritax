@@ -28,6 +28,7 @@ from ..deps import (
 from ..financial_classification import CLASSIFICATIONS, ClassificationSuggester
 from ..financial_intake import CANONICAL_FIELDS, detect_columns, header_signature, parse_financial_file
 from ..financial_mapping import ColumnMappingSuggester, find_saved_mapping, save_mapping
+from ..far_builder import build_far_profile, derive_characterization
 from ..financial_reconciliation import reconcile
 from ..financial_segments import (
     ADJUSTMENT_TYPES,
@@ -39,9 +40,11 @@ from ..financial_segments import (
     segment_allocations,
     segment_pnl,
     segment_rows,
+    segment_tnmm_inputs,
     segment_total,
 )
 from ..financial_store import create_dataset, dataset_summary, dataset_total, reapply_mapping
+from ..financial_tnmm import PLI_TYPES, compute_pli
 from ..ingest import get_or_create_uploaded_source, store_upload
 from ..models import (
     Engagement,
@@ -53,6 +56,8 @@ from ..models import (
     FinancialSegment,
     SegmentRule,
     SourceKind,
+    TNMMAnalysis,
+    TNMMCalculation,
 )
 from ..storage import Storage
 
@@ -800,3 +805,172 @@ async def delete_reconciliation(
     await assert_owner(session, rec.engagement_id, user)
     await session.delete(rec)
     await session.commit()
+
+
+# ── TNMM analysis (S10, §29-35, §64) ──────────────────────────────────────────
+TNMM_STATUSES = (
+    "not_started", "data_preparation", "segmentation_required", "ready_for_analysis",
+    "analysis_in_progress", "review_required", "complete",
+)
+
+
+class TNMMCreate(BaseModel):
+    pli_type: str
+    tested_party_entity_id: str | None = None
+    tested_party_rationale: str | None = None
+    segment_id: uuid.UUID | None = None
+    transaction_id: str | None = None
+    jurisdiction: str | None = None
+    period: str | None = None
+
+
+class TNMMPatch(BaseModel):
+    pli_type: str | None = None
+    tested_party_entity_id: str | None = None
+    tested_party_rationale: str | None = None
+    segment_id: uuid.UUID | None = None
+    status: str | None = None
+
+
+class TNMMCalculationRead(BaseModel):
+    revenue: float | None
+    total_costs: float | None
+    operating_profit: float | None
+    pli_value: float | None
+    calculation_version: str
+    created_at: datetime | None
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class TNMMAnalysisRead(BaseModel):
+    id: uuid.UUID
+    engagement_id: uuid.UUID
+    transaction_id: str | None
+    tested_party_entity_id: str | None
+    tested_party_rationale: str | None
+    tested_party_selected_by: uuid.UUID | None
+    segment_id: uuid.UUID | None
+    pli_type: str
+    jurisdiction: str | None
+    period: str | None
+    status: str
+    far_characterization: str | None = None   # Class 2 FAR link (informs the tested-party rationale)
+    calculation: TNMMCalculationRead | None = None
+
+
+async def _owned_analysis(session: AsyncSession, analysis_id: uuid.UUID, user: AuthUser) -> TNMMAnalysis:
+    a = await session.get(TNMMAnalysis, analysis_id)
+    if a is None:
+        raise HTTPException(status_code=404, detail="TNMM analysis not found")
+    await assert_owner(session, a.engagement_id, user)
+    return a
+
+
+async def _analysis_read(session: AsyncSession, a: TNMMAnalysis) -> TNMMAnalysisRead:
+    latest = (await session.execute(
+        select(TNMMCalculation).where(TNMMCalculation.analysis_id == a.id)
+        .order_by(TNMMCalculation.created_at.desc()).limit(1)
+    )).scalar_one_or_none()
+    far = derive_characterization(await build_far_profile(session, a.engagement_id))
+    return TNMMAnalysisRead(
+        id=a.id, engagement_id=a.engagement_id, transaction_id=a.transaction_id,
+        tested_party_entity_id=a.tested_party_entity_id, tested_party_rationale=a.tested_party_rationale,
+        tested_party_selected_by=a.tested_party_selected_by, segment_id=a.segment_id, pli_type=a.pli_type,
+        jurisdiction=a.jurisdiction, period=a.period, status=a.status, far_characterization=far,
+        calculation=TNMMCalculationRead.model_validate(latest) if latest else None,
+    )
+
+
+@router.post("/engagements/{engagement_id}/tnmm-analyses", response_model=TNMMAnalysisRead, status_code=201)
+async def create_tnmm_analysis(
+    engagement_id: uuid.UUID,
+    body: TNMMCreate,
+    session: AsyncSession = Depends(get_session),
+    user: AuthUser = Depends(get_current_user),
+    _owner: Engagement = Depends(require_engagement_owner),
+) -> TNMMAnalysisRead:
+    if body.pli_type not in PLI_TYPES:
+        raise HTTPException(status_code=422, detail=f"unknown PLI: {body.pli_type}")
+    a = TNMMAnalysis(
+        engagement_id=engagement_id, pli_type=body.pli_type, transaction_id=body.transaction_id,
+        tested_party_entity_id=body.tested_party_entity_id, tested_party_rationale=body.tested_party_rationale,
+        tested_party_selected_by=user.id if body.tested_party_entity_id else None,   # practitioner-selected (§31)
+        segment_id=body.segment_id, jurisdiction=body.jurisdiction, period=body.period,
+    )
+    session.add(a)
+    await session.commit()
+    return await _analysis_read(session, a)
+
+
+@router.get("/engagements/{engagement_id}/tnmm-analyses", response_model=list[TNMMAnalysisRead])
+async def list_tnmm_analyses(
+    engagement_id: uuid.UUID,
+    session: AsyncSession = Depends(get_session),
+    _owner: Engagement = Depends(require_engagement_owner),
+) -> list[TNMMAnalysisRead]:
+    rows = (await session.execute(
+        select(TNMMAnalysis).where(TNMMAnalysis.engagement_id == engagement_id).order_by(TNMMAnalysis.created_at)
+    )).scalars().all()
+    return [await _analysis_read(session, a) for a in rows]
+
+
+@router.get("/tnmm-analyses/{analysis_id}", response_model=TNMMAnalysisRead)
+async def get_tnmm_analysis(
+    analysis_id: uuid.UUID,
+    session: AsyncSession = Depends(get_session),
+    user: AuthUser = Depends(get_current_user),
+) -> TNMMAnalysisRead:
+    return await _analysis_read(session, await _owned_analysis(session, analysis_id, user))
+
+
+@router.patch("/tnmm-analyses/{analysis_id}", response_model=TNMMAnalysisRead)
+async def patch_tnmm_analysis(
+    analysis_id: uuid.UUID,
+    body: TNMMPatch,
+    session: AsyncSession = Depends(get_session),
+    user: AuthUser = Depends(get_current_user),
+) -> TNMMAnalysisRead:
+    a = await _owned_analysis(session, analysis_id, user)
+    if body.pli_type is not None:
+        if body.pli_type not in PLI_TYPES:
+            raise HTTPException(status_code=422, detail=f"unknown PLI: {body.pli_type}")
+        a.pli_type = body.pli_type
+    if body.status is not None:
+        if body.status not in TNMM_STATUSES:
+            raise HTTPException(status_code=422, detail=f"unknown status: {body.status}")
+        a.status = body.status
+    if body.tested_party_entity_id is not None:
+        a.tested_party_entity_id = body.tested_party_entity_id
+        a.tested_party_selected_by = user.id            # practitioner-selected (§31)
+    if body.tested_party_rationale is not None:
+        a.tested_party_rationale = body.tested_party_rationale
+    if body.segment_id is not None:
+        a.segment_id = body.segment_id
+    await session.commit()
+    return await _analysis_read(session, a)
+
+
+@router.post("/tnmm-analyses/{analysis_id}/compute", response_model=TNMMAnalysisRead)
+async def compute_tnmm_analysis(
+    analysis_id: uuid.UUID,
+    session: AsyncSession = Depends(get_session),
+    user: AuthUser = Depends(get_current_user),
+) -> TNMMAnalysisRead:
+    a = await _owned_analysis(session, analysis_id, user)
+    if a.segment_id is None:
+        raise HTTPException(status_code=422, detail="select a segment before computing the PLI")
+    seg = await session.get(FinancialSegment, a.segment_id)
+    if seg is None:
+        raise HTTPException(status_code=422, detail="the analysis segment no longer exists")
+    inputs = await segment_tnmm_inputs(session, seg)
+    pli = compute_pli(
+        a.pli_type, revenue=inputs["revenue"], operating_profit=inputs["operating_profit"],
+        total_costs=inputs["total_costs"],
+    )
+    session.add(TNMMCalculation(
+        analysis_id=a.id, revenue=inputs["revenue"], total_costs=inputs["total_costs"],
+        operating_profit=inputs["operating_profit"], pli_value=pli, calculation_version="tnmm-v1",
+    ))
+    await session.commit()
+    return await _analysis_read(session, a)

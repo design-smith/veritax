@@ -1282,6 +1282,49 @@ class FinancialReconciliation(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
+class TNMMAnalysis(Base):
+    """A TNMM analysis for a controlled transaction (Class 3 §29-35, §64). The tested party is PRACTITIONER-
+    selected (never the LLM, §31); the PLI is computed deterministically from the tested party's segment."""
+
+    __tablename__ = "tnmm_analyses"
+
+    id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
+    engagement_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("engagements.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    transaction_id: Mapped[str | None] = mapped_column(Text, nullable=True)
+    tested_party_entity_id: Mapped[str | None] = mapped_column(Text, nullable=True)
+    tested_party_rationale: Mapped[str | None] = mapped_column(Text, nullable=True)
+    tested_party_selected_by: Mapped[uuid.UUID | None] = mapped_column(nullable=True)
+    segment_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("financial_segments.id", ondelete="SET NULL"), nullable=True
+    )
+    pli_type: Mapped[str] = mapped_column(Text, nullable=False)   # operating_margin|full_cost_markup|berry_ratio|return_on_assets
+    jurisdiction: Mapped[str | None] = mapped_column(Text, nullable=True)
+    period: Mapped[str | None] = mapped_column(Text, nullable=True)
+    status: Mapped[str] = mapped_column(Text, nullable=False, default="not_started")   # §64 lifecycle
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class TNMMCalculation(Base):
+    """A deterministic TNMM calculation snapshot (§35) — inputs + PLI value + calculation version, so a result is
+    reproducible when the engine evolves (§72)."""
+
+    __tablename__ = "tnmm_calculations"
+    __table_args__ = (Index("ix_tnmm_calculations_analysis", "analysis_id"),)
+
+    id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
+    analysis_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("tnmm_analyses.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    revenue: Mapped[float | None] = mapped_column(Numeric, nullable=True)
+    total_costs: Mapped[float | None] = mapped_column(Numeric, nullable=True)
+    operating_profit: Mapped[float | None] = mapped_column(Numeric, nullable=True)
+    pli_value: Mapped[float | None] = mapped_column(Numeric, nullable=True)
+    calculation_version: Mapped[str] = mapped_column(Text, nullable=False, default="tnmm-v1")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
 class FinancialColumnMapping(Base):
     """A saved, versioned column mapping (Class 3 §14) keyed by user + header signature, so a repeat engagement
     with the same source format reuses last time's mapping. Stores {canonical_field: source_header}."""

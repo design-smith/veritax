@@ -7,9 +7,9 @@
 
 import { useCallback, useEffect, useRef, useState } from "react"
 import { FileSpreadsheet, Layers, Calculator, BarChart3, Flag, Info, Upload, Loader2, Columns3, Sparkles, AlertTriangle, Plus, Trash2 } from "lucide-react"
-import { api, FINANCIAL_CLASSIFICATIONS, SEGMENT_RULE_FIELDS, SEGMENT_RULE_OPERATORS, FINANCIAL_ADJUSTMENT_TYPES, FINANCIAL_ALLOCATION_BASES,
+import { api, FINANCIAL_CLASSIFICATIONS, SEGMENT_RULE_FIELDS, SEGMENT_RULE_OPERATORS, FINANCIAL_ADJUSTMENT_TYPES, FINANCIAL_ALLOCATION_BASES, FINANCIAL_PLI_TYPES,
   type FinancialDatasetRead, type FinancialRowRead, type FinancialMappingRead,
-  type FinancialSegmentRead, type SegmentPnL, type FinancialReconciliationRead } from "@/lib/api"
+  type FinancialSegmentRead, type SegmentPnL, type FinancialReconciliationRead, type TNMMAnalysisRead } from "@/lib/api"
 
 export type WorkbenchView = "financials" | "segmentation" | "tnmm" | "benchmark" | "conclusion"
 
@@ -73,7 +73,9 @@ export default function EconomicWorkbench({ engagementId }: { engagementId: stri
             ? <FinancialsView engagementId={engagementId} />
             : view === "segmentation"
               ? <SegmentationView engagementId={engagementId} />
-              : <Placeholder {...PLACEHOLDER[view]} />}
+              : view === "tnmm"
+                ? <TnmmView engagementId={engagementId} />
+                : <Placeholder {...PLACEHOLDER[view]} />}
         </div>
 
         <aside style={{ width: "18rem", flexShrink: 0, borderLeft: "1px solid var(--color-border-subtle)", padding: "1.25rem", overflow: "auto", background: "var(--color-surface)" }}>
@@ -677,6 +679,77 @@ function SegmentDetail({ segmentId }: { segmentId: string }) {
           <button type="button" onClick={addAlloc} style={toolbarBtn}><Plus size={13} /> Allocate</button>
         </div>
       </div>
+    </div>
+  )
+}
+
+const fmtPct = (v: number | null) => (v === null ? "undetermined" : `${(v * 100).toFixed(2)}%`)
+
+function TnmmView({ engagementId }: { engagementId: string }) {
+  const [segments, setSegments] = useState<FinancialSegmentRead[]>([])
+  const [analyses, setAnalyses] = useState<TNMMAnalysisRead[] | null>(null)
+  const [segId, setSegId] = useState("")
+  const [pli, setPli] = useState<string>(FINANCIAL_PLI_TYPES[0])
+  const [testedParty, setTestedParty] = useState("")
+  const [rationale, setRationale] = useState("")
+
+  const refresh = useCallback(async () => {
+    const [sg, an] = await Promise.all([api.listFinancialSegments(engagementId), api.listTnmmAnalyses(engagementId)])
+    setSegments(sg); setAnalyses(an)
+    setSegId(prev => prev || (sg[0]?.id ?? ""))
+  }, [engagementId])
+  useEffect(() => { void refresh() }, [refresh])
+
+  async function create() {
+    if (!pli) return
+    await api.createTnmmAnalysis(engagementId, {
+      pli_type: pli, segment_id: segId || undefined,
+      tested_party_entity_id: testedParty.trim() || undefined, tested_party_rationale: rationale.trim() || undefined,
+    })
+    setTestedParty(""); setRationale("")
+    await refresh()
+  }
+  async function compute(id: string) { await api.computeTnmmAnalysis(id); await refresh() }
+
+  if (analyses === null) return <p style={{ fontSize: "var(--font-text-sm-size)", color: "var(--color-text-tertiary)" }}>Loading…</p>
+
+  return (
+    <div style={{ maxWidth: "56rem", margin: "0 auto", display: "flex", flexDirection: "column", gap: "1rem" }}>
+      {/* Create */}
+      <div style={{ display: "flex", gap: "0.375rem", flexWrap: "wrap", alignItems: "center", border: "1px solid var(--color-border)", borderRadius: "0.75rem", padding: "0.875rem 1.125rem", background: "var(--color-surface)" }}>
+        <select value={segId} onChange={e => setSegId(e.target.value)} style={miniSelect}>
+          <option value="">no segment</option>
+          {segments.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+        </select>
+        <select value={pli} onChange={e => setPli(e.target.value)} style={miniSelect}>{FINANCIAL_PLI_TYPES.map(p => <option key={p} value={p}>{p.replace(/_/g, " ")}</option>)}</select>
+        <input value={testedParty} onChange={e => setTestedParty(e.target.value)} placeholder="tested party" style={{ ...miniSelect, width: "8rem" }} />
+        <input value={rationale} onChange={e => setRationale(e.target.value)} placeholder="rationale" style={{ ...miniSelect, width: "14rem" }} />
+        <button type="button" onClick={create} style={toolbarBtn}><Plus size={13} /> New TNMM analysis</button>
+      </div>
+
+      {analyses.length === 0 && <Placeholder title="No TNMM analysis yet" body="Select the tested party's segment and a PLI, then compute the profit-level indicator deterministically from the reconciled segment." />}
+
+      {analyses.map(a => (
+        <div key={a.id} style={{ border: "1px solid var(--color-border)", borderRadius: "0.75rem", padding: "1rem 1.125rem", background: "var(--color-surface)", display: "flex", flexDirection: "column", gap: "0.5rem" }}>
+          <div style={{ display: "flex", alignItems: "baseline", gap: "0.5rem" }}>
+            <span style={{ fontSize: "var(--font-text-sm-size)", fontWeight: "var(--font-weight-semibold)", color: "var(--color-text)" }}>{a.pli_type.replace(/_/g, " ")}</span>
+            <span style={{ fontSize: "var(--font-text-xs-size)", color: "var(--color-text-tertiary)" }}>· tested party {a.tested_party_entity_id ?? "—"} · {a.status.replace(/_/g, " ")}</span>
+            <button type="button" onClick={() => void compute(a.id)} style={{ ...toolbarBtn, marginLeft: "auto" }}><Calculator size={13} /> Compute</button>
+          </div>
+          <div style={{ fontSize: "var(--font-text-xs-size)", color: "var(--color-text-secondary)" }}>
+            {a.tested_party_rationale ?? <span style={{ color: "var(--color-text-tertiary)" }}>No rationale.</span>}
+            {a.far_characterization && <span style={{ color: "var(--color-text-tertiary)" }}> · FAR: {a.far_characterization.replace(/_/g, " ")}</span>}
+          </div>
+          {a.calculation && (
+            <div style={{ display: "flex", gap: "1.5rem", flexWrap: "wrap", fontSize: "var(--font-text-xs-size)", color: "var(--color-text-secondary)", borderTop: "1px solid var(--color-border-subtle)", paddingTop: "0.5rem" }}>
+              <span>Revenue <strong style={{ fontVariantNumeric: "tabular-nums", color: "var(--color-text)" }}>{fmtNum(a.calculation.revenue)}</strong></span>
+              <span>Total costs <strong style={{ fontVariantNumeric: "tabular-nums", color: "var(--color-text)" }}>{fmtNum(a.calculation.total_costs)}</strong></span>
+              <span>Operating profit <strong style={{ fontVariantNumeric: "tabular-nums", color: "var(--color-text)" }}>{fmtNum(a.calculation.operating_profit)}</strong></span>
+              <span style={{ marginLeft: "auto" }}>PLI <strong style={{ color: "var(--color-text)" }}>{fmtPct(a.calculation.pli_value)}</strong></span>
+            </div>
+          )}
+        </div>
+      ))}
     </div>
   )
 }

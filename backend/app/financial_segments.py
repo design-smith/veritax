@@ -149,6 +149,21 @@ async def segment_adjustments(session: AsyncSession, segment: FinancialSegment) 
     )).scalars().all())
 
 
+async def segment_tnmm_inputs(session: AsyncSession, segment: FinancialSegment) -> dict:
+    """TNMM inputs from the segment (§34), under the documented sign convention (income positive, expense
+    negative): revenue = Σ operating rows with amount>0; operating_profit = adjusted operating result (net
+    operating + adjustments + allocations); total_costs = revenue − operating_profit."""
+    rules = await _rules(session, segment)
+    revenue = (await session.execute(
+        _base_query([func.sum(FinancialRow.amount)], segment, rules)
+        .where(FinancialRow.classification == "operating", FinancialRow.amount > 0)
+    )).scalar()
+    revenue = float(revenue) if revenue is not None else 0.0
+    pnl = await segment_pnl(session, segment)
+    operating_profit = pnl["adjusted_operating_result"]
+    return {"revenue": revenue, "operating_profit": operating_profit, "total_costs": revenue - operating_profit}
+
+
 async def segment_total(session: AsyncSession, segment: FinancialSegment) -> float | None:
     """SQL sum of the segment's matched-row amounts (for reconciliation, §25). None when nothing matches."""
     rules = await _rules(session, segment)
