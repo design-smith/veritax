@@ -1,9 +1,10 @@
 "use client"
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
-import { ArrowRight, Download, Edit3, Loader2 } from "lucide-react"
+import { ArrowRight, Download, Edit3, Loader2, Calculator } from "lucide-react"
 import { api, type DraftResponse, type DraftSection } from "@/lib/api"
 import { Animate } from "@/components/ui/transition"
+import EconomicWorkbench from "@/components/economic/Workbench"
 import { ActionModal } from "@/components/ui/action-modal"
 import {
   diagnoseApiFailure,
@@ -256,6 +257,7 @@ export default function DraftStep({ engagementId, jurisdictions, entity, onConti
   const [issue, setIssue] = useState<ActionableIssue | null>(null)
   const [retrying, setRetrying] = useState(false)
   const [editing, setEditing] = useState(false)
+  const [showWorkbench, setShowWorkbench] = useState(false)   // Class 3: in-Draft Economic Analysis workbench
   const [downloading, setDownloading] = useState(false)
   const [downloadHover, setDownloadHover] = useState(false)
   const [typedDoneByJuris, setTypedDoneByJuris] = useState<Record<string, boolean>>({})
@@ -587,6 +589,16 @@ export default function DraftStep({ engagementId, jurisdictions, entity, onConti
           })}
         </div>
         <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: "0.375rem", flexShrink: 0 }}>
+          <button type="button" onClick={() => setShowWorkbench(v => !v)} aria-pressed={showWorkbench} title="Economic Analysis workbench" style={{
+            display: "inline-flex", alignItems: "center", gap: "0.375rem", height: "var(--control-size-md)", padding: "0 0.625rem",
+            borderRadius: "var(--control-radius-md)", border: "none", cursor: "pointer",
+            background: showWorkbench ? "var(--color-background-primary-soft)" : "transparent",
+            color: showWorkbench ? "var(--color-text)" : "var(--color-text-secondary)",
+            fontSize: "var(--control-font-size-md)", fontWeight: "var(--font-weight-medium)",
+            transition: "background var(--transition-duration-basic), color var(--transition-duration-basic)",
+          }}>
+            <Calculator size={14} /> Economic Analysis
+          </button>
           {showDraftActions && (
             <div data-tour="draft-actions" style={{ display: "inline-flex", alignItems: "center", gap: "0.375rem" }}>
               <button type="button" onClick={() => setEditing(v => !v)} aria-label={editing ? "Preview draft" : "Edit draft"} title={editing ? "Preview" : "Edit draft"} style={{
@@ -632,7 +644,10 @@ export default function DraftStep({ engagementId, jurisdictions, entity, onConti
         </div>
       </div>
 
-      {/* Body — the document editor once drafting is complete, otherwise progress */}
+      {/* Body — the Economic Analysis workbench when toggled, else the document editor / progress */}
+      {showWorkbench ? (
+        <EconomicWorkbench />
+      ) : (
       <div style={{ flex: 1, minHeight: 0, display: "flex", flexDirection: "column" }}>
         {draft?.draft_mode === "fake" && (
           <p style={{ padding: "0.625rem 3.5rem", margin: 0, fontSize: "var(--font-text-xs-size)", color: "#8a5a00", background: "#fff8e5", borderTop: "1px solid #f0d58c", borderBottom: "1px solid #f0d58c" }}>
@@ -669,6 +684,7 @@ export default function DraftStep({ engagementId, jurisdictions, entity, onConti
           </Animate>
         )}
       </div>
+      )}
       <ActionModal issue={issue} onClose={() => setIssue(null)} />
     </div>
   )

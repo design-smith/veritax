@@ -39,8 +39,8 @@ quartiles/adjustments, reconcile, alter rows, or decide whether a number is in a
 
 | # | Title | Type | Blocked by | Status |
 |---|-------|------|-----------|--------|
-| S1 | Financial Workbench design + shell — in-Draft Economic Analysis surface (nav + main + side panel), visual language | HITL (design review) | — | ▶ NEXT |
-| S2 | Financial dataset intake — upload XLSX/CSV → immutable datasets + rows w/ provenance; scale-ready (bulk + columnar); Financials view | AFK | S1 | pending |
+| S1 | Financial Workbench design + shell — in-Draft Economic Analysis surface (nav + main + side panel), visual language | HITL (design review) | — | ✅ DONE |
+| S2 | Financial dataset intake — upload XLSX/CSV → immutable datasets + rows w/ provenance; scale-ready (bulk + columnar); Financials view | AFK | S1 | ▶ NEXT |
 | S3 | Column mapping + saved mappings (deterministic + LLM-assisted suggestions) + mapping UI | AFK | S2 | pending |
 | S4 | Validation & diagnostics — invalid rows retained + flagged, never dropped; diagnostics UI | AFK | S2 | pending |
 | S5 | Account classification (operating/non-operating/…; deterministic + LLM-assisted) + override w/ audit | AFK | S2 | pending |
@@ -105,4 +105,15 @@ TNMM (§81).
 
 ## Status / verification log
 
-_(populated as slices complete)_
+- [x] **S1 — Financial Workbench design + shell** — DONE (HITL design/shell; built to match the existing app
+  design system + PRD §58, published for async review — non-blocking). USER-VISIBLE.
+  - `components/economic/Workbench.tsx` — the in-Draft Economic Analysis shell: a five-view nav (Financials /
+    Segmentation / TNMM / Benchmark / Conclusion), a main area with a per-view placeholder, and an
+    evidence/calculations/warnings side panel. Pure component, zero backend, styled with the app's design tokens.
+  - `components/steps/draft.tsx` — an "Economic Analysis" toggle in the Draft header swaps the body to the
+    workbench (internal surface within Draft; no new top-level step, §3/§58). Minimal, reversible integration.
+  - **Verification:** `npx tsc --noEmit` clean; `pnpm build` clean (8/8 pages). Design preview published as an
+    Artifact for review: https://claude.ai/code/artifact/c457ac44-3714-473f-b6c9-6dc1d34c62b1
+  - Acceptance (S1): shell renders inside Draft with the 5-item nav + side panel ✓ · no new global step ✓ · zero
+    backend dependency ✓ · tsc+build clean ✓ · design preview published ✓.
+  - Open to design feedback (nav order/naming/layout) — cheap to apply to the shell + the surfaces that plug in.
