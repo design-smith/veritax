@@ -53,8 +53,8 @@ quartiles/adjustments, reconcile, alter rows, or decide whether a number is in a
 | S12 | Arm's-length range & conclusion (jurisdiction-aware) — REUSE Class 1 engine; within/below/above; conclusion UI | AFK | S11, S10 | ✅ DONE |
 | S13 | TP adjustment — illustrative adjustment to practitioner target, approval state, never auto-post; UI | AFK | S12 | ✅ DONE |
 | S14 | Requirements integration — evaluate economic-analysis capabilities (not doc presence) + panel | AFK | S9, S12 | ✅ DONE |
-| S15 | Draft integration — Economic Analysis section from structured results (numbers never invented) | AFK | S12 | ▶ NEXT |
-| S16 | Risks integration — reconciliation gap / unsupported exclusion / stale benchmark / method mismatch / out-of-range / missing segmentation | AFK | S9, S12, S13 | pending |
+| S15 | Draft integration — Economic Analysis section from structured results (numbers never invented) | AFK | S12 | ✅ DONE |
+| S16 | Risks integration — reconciliation gap / unsupported exclusion / stale benchmark / method mismatch / out-of-range / missing segmentation | AFK | S9, S12, S13 | ▶ NEXT |
 
 **DAG:** S1 (design, parallel) · S2 → {S3, S4, S5, S6} · S6 → {S7, S9} · S7 → S8 · {S6,S7,S8} → S10 → S11 → S12 → S13 · {S9,S12} → S14 · S12 → S15 · {S9,S12,S13} → S16.
 
@@ -369,3 +369,24 @@ TNMM (§81).
   - Acceptance (S14): Requirements evaluate economic-analysis capabilities (not benchmark-PDF existence) ✓ ·
     missing segmentation / failed reconciliation / stale benchmark drive Partial/Missing ✓ · panel surfaces
     status + gaps ✓.
+
+- [x] **S15 — Draft integration** — BUILT, full-suite gate running. Reuses the Class 1/2 deterministic-section
+    pattern EXACTLY (Local Regulations / Industry / Functional Analysis).
+  - `regulatory/requirements.py`: new `ResolvedElement.economic` flag + `_economic_element(country)`
+    (`{country}:economic_analysis`) injected by `draft_elements` ALWAYS, right after Functional Analysis;
+    `resolve_requirements` untouched (coverage/matching never see it).
+  - `economic_coverage.py::economic_section_content` — deterministic markdown ONLY from the stored TNMM/benchmark/
+    adjustment rows + FAR characterization (Method / Tested party / Financial analysis / Benchmarking / Arm's-
+    length conclusion); numbers never invented (§53); honest "not yet established" note when absent.
+    `routers/draft.py`: `_draft_economic` branch in `run_draft` + `regenerate_section` (`model=
+    "deterministic:economic"`, non-gating); the docx uncited-section guard already exempts `deterministic:`.
+  - **Golden re-capture (behaviour-preserving):** a proof script confirmed the ONLY changes are the defaulted
+    `economic:false` flag on every element (resolve+draft) + exactly one economic element after functional_
+    analysis per jurisdiction (verified across all 17); `test_industry_analysis` `+2`→`+3` + new economic
+    structural tests updated legitimately.
+  - **Verification:** `test_draft.py` (economic section deterministic from the stored TNMM/benchmark result +
+    positioned after Functional; honest non-gating fallback) + `test_requirements_golden` 2 +
+    `test_industry_analysis` = **32 passed** (golden+industry+draft). No frontend change (draft renders sections
+    generically). **Full backend suite 381 passed** (377 + 4).
+  - Acceptance (S15): Economic Analysis section renders from structured results ✓ · generated numbers cannot
+    differ from stored analysis ✓ · claims traceable to source calculations ✓ · non-gating w/ honest fallback ✓.

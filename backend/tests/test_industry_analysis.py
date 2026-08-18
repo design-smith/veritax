@@ -65,9 +65,9 @@ def test_draft_elements_injects_industry_analysis_after_business_strategy():
     ind = els[idx]
     assert ind.research is True and ind.required is False       # web-sourced, non-gating
     assert ind.requirement_key == "United Arab Emirates:industry_analysis"   # distinct, no key collision
-    # display orders stay contiguous; two more elements than the statutory list (Industry + Functional Analysis)
+    # display orders stay contiguous; three more than statutory (Industry + Functional + Economic Analysis)
     assert [e.order for e in els] == list(range(1, len(els) + 1))
-    assert len(els) == len(resolve_requirements("United Arab Emirates")) + 2
+    assert len(els) == len(resolve_requirements("United Arab Emirates")) + 3
     # statutory requirement_keys are preserved (coverage <-> draft linkage intact)
     statutory_keys = {e.requirement_key for e in resolve_requirements("United Arab Emirates")}
     assert statutory_keys.issubset({e.requirement_key for e in els})
@@ -91,6 +91,24 @@ def test_resolve_requirements_excludes_the_functional_element():
     els = resolve_requirements("United Arab Emirates")
     assert all(not getattr(e, "functional", False) for e in els)
     assert all(e.requirement_key != "United Arab Emirates:functional_analysis" for e in els)
+
+
+def test_draft_elements_injects_economic_analysis_after_functional():
+    # S15: Economic Analysis is a draft-only value-add section, injected right after Functional Analysis.
+    els = draft_elements("United Arab Emirates")
+    names = [e.element_name for e in els]
+    assert "Economic Analysis" in names
+    idx = names.index("Economic Analysis")
+    assert names[idx - 1] == "Functional Analysis"              # positioned right after Functional Analysis
+    ec = els[idx]
+    assert ec.economic is True and ec.required is False          # deterministic, non-gating
+    assert ec.requirement_key == "United Arab Emirates:economic_analysis"   # distinct, no key collision
+
+
+def test_resolve_requirements_excludes_the_economic_element():
+    els = resolve_requirements("United Arab Emirates")
+    assert all(not getattr(e, "economic", False) for e in els)
+    assert all(e.requirement_key != "United Arab Emirates:economic_analysis" for e in els)
 
 
 def test_draft_elements_falls_after_profile_when_no_strategy_element():

@@ -282,6 +282,54 @@ async def test_functional_analysis_section_is_non_gating_without_evidence(client
     assert "not yet established" in fn["content"].lower()
 
 
+def _financials_xlsx() -> bytes:
+    from openpyxl import Workbook
+    wb = Workbook(); ws = wb.active; ws.title = "TB"
+    ws.append(["Account", "GL Description", "BU", "Amount", "Currency"])
+    ws.append(["500100", "Revenue", "SERVICES", 1000000, "QAR"])
+    ws.append(["510100", "Salaries", "SERVICES", -950000, "QAR"])   # operating margin 5%
+    buf = io.BytesIO(); wb.save(buf); return buf.getvalue()
+
+
+async def test_economic_analysis_section_is_deterministic_from_structured_result(client):
+    # S15: the Economic Analysis section is built from the stored TNMM/benchmark result — never generated numbers.
+    eid = await _engagement_ready_for_draft(client, "Netherlands", b"The entity is a limited-risk distributor.")
+    await client.post(f"/engagements/{eid}/financial-datasets", data={"dataset_type": "trial_balance"},
+                      files={"file": ("tb.xlsx", _financials_xlsx(), "application/octet-stream")})
+    seg = (await client.post(f"/engagements/{eid}/financial-segments", json={"name": "Services"})).json()["id"]
+    await client.post(f"/financial-segments/{seg}/rules",
+                      json={"field": "business_unit", "operator": "equals", "value": "SERVICES"})
+    a = (await client.post(f"/engagements/{eid}/tnmm-analyses", json={
+        "pli_type": "operating_margin", "segment_id": seg, "tested_party_entity_id": "NLCo"})).json()["id"]
+    await client.post(f"/tnmm-analyses/{a}/compute")
+    bs = (await client.post(f"/tnmm-analyses/{a}/benchmark-sets", json={"source": "Orbis", "comparables": [
+        {"company_name": f"C{i}", "accepted": True, "pli_values": [v]} for i, v in enumerate([0.03, 0.04, 0.06, 0.07])]})).json()["id"]
+    await client.post(f"/benchmark-sets/{bs}/compute-range")
+
+    await client.post(f"/engagements/{eid}/draft", params={"jurisdiction": "Netherlands"})
+    got = (await client.get(f"/engagements/{eid}/draft", params={"jurisdiction": "Netherlands"})).json()
+    assert got["summary"]["pending"] == 0 and got["summary"]["failed"] == 0
+
+    ec = next(s for s in got["sections"] if s["element_name"] == "Economic Analysis")
+    assert ec["status"] == "drafted" and ec["content"]
+    assert "TNMM" in ec["content"] and "NLCo" in ec["content"]
+    assert "5.00%" in ec["content"]                              # the stored PLI value, not invented
+    assert "within range" in ec["content"].lower()              # tested 5% inside [~3.75%, ~6.25%]
+    assert not ec["citations"]
+    # Positioned right after Functional Analysis.
+    ordered = [s["element_name"] for s in sorted(got["sections"], key=lambda s: s["element_order"])]
+    assert ordered[ordered.index("Economic Analysis") - 1] == "Functional Analysis"
+
+
+async def test_economic_analysis_section_is_non_gating_without_analysis(client):
+    eid = await _engagement_ready_for_draft(client, "Netherlands", b"The entity is a limited-risk distributor.")
+    await client.post(f"/engagements/{eid}/draft", params={"jurisdiction": "Netherlands"})
+    got = (await client.get(f"/engagements/{eid}/draft", params={"jurisdiction": "Netherlands"})).json()
+    assert got["summary"]["failed"] == 0
+    ec = next(s for s in got["sections"] if s["element_name"] == "Economic Analysis")
+    assert ec["status"] == "drafted" and "not yet established" in ec["content"].lower()
+
+
 async def test_unknown_jurisdiction_404(client):
     eid = (await client.post("/engagements")).json()["id"]
     r = await client.post(f"/engagements/{eid}/draft", params={"jurisdiction": "Narnia"})

@@ -33,6 +33,7 @@ from ..deps import (
 from ..docx_export import build_document
 from ..drafting import Drafter, DraftResult, ResearchDrafter, validate_research
 from ..far_builder import functional_section_content
+from ..economic_coverage import economic_section_content
 from ..embeddings import Embedder
 from ..jobs import enqueue_pipeline_job, schedule_pipeline_drain
 from regulatory import local_regulations_content, regulatory_snapshot
@@ -375,6 +376,26 @@ async def _draft_functional(session: AsyncSession, section: DraftSection, engage
         section.error = str(exc)[:1000]
 
 
+# The Economic Analysis section: DETERMINISTIC from the stored TNMM/benchmark/adjustment result (no LLM,
+# no retrieval). Non-gating — with no economic analysis it emits an honest "not yet established" note.
+async def _draft_economic(session: AsyncSession, section: DraftSection, engagement_id: uuid.UUID) -> None:
+    section.status = DraftStatus.drafting
+    section.error = None
+    section.status_updated_at = datetime.now(timezone.utc)
+    try:
+        section.content = await economic_section_content(session, engagement_id)
+        section.model = "deterministic:economic"
+        section.status = DraftStatus.drafted
+        section.drafted_at = datetime.now(timezone.utc)
+        section.status_updated_at = section.drafted_at
+        log.info("draft_economic DONE section=%s", section.id)
+    except Exception as exc:  # noqa: BLE001 - record the failure; caller stops the run
+        log.exception("draft_economic FAILED section=%s", section.id)
+        section.status = DraftStatus.failed
+        section.status_updated_at = datetime.now(timezone.utc)
+        section.error = str(exc)[:1000]
+
+
 async def _draft_one(session: AsyncSession, section: DraftSection, element, documents: list[DocContext],
                      coverage_note: str, scope_note: str, drafter: Drafter,
                      fname_to_docid: dict[str, str]) -> None:
@@ -673,6 +694,20 @@ async def run_draft(session_factory: async_sessionmaker, drafter: Drafter, resea
                     if getattr(element, "functional", False):
                         # Deterministic Functional Analysis section: built from the FAR profile, no LLM/retrieval.
                         await _draft_functional(session, section, engagement_id)
+                        await session.commit()
+                        if section.status == DraftStatus.failed:
+                            stopped = await _mark_open_sections_failed(
+                                session, engagement_id, jurisdiction, section.error or "draft section failed"
+                            )
+                            log.info(
+                                "run_draft STOPPED engagement=%s jurisdiction=%s failed_section=%s stopped_sections=%d reason=%s",
+                                engagement_id, jurisdiction, section.id, stopped, section.error,
+                            )
+                            return
+                        continue
+                    if getattr(element, "economic", False):
+                        # Deterministic Economic Analysis section: built from the stored TNMM/benchmark result.
+                        await _draft_economic(session, section, engagement_id)
                         await session.commit()
                         if section.status == DraftStatus.failed:
                             stopped = await _mark_open_sections_failed(
@@ -993,6 +1028,11 @@ async def regenerate_section(
         return _to_read(section)
     if getattr(element, "functional", False):
         await _draft_functional(session, section, section.engagement_id)
+        await session.commit()
+        await session.refresh(section)
+        return _to_read(section)
+    if getattr(element, "economic", False):
+        await _draft_economic(session, section, section.engagement_id)
         await session.commit()
         await session.refresh(section)
         return _to_read(section)
