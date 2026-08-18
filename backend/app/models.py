@@ -1366,6 +1366,31 @@ class BenchmarkComparable(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
+class BenchmarkResult(Base):
+    """A computed arm's-length range + conclusion for a benchmark set (Class 3 §40-44). Deterministic snapshot;
+    records the statistical method + jurisdiction for reproducibility (§72)."""
+
+    __tablename__ = "benchmark_results"
+    __table_args__ = (Index("ix_benchmark_results_set", "benchmark_set_id"),)
+
+    id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
+    benchmark_set_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("benchmark_sets.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    minimum: Mapped[float | None] = mapped_column(Numeric, nullable=True)
+    lower_quartile: Mapped[float | None] = mapped_column(Numeric, nullable=True)
+    median: Mapped[float | None] = mapped_column(Numeric, nullable=True)
+    upper_quartile: Mapped[float | None] = mapped_column(Numeric, nullable=True)
+    maximum: Mapped[float | None] = mapped_column(Numeric, nullable=True)
+    statistical_method: Mapped[str] = mapped_column(Text, nullable=False)
+    n: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    tested_result: Mapped[float | None] = mapped_column(Numeric, nullable=True)
+    position: Mapped[str] = mapped_column(Text, nullable=False)   # within_range|below_range|above_range|insufficient_data|review_required
+    jurisdiction: Mapped[str | None] = mapped_column(Text, nullable=True)
+    freshness_status: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
 class FinancialColumnMapping(Base):
     """A saved, versioned column mapping (Class 3 §14) keyed by user + header signature, so a repeat engagement
     with the same source format reuses last time's mapping. Stores {canonical_field: source_header}."""

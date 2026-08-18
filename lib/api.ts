@@ -627,6 +627,22 @@ export interface ComparableInput {
   rejection_reason?: string
   pli_values: number[]
 }
+export interface BenchmarkResultRead {
+  id: string
+  benchmark_set_id: string
+  minimum: number | null
+  lower_quartile: number | null
+  median: number | null
+  upper_quartile: number | null
+  maximum: number | null
+  statistical_method: string
+  n: number
+  tested_result: number | null
+  position: string
+  jurisdiction: string | null
+  freshness_status: string | null
+  created_at: string | null
+}
 export const SEGMENT_RULE_FIELDS = ["account_code", "account_name", "cost_center", "business_unit"] as const
 export const SEGMENT_RULE_OPERATORS = ["equals", "in", "contains"] as const
 export interface FinancialReconciliationRead {
@@ -976,6 +992,13 @@ const realApi = {
 
   deleteBenchmarkSet: (setId: string): Promise<void> =>
     afetch(`${BASE}/benchmark-sets/${setId}`, { method: "DELETE" }).then(parseVoid),
+
+  // Class 3 — arm's-length range
+  computeBenchmarkRange: (setId: string): Promise<BenchmarkResultRead> =>
+    afetch(`${BASE}/benchmark-sets/${setId}/compute-range`, { method: "POST" }).then(r => parse<BenchmarkResultRead>(r)),
+
+  getBenchmarkRange: (setId: string): Promise<BenchmarkResultRead | null> =>
+    afetch(`${BASE}/benchmark-sets/${setId}/range`).then(r => parse<BenchmarkResultRead | null>(r)),
 }
 
 // On the public /demo route, serve canned data from lib/demo-api instead of the network so the real

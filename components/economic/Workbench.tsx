@@ -10,7 +10,7 @@ import { FileSpreadsheet, Layers, Calculator, BarChart3, Flag, Info, Upload, Loa
 import { api, FINANCIAL_CLASSIFICATIONS, SEGMENT_RULE_FIELDS, SEGMENT_RULE_OPERATORS, FINANCIAL_ADJUSTMENT_TYPES, FINANCIAL_ALLOCATION_BASES, FINANCIAL_PLI_TYPES,
   type FinancialDatasetRead, type FinancialRowRead, type FinancialMappingRead,
   type FinancialSegmentRead, type SegmentPnL, type FinancialReconciliationRead, type TNMMAnalysisRead,
-  type BenchmarkSetRead, type ComparableInput } from "@/lib/api"
+  type BenchmarkSetRead, type ComparableInput, type BenchmarkResultRead } from "@/lib/api"
 
 export type WorkbenchView = "financials" | "segmentation" | "tnmm" | "benchmark" | "conclusion"
 
@@ -22,14 +22,7 @@ const NAV: { id: WorkbenchView; label: string; icon: typeof FileSpreadsheet }[] 
   { id: "conclusion", label: "Conclusion", icon: Flag },
 ]
 
-const PLACEHOLDER: Record<Exclude<WorkbenchView, "financials">, { title: string; body: string }> = {
-  segmentation: { title: "Segmentation", body: "Isolate the financial result for a controlled transaction or business segment — direct account mapping, exclusions, and allocations, with a segmented P&L that drills to source." },
-  tnmm: { title: "TNMM", body: "Select the tested party (from the FAR analysis) and a PLI, then Veritax computes the result deterministically from the reconciled segment." },
-  benchmark: { title: "Benchmark", body: "Import a comparable set with its rejection log. The arm's-length range is computed with the jurisdiction's statistical method." },
-  conclusion: { title: "Conclusion", body: "The tested result against the arm's-length range — within / below / above — and any illustrative transfer-pricing adjustment for your review." },
-}
-
-const DATASET_TYPES = ["trial_balance", "general_ledger", "segmented_pl", "financial_statements", "management_accounts", "invoice_population"]
+const DATASET_TYPES =["trial_balance", "general_ledger", "segmented_pl", "financial_statements", "management_accounts", "invoice_population"]
 const fmtType = (t: string) => t.replace(/_/g, " ")
 const fmtNum = (n: number | null) => (n === null ? "—" : n.toLocaleString(undefined, { maximumFractionDigits: 2 }))
 const fmtIssue = (code: string) => code.replace(/_/g, " ")
@@ -78,7 +71,9 @@ export default function EconomicWorkbench({ engagementId }: { engagementId: stri
                 ? <TnmmView engagementId={engagementId} />
                 : view === "benchmark"
                   ? <BenchmarkView engagementId={engagementId} />
-                  : <Placeholder {...PLACEHOLDER[view]} />}
+                  : view === "conclusion"
+                    ? <ConclusionView engagementId={engagementId} />
+                    : <Placeholder title="Coming soon" body="" />}
         </div>
 
         <aside style={{ width: "18rem", flexShrink: 0, borderLeft: "1px solid var(--color-border-subtle)", padding: "1.25rem", overflow: "auto", background: "var(--color-surface)" }}>
@@ -857,6 +852,89 @@ function BenchmarkView({ engagementId }: { engagementId: string }) {
               )}
             </div>
           </>
+        )}
+    </div>
+  )
+}
+
+const POSITION_LABEL: Record<string, { label: string; color: string }> = {
+  within_range: { label: "Within range", color: "var(--color-text-success-soft, #1a7f37)" },
+  below_range: { label: "Below range", color: "var(--color-text-danger-soft, #b3261e)" },
+  above_range: { label: "Above range", color: "var(--color-text-caution-soft, #8a5a00)" },
+  insufficient_data: { label: "Insufficient data", color: "var(--color-text-tertiary)" },
+  review_required: { label: "Review required", color: "var(--color-text-caution-soft, #8a5a00)" },
+}
+
+function ConclusionView({ engagementId }: { engagementId: string }) {
+  const [analyses, setAnalyses] = useState<TNMMAnalysisRead[]>([])
+  const [analysisId, setAnalysisId] = useState("")
+  const [sets, setSets] = useState<BenchmarkSetRead[]>([])
+  const [setId, setSetId] = useState("")
+  const [result, setResult] = useState<BenchmarkResultRead | null>(null)
+
+  const refreshAnalyses = useCallback(async () => {
+    const an = await api.listTnmmAnalyses(engagementId)
+    setAnalyses(an); setAnalysisId(prev => prev || (an[0]?.id ?? ""))
+  }, [engagementId])
+  useEffect(() => { void refreshAnalyses() }, [refreshAnalyses])
+
+  const refreshSets = useCallback(async () => {
+    if (!analysisId) { setSets([]); setSetId(""); return }
+    const s = await api.listBenchmarkSets(analysisId)
+    setSets(s); setSetId(prev => prev || (s[0]?.id ?? ""))
+  }, [analysisId])
+  useEffect(() => { void refreshSets() }, [refreshSets])
+
+  const loadRange = useCallback(async () => {
+    setResult(setId ? await api.getBenchmarkRange(setId) : null)
+  }, [setId])
+  useEffect(() => { void loadRange() }, [loadRange])
+
+  async function compute() { if (setId) { setResult(await api.computeBenchmarkRange(setId)); } }
+
+  const analysis = analyses.find(a => a.id === analysisId)
+  const pos = result ? POSITION_LABEL[result.position] : null
+
+  return (
+    <div style={{ maxWidth: "56rem", margin: "0 auto", display: "flex", flexDirection: "column", gap: "1rem" }}>
+      <div style={{ display: "flex", gap: "0.5rem", alignItems: "center", flexWrap: "wrap" }}>
+        <select value={analysisId} onChange={e => { setAnalysisId(e.target.value); setSetId(""); }} style={miniSelect}>
+          <option value="">select analysis…</option>
+          {analyses.map(a => <option key={a.id} value={a.id}>{a.pli_type.replace(/_/g, " ")} · {a.tested_party_entity_id ?? "—"}</option>)}
+        </select>
+        <select value={setId} onChange={e => setSetId(e.target.value)} style={miniSelect}>
+          <option value="">select benchmark set…</option>
+          {sets.map(s => <option key={s.id} value={s.id}>{s.source} ({s.accepted_count} accepted)</option>)}
+        </select>
+        <button type="button" onClick={compute} style={toolbarBtn} disabled={!setId}><Calculator size={13} /> Compute range</button>
+      </div>
+
+      {!result
+        ? <Placeholder title="No conclusion yet" body="Pick a TNMM analysis and its benchmark set, then compute the arm's-length range. The tested result is placed within / below / above the range deterministically." />
+        : (
+          <div style={{ border: "1px solid var(--color-border)", borderRadius: "0.75rem", overflow: "hidden", background: "var(--color-surface)" }}>
+            <div style={{ display: "flex", alignItems: "center", gap: "0.75rem", padding: "1rem 1.125rem", borderBottom: "1px solid var(--color-border-subtle)" }}>
+              <span style={{ fontSize: "var(--font-text-lg-size)", fontWeight: "var(--font-weight-semibold)", color: pos?.color ?? "var(--color-text)" }}>{pos?.label ?? result.position}</span>
+              {analysis && <span style={{ fontSize: "var(--font-text-xs-size)", color: "var(--color-text-tertiary)" }}>{analysis.pli_type.replace(/_/g, " ")} · n={result.n} · {result.statistical_method}{result.jurisdiction ? ` · ${result.jurisdiction}` : ""}</span>}
+            </div>
+            <div style={{ display: "flex", gap: "1.5rem", flexWrap: "wrap", padding: "1rem 1.125rem", fontSize: "var(--font-text-sm-size)" }}>
+              {([["Minimum", result.minimum], ["Lower quartile", result.lower_quartile], ["Median", result.median], ["Upper quartile", result.upper_quartile], ["Maximum", result.maximum]] as [string, number | null][]).map(([label, v]) => (
+                <div key={label}>
+                  <div style={{ fontSize: "var(--font-text-xs-size)", color: "var(--color-text-tertiary)" }}>{label}</div>
+                  <div style={{ fontVariantNumeric: "tabular-nums", color: "var(--color-text)" }}>{fmtPct(v)}</div>
+                </div>
+              ))}
+              <div style={{ marginLeft: "auto" }}>
+                <div style={{ fontSize: "var(--font-text-xs-size)", color: "var(--color-text-tertiary)" }}>Tested result</div>
+                <div style={{ fontVariantNumeric: "tabular-nums", fontWeight: "var(--font-weight-semibold)", color: pos?.color ?? "var(--color-text)" }}>{fmtPct(result.tested_result)}</div>
+              </div>
+            </div>
+            {result.freshness_status && (
+              <div style={{ padding: "0.625rem 1.125rem", borderTop: "1px solid var(--color-border-subtle)", fontSize: "var(--font-text-xs-size)", color: "var(--color-text-tertiary)" }}>
+                Benchmark freshness: {result.freshness_status.replace(/_/g, " ")}
+              </div>
+            )}
+          </div>
         )}
     </div>
   )

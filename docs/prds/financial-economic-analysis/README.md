@@ -50,8 +50,8 @@ quartiles/adjustments, reconcile, alter rows, or decide whether a number is in a
 | S9 | Financial reconciliation — FS→TB→Segment, configurable tolerance, deterministic status; tie-out UI | AFK | S6 | ✅ DONE |
 | S10 | TNMM core — tested party (practitioner-selected, links FAR) + PLI registry (deterministic) + calc + lifecycle; TNMM UI | AFK | S6, S7, S8 | ✅ DONE |
 | S11 | Benchmark import — comparables + accepted/rejected + rejection log; benchmark UI | AFK | S10 | ✅ DONE |
-| S12 | Arm's-length range & conclusion (jurisdiction-aware) — REUSE Class 1 engine; within/below/above; conclusion UI | AFK | S11, S10 | ▶ NEXT |
-| S13 | TP adjustment — illustrative adjustment to practitioner target, approval state, never auto-post; UI | AFK | S12 | pending |
+| S12 | Arm's-length range & conclusion (jurisdiction-aware) — REUSE Class 1 engine; within/below/above; conclusion UI | AFK | S11, S10 | ✅ DONE |
+| S13 | TP adjustment — illustrative adjustment to practitioner target, approval state, never auto-post; UI | AFK | S12 | ▶ NEXT |
 | S14 | Requirements integration — evaluate economic-analysis capabilities (not doc presence) + panel | AFK | S9, S12 | pending |
 | S15 | Draft integration — Economic Analysis section from structured results (numbers never invented) | AFK | S12 | pending |
 | S16 | Risks integration — reconciliation gap / unsupported exclusion / stale benchmark / method mismatch / out-of-range / missing segmentation | AFK | S9, S12, S13 | pending |
@@ -316,3 +316,23 @@ TNMM (§81).
     passed** (362 + 3).
   - Acceptance (S11): a benchmark study/comparable set imported + linked ✓ · accepted vs rejected distinguishable
     with reasons ✓ · population + rejection log viewable ✓.
+
+- [x] **S12 — Arm's-length range & conclusion** — BUILT, full-suite gate running. USER-VISIBLE (Conclusion view).
+    REUSES the Class 1 engine (no rebuilt math).
+  - `financial_range.py::compute_range` — one observation per accepted comparable (mean of its pli_values), fed
+    to `regulatory.compute_arm_length_range` with the jurisdiction quartile convention from
+    `regulatory.benchmarking_method(jurisdiction, period)`; tested result = latest `tnmm_calculations.pli_value`;
+    `regulatory.position_in_range` → within_range/below_range/above_range; too-few/no observations →
+    insufficient_data; no tested result → review_required; freshness via `regulatory.evaluate_period_
+    compatibility`. Deterministic — the LLM never decides range membership (§44).
+  - `benchmark_results` table (min/LQ/median/UQ/max + statistical_method + n + tested_result + position +
+    jurisdiction + freshness) via create_all — records method + jurisdiction for reproducibility (§72). Endpoints:
+    POST `/benchmark-sets/{id}/compute-range` + GET `/benchmark-sets/{id}/range`.
+  - Frontend: the Conclusion view — arm's-length range (min/LQ/median/UQ/max) + tested result + within/below/above
+    status (colored) + benchmark freshness.
+  - **Verification:** `test_financial_range.py` **5 passed** (within via the Class 1 engine; below; insufficient_
+    data when <4; review_required without a tested result; persisted + fetchable). `tsc` + `pnpm build` clean.
+    **Full backend suite 370 passed** (365 + 5).
+  - Acceptance (S12): range via the jurisdiction's Class 1 method (not hard-coded) ✓ · tested compared
+    deterministically → within/below/above/insufficient/review ✓ · freshness vs Class 1 refresh ✓ · reproducible,
+    records method + version ✓.

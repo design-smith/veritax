@@ -29,6 +29,7 @@ from ..financial_classification import CLASSIFICATIONS, ClassificationSuggester
 from ..financial_intake import CANONICAL_FIELDS, detect_columns, header_signature, parse_financial_file
 from ..financial_mapping import ColumnMappingSuggester, find_saved_mapping, save_mapping
 from ..far_builder import build_far_profile, derive_characterization
+from ..financial_range import compute_range
 from ..financial_reconciliation import reconcile
 from ..financial_segments import (
     ADJUSTMENT_TYPES,
@@ -48,6 +49,7 @@ from ..financial_tnmm import PLI_TYPES, compute_pli
 from ..ingest import get_or_create_uploaded_source, store_upload
 from ..models import (
     BenchmarkComparable,
+    BenchmarkResult,
     BenchmarkSet,
     Engagement,
     FinancialAdjustment,
@@ -1107,3 +1109,57 @@ async def delete_benchmark_set(
     bs = await _owned_benchmark_set(session, set_id, user)
     await session.delete(bs)
     await session.commit()
+
+
+# ── Arm's-length range & conclusion (S12, §40-44) — reuses the Class 1 engine ──
+class BenchmarkResultRead(BaseModel):
+    id: uuid.UUID
+    benchmark_set_id: uuid.UUID
+    minimum: float | None
+    lower_quartile: float | None
+    median: float | None
+    upper_quartile: float | None
+    maximum: float | None
+    statistical_method: str
+    n: int
+    tested_result: float | None
+    position: str
+    jurisdiction: str | None
+    freshness_status: str | None
+    created_at: datetime | None
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+@router.post("/benchmark-sets/{set_id}/compute-range", response_model=BenchmarkResultRead, status_code=201)
+async def compute_benchmark_range(
+    set_id: uuid.UUID,
+    session: AsyncSession = Depends(get_session),
+    user: AuthUser = Depends(get_current_user),
+) -> BenchmarkResultRead:
+    bs = await _owned_benchmark_set(session, set_id, user)
+    r = await compute_range(session, bs)   # deterministic; reuses the Class 1 quartile/statistical/freshness engine
+    result = BenchmarkResult(
+        benchmark_set_id=bs.id, minimum=r["minimum"], lower_quartile=r["lower_quartile"], median=r["median"],
+        upper_quartile=r["upper_quartile"], maximum=r["maximum"], statistical_method=r["statistical_method"],
+        n=r["n"], tested_result=r["tested_result"], position=r["position"], jurisdiction=r["jurisdiction"],
+        freshness_status=r["freshness_status"],
+    )
+    session.add(result)
+    await session.commit()
+    await session.refresh(result)
+    return BenchmarkResultRead.model_validate(result)
+
+
+@router.get("/benchmark-sets/{set_id}/range", response_model=BenchmarkResultRead | None)
+async def get_benchmark_range(
+    set_id: uuid.UUID,
+    session: AsyncSession = Depends(get_session),
+    user: AuthUser = Depends(get_current_user),
+) -> BenchmarkResultRead | None:
+    bs = await _owned_benchmark_set(session, set_id, user)
+    latest = (await session.execute(
+        select(BenchmarkResult).where(BenchmarkResult.benchmark_set_id == bs.id)
+        .order_by(BenchmarkResult.created_at.desc()).limit(1)
+    )).scalar_one_or_none()
+    return BenchmarkResultRead.model_validate(latest) if latest else None
