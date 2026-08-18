@@ -13,6 +13,7 @@ from sqlalchemy import func, insert, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from .financial_intake import ParsedFinancials, derive_from_mapping
+from .financial_validation import validate_rows
 from .models import FinancialDataset, FinancialRow
 
 
@@ -34,15 +35,21 @@ async def create_dataset(
 
     if parsed.rows:
         locator_base = parsed.sheet or source_filename
-        rows = []
-        for r in parsed.rows:
-            d = derive_from_mapping(r.raw, mapping)
-            rows.append({
+        derived = [derive_from_mapping(r.raw, mapping) for r in parsed.rows]
+        for d, r in zip(derived, parsed.rows):
+            d["currency"] = d["currency"] or currency
+            d["period"] = d["period"] or period
+        issues, summary = validate_rows([{**d, "raw": r.raw} for d, r in zip(derived, parsed.rows)], mapping)
+        ds.diagnostics = summary
+        await session.execute(insert(FinancialRow), [
+            {
                 "dataset_id": ds.id, "row_index": r.row_index, **d,
-                "currency": d["currency"] or currency, "period": d["period"] or period,
-                "source_locator": f"{locator_base}!Row {r.row_index}", "raw": r.raw,
-            })
-        await session.execute(insert(FinancialRow), rows)
+                "source_locator": f"{locator_base}!Row {r.row_index}", "raw": r.raw, "issues": iss,
+            }
+            for d, r, iss in zip(derived, parsed.rows, issues)
+        ])
+    else:
+        _, ds.diagnostics = validate_rows([], mapping)
     return ds
 
 
@@ -53,13 +60,16 @@ async def reapply_mapping(session: AsyncSession, dataset: FinancialDataset, mapp
     rows = (await session.execute(
         select(FinancialRow.id, FinancialRow.raw).where(FinancialRow.dataset_id == dataset.id)
     )).all()
-    updates = []
-    for rid, raw in rows:
+    derived = []
+    for _rid, raw in rows:
         d = derive_from_mapping(raw, mapping)
-        updates.append({
-            "id": rid, **d,
-            "currency": d["currency"] or dataset.currency, "period": d["period"] or dataset.period,
-        })
+        d["currency"] = d["currency"] or dataset.currency
+        d["period"] = d["period"] or dataset.period
+        derived.append(d)
+    issues, summary = validate_rows([{**d, "raw": raw} for d, (_rid, raw) in zip(derived, rows)], mapping)
+    dataset.diagnostics = summary
+    updates = [{"id": rid, **d, "issues": iss}
+               for d, (rid, _raw), iss in zip(derived, rows, issues)]
     if updates:
         await session.execute(update(FinancialRow), updates)
 

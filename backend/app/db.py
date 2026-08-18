@@ -129,6 +129,13 @@ async def init_db(eng=engine) -> None:
             await conn.execute(text(
                 "ALTER TABLE financial_datasets ADD COLUMN IF NOT EXISTS column_mapping jsonb"
             ))
+            # Class 3 S4: validation diagnostics (dataset summary + per-row issue flags).
+            await conn.execute(text(
+                "ALTER TABLE financial_datasets ADD COLUMN IF NOT EXISTS diagnostics jsonb"
+            ))
+            await conn.execute(text(
+                "ALTER TABLE financial_rows ADD COLUMN IF NOT EXISTS issues jsonb NOT NULL DEFAULT '[]'::jsonb"
+            ))
             log.info("db init: idempotent column updates ready")
 
         async with async_sessionmaker(eng, expire_on_commit=False)() as session:

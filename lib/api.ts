@@ -466,6 +466,13 @@ export interface CurrencyTotal {
   row_count: number
   total_amount: number | null
 }
+export interface FinancialDiagnostics {
+  status: string
+  total_rows: number
+  rows_with_issues: number
+  issue_counts: Record<string, number>
+  missing_required_columns: string[]
+}
 export interface FinancialDatasetRead {
   id: string
   engagement_id: string
@@ -480,6 +487,7 @@ export interface FinancialDatasetRead {
   detected_columns?: Record<string, string> | null
   status: string
   row_count: number
+  diagnostics?: FinancialDiagnostics | null
   totals_by_currency: CurrencyTotal[]
 }
 export interface FinancialRowRead {
@@ -495,6 +503,7 @@ export interface FinancialRowRead {
   period: string | null
   source_locator: string
   raw: Record<string, string>
+  issues: string[]
 }
 export interface FinancialRowsPage {
   dataset_id: string

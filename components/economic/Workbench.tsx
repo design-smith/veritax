@@ -6,7 +6,7 @@
 // source-linked rows). Later slices fill Segmentation / TNMM / Benchmark / Conclusion.
 
 import { useCallback, useEffect, useRef, useState } from "react"
-import { FileSpreadsheet, Layers, Calculator, BarChart3, Flag, Info, Upload, Loader2, Columns3, Sparkles } from "lucide-react"
+import { FileSpreadsheet, Layers, Calculator, BarChart3, Flag, Info, Upload, Loader2, Columns3, Sparkles, AlertTriangle } from "lucide-react"
 import { api, type FinancialDatasetRead, type FinancialRowRead, type FinancialMappingRead } from "@/lib/api"
 
 export type WorkbenchView = "financials" | "segmentation" | "tnmm" | "benchmark" | "conclusion"
@@ -29,6 +29,7 @@ const PLACEHOLDER: Record<Exclude<WorkbenchView, "financials">, { title: string;
 const DATASET_TYPES = ["trial_balance", "general_ledger", "segmented_pl", "financial_statements", "management_accounts", "invoice_population"]
 const fmtType = (t: string) => t.replace(/_/g, " ")
 const fmtNum = (n: number | null) => (n === null ? "—" : n.toLocaleString(undefined, { maximumFractionDigits: 2 }))
+const fmtIssue = (code: string) => code.replace(/_/g, " ")
 
 const toolbarBtn: React.CSSProperties = {
   display: "inline-flex", alignItems: "center", gap: "0.375rem", height: "1.75rem", padding: "0 0.625rem",
@@ -216,6 +217,9 @@ function DatasetCard({ ds, open, onToggle }: { ds: FinancialDatasetRead; open: b
           </div>
           <div style={{ fontSize: "var(--font-text-xs-size)", color: "var(--color-text-tertiary)", marginTop: "0.125rem" }}>
             {fmtType(ds.dataset_type)}{ds.period ? ` · ${ds.period}` : ""} · {ds.row_count.toLocaleString()} rows
+            {(ds.diagnostics?.rows_with_issues ?? 0) > 0 && (
+              <span style={{ color: "var(--color-text-caution-soft, #8a5a00)" }}> · {ds.diagnostics!.rows_with_issues} flagged</span>
+            )}
           </div>
         </div>
         <div style={{ display: "flex", gap: "0.875rem", flexShrink: 0 }}>
@@ -239,6 +243,19 @@ function DatasetCard({ ds, open, onToggle }: { ds: FinancialDatasetRead; open: b
               <Sparkles size={13} /> Suggest
             </button>
           </div>
+
+          {/* Validation diagnostics (§15) — invalid rows are flagged, never dropped */}
+          {ds.diagnostics && (ds.diagnostics.rows_with_issues > 0 || ds.diagnostics.missing_required_columns.length > 0) && (
+            <div style={{ display: "flex", alignItems: "center", gap: "0.5rem", flexWrap: "wrap", padding: "0.625rem 1.125rem", borderBottom: "1px solid var(--color-border-subtle)", background: "var(--color-background-caution-soft, #fff8e5)", fontSize: "var(--font-text-xs-size)", color: "var(--color-text-caution-soft, #8a5a00)" }}>
+              <AlertTriangle size={13} />
+              {ds.diagnostics.missing_required_columns.length > 0 && (
+                <span>Missing required column(s): {ds.diagnostics.missing_required_columns.join(", ")}.</span>
+              )}
+              {Object.entries(ds.diagnostics.issue_counts).map(([code, n]) => (
+                <span key={code} style={{ padding: "0.0625rem 0.375rem", borderRadius: "9999px", background: "var(--alpha-06)" }}>{fmtIssue(code)} ×{n}</span>
+              ))}
+            </div>
+          )}
 
           {showMapping && mapping && (
             <div style={{ padding: "0.875rem 1.125rem", borderBottom: "1px solid var(--color-border-subtle)", background: "var(--color-background)" }}>
@@ -272,7 +289,7 @@ function DatasetCard({ ds, open, onToggle }: { ds: FinancialDatasetRead; open: b
               <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "var(--font-text-xs-size)" }}>
                 <thead>
                   <tr style={{ color: "var(--color-text-tertiary)", textAlign: "left" }}>
-                    {["Account", "Name", "BU", "Amount", "Ccy", "Source"].map(h => (
+                    {["Account", "Name", "BU", "Amount", "Ccy", "Source", "Issues"].map(h => (
                       <th key={h} style={{ padding: "0.5rem 1.125rem", fontWeight: "var(--font-weight-medium)", borderBottom: "1px solid var(--color-border-subtle)" }}>{h}</th>
                     ))}
                   </tr>
@@ -286,6 +303,11 @@ function DatasetCard({ ds, open, onToggle }: { ds: FinancialDatasetRead; open: b
                       <td style={{ padding: "0.4375rem 1.125rem", borderBottom: "1px solid var(--color-border-subtle)", textAlign: "right", fontVariantNumeric: "tabular-nums" }}>{fmtNum(r.amount)}</td>
                       <td style={{ padding: "0.4375rem 1.125rem", borderBottom: "1px solid var(--color-border-subtle)" }}>{r.currency ?? "—"}</td>
                       <td style={{ padding: "0.4375rem 1.125rem", borderBottom: "1px solid var(--color-border-subtle)", color: "var(--color-text-tertiary)" }} title="Traces to the original source cell">{r.source_locator}</td>
+                      <td style={{ padding: "0.4375rem 1.125rem", borderBottom: "1px solid var(--color-border-subtle)" }}>
+                        {r.issues.length > 0
+                          ? <span style={{ color: "var(--color-text-caution-soft, #8a5a00)" }} title={r.issues.map(fmtIssue).join(", ")}>{r.issues.map(fmtIssue).join(", ")}</span>
+                          : <span style={{ color: "var(--color-text-tertiary)" }}>—</span>}
+                      </td>
                     </tr>
                   ))}
                 </tbody>

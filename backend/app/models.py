@@ -1130,6 +1130,7 @@ class FinancialDataset(Base):
     currency: Mapped[str | None] = mapped_column(Text, nullable=True)
     columns: Mapped[list] = mapped_column(JSONB, nullable=False, default=list)   # detected header columns (raw)
     column_mapping: Mapped[dict | None] = mapped_column(JSONB, nullable=True)    # effective {canonical_field: header} (S3)
+    diagnostics: Mapped[dict | None] = mapped_column(JSONB, nullable=True)       # validation summary (S4, §15)
     schema_version: Mapped[str] = mapped_column(Text, nullable=False, default="1")
     status: Mapped[str] = mapped_column(Text, nullable=False, default="ready")   # §64 lifecycle (v1: ready)
     row_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
@@ -1158,6 +1159,7 @@ class FinancialRow(Base):
     period: Mapped[str | None] = mapped_column(Text, nullable=True)
     source_locator: Mapped[str] = mapped_column(Text, nullable=False)    # "<sheet>!Row <n>" (§11)
     raw: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict)  # original cells by header — immutable (§9)
+    issues: Mapped[list] = mapped_column(JSONB, nullable=False, default=list)  # validation issue codes (S4, §15)
 
 
 class FinancialColumnMapping(Base):

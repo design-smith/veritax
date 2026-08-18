@@ -56,6 +56,7 @@ class DatasetRead(BaseModel):
     detected_columns: dict[str, str] | None = None
     status: str
     row_count: int
+    diagnostics: dict | None = None
     totals_by_currency: list[CurrencyTotal] = []
 
     model_config = ConfigDict(from_attributes=True)
@@ -74,6 +75,7 @@ class RowRead(BaseModel):
     period: str | None
     source_locator: str
     raw: dict
+    issues: list[str] = []
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -100,7 +102,7 @@ async def _to_read(session: AsyncSession, ds: FinancialDataset, *, detected: dic
         id=ds.id, engagement_id=ds.engagement_id, document_id=ds.document_id, entity_id=ds.entity_id,
         dataset_type=ds.dataset_type, source_filename=ds.source_filename, source_sheet=ds.source_sheet,
         period=ds.period, currency=ds.currency, columns=list(ds.columns or []), detected_columns=detected,
-        status=ds.status, row_count=ds.row_count,
+        status=ds.status, row_count=ds.row_count, diagnostics=ds.diagnostics,
         totals_by_currency=[CurrencyTotal(**t) for t in summary["totals_by_currency"]],
     )
 
@@ -182,6 +184,18 @@ async def get_financial_rows(
         dataset_id=ds.id, total=ds.row_count, limit=limit, offset=offset,
         rows=[RowRead.model_validate(r) for r in rows],
     )
+
+
+@router.get("/financial-datasets/{dataset_id}/diagnostics")
+async def get_diagnostics(
+    dataset_id: uuid.UUID,
+    session: AsyncSession = Depends(get_session),
+    user: AuthUser = Depends(get_current_user),
+) -> dict:
+    """Validation summary for the dataset (§15): status, counts by issue type, missing required columns."""
+    ds = await _owned_dataset(session, dataset_id, user)
+    return ds.diagnostics or {"status": "passed", "total_rows": ds.row_count, "rows_with_issues": 0,
+                              "issue_counts": {}, "missing_required_columns": []}
 
 
 class MappingRead(BaseModel):

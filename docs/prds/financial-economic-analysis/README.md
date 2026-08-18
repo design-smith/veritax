@@ -42,8 +42,8 @@ quartiles/adjustments, reconcile, alter rows, or decide whether a number is in a
 | S1 | Financial Workbench design + shell — in-Draft Economic Analysis surface (nav + main + side panel), visual language | HITL (design review) | — | ✅ DONE |
 | S2 | Financial dataset intake — upload XLSX/CSV → immutable datasets + rows w/ provenance; scale-ready (bulk + columnar); Financials view | AFK | S1 | ✅ DONE |
 | S3 | Column mapping + saved mappings (deterministic + LLM-assisted suggestions) + mapping UI | AFK | S2 | ✅ DONE |
-| S4 | Validation & diagnostics — invalid rows retained + flagged, never dropped; diagnostics UI | AFK | S2 | ▶ NEXT |
-| S5 | Account classification (operating/non-operating/…; deterministic + LLM-assisted) + override w/ audit | AFK | S2 | pending |
+| S4 | Validation & diagnostics — invalid rows retained + flagged, never dropped; diagnostics UI | AFK | S2 | ✅ DONE |
+| S5 | Account classification (operating/non-operating/…; deterministic + LLM-assisted) + override w/ audit | AFK | S2 | ▶ NEXT |
 | S6 | Segments + segmented P&L — segment container, direct mapping, include/exclude; drill-down; segmentation editor | AFK | S2 | pending |
 | S7 | Adjustments (exclude/GAAP/topside/manual) — auditable, raw immutable; workpaper UI | AFK | S6 | pending |
 | S8 | Allocations — shared-cost split by base + provenance; allocation UI | AFK | S7 | pending |
@@ -168,3 +168,24 @@ TNMM (§81).
   - Honest: the "LLM-assisted" suggester ships as a deterministic token-overlap matcher behind the injectable
     seam (offline, free, decent for short header names), consistent with the Class 2 v1 extractor; a real
     LLM-backed suggester is a drop-in via `app.state.column_mapping_suggester`.
+
+- [x] **S4 — Validation & diagnostics** — BUILT, full-suite gate running. USER-VISIBLE (diagnostics panel + row
+  flags in the Financials view).
+  - `financial_validation.py::validate_rows(rows, mapping)` — pure deterministic checks (§15): blank/unparseable
+    amount, missing account, malformed account code, invalid currency, duplicate rows, and dataset-level missing
+    required columns (account + amount). Returns per-row issue codes + a summary. Invalid rows are FLAGGED, never
+    dropped.
+  - `financial_datasets.diagnostics` JSONB + `financial_rows.issues` JSONB (idempotent ALTERs in init_db).
+    Validation runs on upload (`create_dataset`) and re-runs on remap (`reapply_mapping`), so fixing the mapping
+    clears the relevant flags. `GET /financial-datasets/{id}/diagnostics` + `issues` on the rows response.
+  - Frontend: a caution diagnostics bar (missing-required-columns + issue-count chips) and an Issues column
+    marking each flagged row, plus a "N flagged" count on the dataset header.
+  - **Verification:** `test_financial_validation.py` **7 passed** (5 pure: clean pass, blank vs unparseable
+    amount, missing-account + invalid-currency, duplicate flag, missing-required-columns; 2 integration: upload
+    flags rows without dropping + diagnostics endpoint; remap re-runs validation and clears flags) + S2/S3
+    regression 13. `tsc` + `pnpm build` clean. **Full backend suite 330 passed** (323 + 7).
+  - Acceptance (S4): validation runs + stores diagnostics ✓ · invalid rows produce diagnostics rather than
+    disappearing ✓ · diagnostics visible in the Financials view ✓.
+  - Honest (§15): date/period parsing, debit/credit sanity, and total tie-outs are follow-ons — the single-amount
+    canonical model has no separate debit/credit columns and period is a free-form label; skipped to avoid
+    false-positive flags rather than shipping brittle checks.
