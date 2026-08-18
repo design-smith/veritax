@@ -643,6 +643,20 @@ export interface BenchmarkResultRead {
   freshness_status: string | null
   created_at: string | null
 }
+export const TP_TARGET_BASES = ["median", "lower_quartile", "upper_quartile"] as const
+export interface TPAdjustmentRead {
+  id: string
+  analysis_id: string
+  current_result: number | null
+  target_result: number | null
+  target_basis: string
+  adjustment_amount: number | null
+  currency: string | null
+  status: string
+  reason: string | null
+  created_by: string | null
+  created_at: string | null
+}
 export const SEGMENT_RULE_FIELDS = ["account_code", "account_name", "cost_center", "business_unit"] as const
 export const SEGMENT_RULE_OPERATORS = ["equals", "in", "contains"] as const
 export interface FinancialReconciliationRead {
@@ -999,6 +1013,20 @@ const realApi = {
 
   getBenchmarkRange: (setId: string): Promise<BenchmarkResultRead | null> =>
     afetch(`${BASE}/benchmark-sets/${setId}/range`).then(r => parse<BenchmarkResultRead | null>(r)),
+
+  // Class 3 — TP adjustment
+  createTpAdjustment: (analysisId: string, body: { target_basis: string; target_value?: number; currency?: string; reason?: string }): Promise<TPAdjustmentRead> =>
+    afetch(`${BASE}/tnmm-analyses/${analysisId}/tp-adjustment`, {
+      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
+    }).then(r => parse<TPAdjustmentRead>(r)),
+
+  listTpAdjustments: (analysisId: string): Promise<TPAdjustmentRead[]> =>
+    afetch(`${BASE}/tnmm-analyses/${analysisId}/tp-adjustments`).then(r => parse<TPAdjustmentRead[]>(r)),
+
+  patchTpAdjustment: (adjustmentId: string, status: string): Promise<TPAdjustmentRead> =>
+    afetch(`${BASE}/tp-adjustments/${adjustmentId}`, {
+      method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ status }),
+    }).then(r => parse<TPAdjustmentRead>(r)),
 }
 
 // On the public /demo route, serve canned data from lib/demo-api instead of the network so the real

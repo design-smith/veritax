@@ -1391,6 +1391,27 @@ class BenchmarkResult(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
+class TPAdjustment(Base):
+    """An illustrative transfer-pricing adjustment to a practitioner-chosen target (Class 3 §45-47). Computed
+    deterministically ((target − current) × revenue); never auto-posted — an approval state gates it (§45,§47)."""
+
+    __tablename__ = "tp_adjustments"
+
+    id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
+    analysis_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("tnmm_analyses.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    current_result: Mapped[float | None] = mapped_column(Numeric, nullable=True)
+    target_result: Mapped[float | None] = mapped_column(Numeric, nullable=True)
+    target_basis: Mapped[str] = mapped_column(Text, nullable=False)   # median|lower_quartile|upper_quartile|custom
+    adjustment_amount: Mapped[float | None] = mapped_column(Numeric, nullable=True)
+    currency: Mapped[str | None] = mapped_column(Text, nullable=True)
+    status: Mapped[str] = mapped_column(Text, nullable=False, default="potential_adjustment")
+    reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_by: Mapped[uuid.UUID | None] = mapped_column(nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
 class FinancialColumnMapping(Base):
     """A saved, versioned column mapping (Class 3 §14) keyed by user + header signature, so a repeat engagement
     with the same source format reuses last time's mapping. Stores {canonical_field: source_header}."""

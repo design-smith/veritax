@@ -29,7 +29,7 @@ from ..financial_classification import CLASSIFICATIONS, ClassificationSuggester
 from ..financial_intake import CANONICAL_FIELDS, detect_columns, header_signature, parse_financial_file
 from ..financial_mapping import ColumnMappingSuggester, find_saved_mapping, save_mapping
 from ..far_builder import build_far_profile, derive_characterization
-from ..financial_range import compute_range
+from ..financial_range import TARGET_BASES, compute_range, compute_tp_adjustment
 from ..financial_reconciliation import reconcile
 from ..financial_segments import (
     ADJUSTMENT_TYPES,
@@ -62,6 +62,7 @@ from ..models import (
     SourceKind,
     TNMMAnalysis,
     TNMMCalculation,
+    TPAdjustment,
 )
 from ..storage import Storage
 
@@ -1163,3 +1164,93 @@ async def get_benchmark_range(
         .order_by(BenchmarkResult.created_at.desc()).limit(1)
     )).scalar_one_or_none()
     return BenchmarkResultRead.model_validate(latest) if latest else None
+
+
+# ── TP adjustment (S13, §45-47) ───────────────────────────────────────────────
+TP_ADJUSTMENT_STATUSES = (
+    "none_required", "potential_adjustment", "practitioner_confirmed", "rejected", "implemented",
+)
+
+
+class TPAdjustmentCreate(BaseModel):
+    target_basis: str
+    target_value: float | None = None
+    currency: str | None = None
+    reason: str | None = None
+
+
+class TPAdjustmentPatch(BaseModel):
+    status: str
+
+
+class TPAdjustmentRead(BaseModel):
+    id: uuid.UUID
+    analysis_id: uuid.UUID
+    current_result: float | None
+    target_result: float | None
+    target_basis: str
+    adjustment_amount: float | None
+    currency: str | None
+    status: str
+    reason: str | None
+    created_by: uuid.UUID | None
+    created_at: datetime | None
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+@router.post("/tnmm-analyses/{analysis_id}/tp-adjustment", response_model=TPAdjustmentRead, status_code=201)
+async def create_tp_adjustment(
+    analysis_id: uuid.UUID,
+    body: TPAdjustmentCreate,
+    session: AsyncSession = Depends(get_session),
+    user: AuthUser = Depends(get_current_user),
+) -> TPAdjustmentRead:
+    a = await _owned_analysis(session, analysis_id, user)
+    if body.target_basis not in TARGET_BASES:
+        raise HTTPException(status_code=422, detail=f"unknown target basis: {body.target_basis}")
+    if body.target_basis == "custom" and body.target_value is None:
+        raise HTTPException(status_code=422, detail="custom target requires target_value")
+    r = await compute_tp_adjustment(session, a, body.target_basis, body.target_value)
+    adj = TPAdjustment(
+        analysis_id=a.id, current_result=r["current_result"], target_result=r["target_result"],
+        target_basis=body.target_basis, adjustment_amount=r["adjustment_amount"], currency=body.currency,
+        status=r["status"], reason=body.reason, created_by=user.id,
+    )
+    session.add(adj)
+    await session.commit()
+    await session.refresh(adj)
+    return TPAdjustmentRead.model_validate(adj)
+
+
+@router.get("/tnmm-analyses/{analysis_id}/tp-adjustments", response_model=list[TPAdjustmentRead])
+async def list_tp_adjustments(
+    analysis_id: uuid.UUID,
+    session: AsyncSession = Depends(get_session),
+    user: AuthUser = Depends(get_current_user),
+) -> list[TPAdjustmentRead]:
+    a = await _owned_analysis(session, analysis_id, user)
+    rows = (await session.execute(
+        select(TPAdjustment).where(TPAdjustment.analysis_id == a.id).order_by(TPAdjustment.created_at)
+    )).scalars().all()
+    return [TPAdjustmentRead.model_validate(x) for x in rows]
+
+
+@router.patch("/tp-adjustments/{adjustment_id}", response_model=TPAdjustmentRead)
+async def patch_tp_adjustment(
+    adjustment_id: uuid.UUID,
+    body: TPAdjustmentPatch,
+    session: AsyncSession = Depends(get_session),
+    user: AuthUser = Depends(get_current_user),
+) -> TPAdjustmentRead:
+    if body.status not in TP_ADJUSTMENT_STATUSES:
+        raise HTTPException(status_code=422, detail=f"unknown status: {body.status}")
+    adj = await session.get(TPAdjustment, adjustment_id)
+    if adj is None:
+        raise HTTPException(status_code=404, detail="TP adjustment not found")
+    analysis = await session.get(TNMMAnalysis, adj.analysis_id)
+    await assert_owner(session, analysis.engagement_id, user)
+    adj.status = body.status   # practitioner approval transition only — never auto-posted (§45,§47)
+    await session.commit()
+    await session.refresh(adj)
+    return TPAdjustmentRead.model_validate(adj)

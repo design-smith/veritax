@@ -10,7 +10,8 @@ import { FileSpreadsheet, Layers, Calculator, BarChart3, Flag, Info, Upload, Loa
 import { api, FINANCIAL_CLASSIFICATIONS, SEGMENT_RULE_FIELDS, SEGMENT_RULE_OPERATORS, FINANCIAL_ADJUSTMENT_TYPES, FINANCIAL_ALLOCATION_BASES, FINANCIAL_PLI_TYPES,
   type FinancialDatasetRead, type FinancialRowRead, type FinancialMappingRead,
   type FinancialSegmentRead, type SegmentPnL, type FinancialReconciliationRead, type TNMMAnalysisRead,
-  type BenchmarkSetRead, type ComparableInput, type BenchmarkResultRead } from "@/lib/api"
+  type BenchmarkSetRead, type ComparableInput, type BenchmarkResultRead,
+  TP_TARGET_BASES, type TPAdjustmentRead } from "@/lib/api"
 
 export type WorkbenchView = "financials" | "segmentation" | "tnmm" | "benchmark" | "conclusion"
 
@@ -871,6 +872,8 @@ function ConclusionView({ engagementId }: { engagementId: string }) {
   const [sets, setSets] = useState<BenchmarkSetRead[]>([])
   const [setId, setSetId] = useState("")
   const [result, setResult] = useState<BenchmarkResultRead | null>(null)
+  const [adjustments, setAdjustments] = useState<TPAdjustmentRead[]>([])
+  const [targetBasis, setTargetBasis] = useState<string>(TP_TARGET_BASES[0])
 
   const refreshAnalyses = useCallback(async () => {
     const an = await api.listTnmmAnalyses(engagementId)
@@ -890,7 +893,18 @@ function ConclusionView({ engagementId }: { engagementId: string }) {
   }, [setId])
   useEffect(() => { void loadRange() }, [loadRange])
 
+  const loadAdjustments = useCallback(async () => {
+    setAdjustments(analysisId ? await api.listTpAdjustments(analysisId) : [])
+  }, [analysisId])
+  useEffect(() => { void loadAdjustments() }, [loadAdjustments])
+
   async function compute() { if (setId) { setResult(await api.computeBenchmarkRange(setId)); } }
+  async function calcAdjustment() {
+    if (!analysisId) return
+    await api.createTpAdjustment(analysisId, { target_basis: targetBasis, currency: result?.jurisdiction ? undefined : undefined })
+    await loadAdjustments()
+  }
+  async function setAdjStatus(id: string, status: string) { await api.patchTpAdjustment(id, status); await loadAdjustments() }
 
   const analysis = analyses.find(a => a.id === analysisId)
   const pos = result ? POSITION_LABEL[result.position] : null
@@ -936,6 +950,39 @@ function ConclusionView({ engagementId }: { engagementId: string }) {
             )}
           </div>
         )}
+
+      {/* TP adjustment (§45-47) — illustrative, to a practitioner-chosen target; approval state, never auto-posted */}
+      {result && (
+        <div style={{ border: "1px solid var(--color-border)", borderRadius: "0.75rem", overflow: "hidden", background: "var(--color-surface)" }}>
+          <div style={{ display: "flex", gap: "0.375rem", alignItems: "center", padding: "0.875rem 1.125rem", borderBottom: "1px solid var(--color-border-subtle)" }}>
+            <span style={{ fontSize: "var(--font-text-sm-size)", fontWeight: "var(--font-weight-semibold)", color: "var(--color-text)" }}>Transfer-pricing adjustment</span>
+            <select value={targetBasis} onChange={e => setTargetBasis(e.target.value)} style={{ ...miniSelect, marginLeft: "auto" }}>{TP_TARGET_BASES.map(b => <option key={b} value={b}>to {b.replace(/_/g, " ")}</option>)}</select>
+            <button type="button" onClick={calcAdjustment} style={toolbarBtn}><Calculator size={13} /> Calculate</button>
+          </div>
+          <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "var(--font-text-xs-size)" }}>
+            <tbody>
+              {adjustments.map(adj => (
+                <tr key={adj.id} style={{ color: "var(--color-text-secondary)" }}>
+                  <td style={{ padding: "0.4375rem 1.125rem", borderBottom: "1px solid var(--color-border-subtle)" }}>to {adj.target_basis.replace(/_/g, " ")}</td>
+                  <td style={{ padding: "0.4375rem 1.125rem", borderBottom: "1px solid var(--color-border-subtle)" }}>{fmtPct(adj.current_result)} → {fmtPct(adj.target_result)}</td>
+                  <td style={{ padding: "0.4375rem 1.125rem", borderBottom: "1px solid var(--color-border-subtle)", textAlign: "right", fontVariantNumeric: "tabular-nums", color: "var(--color-text)" }}>{fmtNum(adj.adjustment_amount)}</td>
+                  <td style={{ padding: "0.4375rem 1.125rem", borderBottom: "1px solid var(--color-border-subtle)" }}>{adj.status.replace(/_/g, " ")}</td>
+                  <td style={{ padding: "0.4375rem 1.125rem", borderBottom: "1px solid var(--color-border-subtle)", textAlign: "right" }}>
+                    {adj.status === "potential_adjustment" && (
+                      <span style={{ display: "inline-flex", gap: "0.375rem" }}>
+                        <button type="button" onClick={() => void setAdjStatus(adj.id, "practitioner_confirmed")} style={toolbarBtn}>Confirm</button>
+                        <button type="button" onClick={() => void setAdjStatus(adj.id, "rejected")} style={toolbarBtn}>Reject</button>
+                      </span>
+                    )}
+                    {adj.status === "practitioner_confirmed" && <button type="button" onClick={() => void setAdjStatus(adj.id, "implemented")} style={toolbarBtn}>Mark implemented</button>}
+                  </td>
+                </tr>
+              ))}
+              {adjustments.length === 0 && <tr><td colSpan={5} style={{ padding: "0.625rem 1.125rem", color: "var(--color-text-tertiary)" }}>No adjustment calculated. Pick a target and Calculate — nothing is posted automatically.</td></tr>}
+            </tbody>
+          </table>
+        </div>
+      )}
     </div>
   )
 }

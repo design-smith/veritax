@@ -51,8 +51,8 @@ quartiles/adjustments, reconcile, alter rows, or decide whether a number is in a
 | S10 | TNMM core — tested party (practitioner-selected, links FAR) + PLI registry (deterministic) + calc + lifecycle; TNMM UI | AFK | S6, S7, S8 | ✅ DONE |
 | S11 | Benchmark import — comparables + accepted/rejected + rejection log; benchmark UI | AFK | S10 | ✅ DONE |
 | S12 | Arm's-length range & conclusion (jurisdiction-aware) — REUSE Class 1 engine; within/below/above; conclusion UI | AFK | S11, S10 | ✅ DONE |
-| S13 | TP adjustment — illustrative adjustment to practitioner target, approval state, never auto-post; UI | AFK | S12 | ▶ NEXT |
-| S14 | Requirements integration — evaluate economic-analysis capabilities (not doc presence) + panel | AFK | S9, S12 | pending |
+| S13 | TP adjustment — illustrative adjustment to practitioner target, approval state, never auto-post; UI | AFK | S12 | ✅ DONE |
+| S14 | Requirements integration — evaluate economic-analysis capabilities (not doc presence) + panel | AFK | S9, S12 | ▶ NEXT |
 | S15 | Draft integration — Economic Analysis section from structured results (numbers never invented) | AFK | S12 | pending |
 | S16 | Risks integration — reconciliation gap / unsupported exclusion / stale benchmark / method mismatch / out-of-range / missing segmentation | AFK | S9, S12, S13 | pending |
 
@@ -336,3 +336,19 @@ TNMM (§81).
   - Acceptance (S12): range via the jurisdiction's Class 1 method (not hard-coded) ✓ · tested compared
     deterministically → within/below/above/insufficient/review ✓ · freshness vs Class 1 refresh ✓ · reproducible,
     records method + version ✓.
+
+- [x] **S13 — TP adjustment** — BUILT, full-suite gate running. USER-VISIBLE (TP-adjustment panel in Conclusion).
+  - `financial_range.py::compute_tp_adjustment` — deterministic (§45): pulls the latest BenchmarkResult for the
+    analysis + the latest TNMM revenue; `adjustment_amount = (target − current) × revenue`; target = median /
+    lower_quartile / upper_quartile / custom; status = `none_required` when within range else
+    `potential_adjustment`. `tp_adjustments` table (current/target/basis/amount/currency/status/reason/audit) via
+    create_all. NEVER auto-posts (§45,§47,§81) — implementation is only a practitioner status transition.
+  - `routers/financials.py`: POST `/tnmm-analyses/{id}/tp-adjustment` (compute+store) + GET list + PATCH
+    `/tp-adjustments/{id}` {status} (confirm/reject/implement, validated). Frontend: a TP-adjustment panel in the
+    Conclusion view — choose target, see the required adjustment (current→target + amount), confirm/reject/mark
+    implemented; nothing is posted automatically.
+  - **Verification:** `test_financial_tp_adjustment.py` **4 passed** (adjustment to median = (target−current)×
+    revenue; within_range → none_required; approval transitions never auto-posted; unknown basis/status 422).
+    `tsc` + `pnpm build` clean. **Full backend suite 374 passed** (370 + 4).
+  - Acceptance (S13): potential adjustment to an explicit practitioner-chosen target ✓ · reproducible w/ basis +
+    currency ✓ · practitioner approval required ✓ · no auto-post/legal conclusion ✓.

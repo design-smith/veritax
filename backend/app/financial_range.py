@@ -19,9 +19,10 @@ from regulatory import (
     position_in_range,
 )
 
-from .models import BenchmarkComparable, BenchmarkSet, TNMMAnalysis, TNMMCalculation
+from .models import BenchmarkComparable, BenchmarkResult, BenchmarkSet, TNMMAnalysis, TNMMCalculation
 
 _POSITION = {"within": "within_range", "below": "below_range", "above": "above_range"}
+TARGET_BASES = ("median", "lower_quartile", "upper_quartile", "custom")
 
 
 def comparable_observation(pli_values: list | None) -> float | None:
@@ -78,3 +79,31 @@ async def compute_range(session: AsyncSession, benchmark_set: BenchmarkSet) -> d
         "jurisdiction": analysis.jurisdiction if analysis else None,
         "freshness_status": freshness_status,
     }
+
+
+async def compute_tp_adjustment(session: AsyncSession, analysis: TNMMAnalysis, target_basis: str,
+                                target_value: float | None = None) -> dict:
+    """Illustrative adjustment to move the tested result to a chosen target (§45). Deterministic:
+    (target − current) × revenue. `none_required` when the tested result is already within range."""
+    result = (await session.execute(
+        select(BenchmarkResult).join(BenchmarkSet, BenchmarkResult.benchmark_set_id == BenchmarkSet.id)
+        .where(BenchmarkSet.analysis_id == analysis.id)
+        .order_by(BenchmarkResult.created_at.desc()).limit(1)
+    )).scalar_one_or_none()
+    revenue = (await session.execute(
+        select(TNMMCalculation.revenue).where(TNMMCalculation.analysis_id == analysis.id)
+        .order_by(TNMMCalculation.created_at.desc()).limit(1)
+    )).scalar()
+
+    current = float(result.tested_result) if result and result.tested_result is not None else None
+    target_map = {
+        "median": result.median if result else None,
+        "lower_quartile": result.lower_quartile if result else None,
+        "upper_quartile": result.upper_quartile if result else None,
+        "custom": target_value,
+    }
+    tv = target_map.get(target_basis)
+    target = float(tv) if tv is not None else None
+    adjustment = ((target - current) * float(revenue)) if (current is not None and target is not None and revenue is not None) else None
+    status = "none_required" if (result and result.position == "within_range") else "potential_adjustment"
+    return {"current_result": current, "target_result": target, "adjustment_amount": adjustment, "status": status}
