@@ -9,7 +9,14 @@ from __future__ import annotations
 from sqlalchemy import and_, false, func, not_, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from .models import FinancialAdjustment, FinancialDataset, FinancialRow, FinancialSegment, SegmentRule
+from .models import (
+    FinancialAdjustment,
+    FinancialAllocation,
+    FinancialDataset,
+    FinancialRow,
+    FinancialSegment,
+    SegmentRule,
+)
 
 RULE_FIELDS = ("account_code", "account_name", "cost_center", "business_unit")
 RULE_OPERATORS = ("equals", "in", "contains")
@@ -17,6 +24,9 @@ RULE_ACTIONS = ("include", "exclude")
 ADJUSTMENT_TYPES = (
     "exclude_non_operating", "reclassify", "gaap_adjustment", "topside_adjustment",
     "manual_adjustment", "tp_true_up",
+)
+ALLOCATION_BASES = (
+    "revenue", "headcount", "fte", "direct_cost", "time_spent", "units", "transaction_volume", "custom",
 )
 
 _FIELD_COL = {
@@ -87,17 +97,38 @@ async def segment_pnl(session: AsyncSession, segment: FinancialSegment) -> dict:
     lines.sort(key=lambda ln: ln["classification"])
     operating = next((ln["total"] for ln in lines if ln["classification"] == "operating"), 0.0)
 
-    # Adjustments (S7) are layered on top of the base P&L — raw rows are never touched (§75).
+    # Adjustments (S7) + allocations (S8) are layered on top of the base P&L — raw rows are never touched (§75).
     adjustments = await segment_adjustments(session, segment)
     adj_total = sum(float(a.adjustment_amount) for a in adjustments)
+    allocations = await segment_allocations(session, segment)
+    alloc_total = sum(float(a.allocated_amount) for a in allocations)
     return {
         "segment_id": str(segment.id), "name": segment.name, "currency": segment.currency,
         "lines": lines, "operating_result": operating,
         "total": sum(ln["total"] for ln in lines), "row_count": sum(ln["row_count"] for ln in lines),
         "adjustments": [_adjustment_dict(a) for a in adjustments],
         "adjustments_total": adj_total,
-        "adjusted_operating_result": operating + adj_total,
+        "allocations": [_allocation_dict(a) for a in allocations],
+        "allocations_total": alloc_total,
+        "adjusted_operating_result": operating + adj_total + alloc_total,
     }
+
+
+def _allocation_dict(a: FinancialAllocation) -> dict:
+    return {
+        "id": str(a.id), "cost_pool": a.cost_pool, "pool_amount": float(a.pool_amount),
+        "allocation_base": a.allocation_base, "allocation_percentage": float(a.allocation_percentage),
+        "allocated_amount": float(a.allocated_amount), "source": a.source, "reason": a.reason,
+        "created_by": str(a.created_by) if a.created_by else None,
+        "created_at": a.created_at.isoformat() if a.created_at else None,
+    }
+
+
+async def segment_allocations(session: AsyncSession, segment: FinancialSegment) -> list[FinancialAllocation]:
+    return list((await session.execute(
+        select(FinancialAllocation).where(FinancialAllocation.segment_id == segment.id)
+        .order_by(FinancialAllocation.created_at)
+    )).scalars().all())
 
 
 def _adjustment_dict(a: FinancialAdjustment) -> dict:

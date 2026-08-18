@@ -30,10 +30,12 @@ from ..financial_intake import CANONICAL_FIELDS, detect_columns, header_signatur
 from ..financial_mapping import ColumnMappingSuggester, find_saved_mapping, save_mapping
 from ..financial_segments import (
     ADJUSTMENT_TYPES,
+    ALLOCATION_BASES,
     RULE_ACTIONS,
     RULE_FIELDS,
     RULE_OPERATORS,
     segment_adjustments,
+    segment_allocations,
     segment_pnl,
     segment_rows,
 )
@@ -42,6 +44,7 @@ from ..ingest import get_or_create_uploaded_source, store_upload
 from ..models import (
     Engagement,
     FinancialAdjustment,
+    FinancialAllocation,
     FinancialDataset,
     FinancialRow,
     FinancialSegment,
@@ -617,4 +620,78 @@ async def delete_adjustment(
     seg = await session.get(FinancialSegment, adj.segment_id)
     await assert_owner(session, seg.engagement_id, user)
     await session.delete(adj)
+    await session.commit()
+
+
+# ── Allocations (S8, §22-23) ──────────────────────────────────────────────────
+class AllocationCreate(BaseModel):
+    cost_pool: str
+    pool_amount: float
+    allocation_base: str
+    allocation_percentage: float
+    source: str | None = None
+    reason: str | None = None
+
+
+class AllocationRead(BaseModel):
+    id: uuid.UUID
+    segment_id: uuid.UUID
+    cost_pool: str
+    pool_amount: float
+    allocation_base: str
+    allocation_percentage: float
+    allocated_amount: float
+    source: str | None
+    reason: str | None
+    created_by: uuid.UUID | None
+    created_at: datetime | None
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+@router.post("/financial-segments/{segment_id}/allocations", response_model=AllocationRead, status_code=201)
+async def add_allocation(
+    segment_id: uuid.UUID,
+    body: AllocationCreate,
+    session: AsyncSession = Depends(get_session),
+    user: AuthUser = Depends(get_current_user),
+) -> AllocationRead:
+    seg = await _owned_segment(session, segment_id, user)
+    if body.allocation_base not in ALLOCATION_BASES:
+        raise HTTPException(status_code=422, detail=f"unknown allocation base: {body.allocation_base}")
+    # Compute the allocated amount server-side — never trust a client-supplied result (§74).
+    allocated = round(body.pool_amount * body.allocation_percentage / 100.0, 2)
+    alloc = FinancialAllocation(
+        segment_id=seg.id, cost_pool=body.cost_pool, pool_amount=body.pool_amount,
+        allocation_base=body.allocation_base, allocation_percentage=body.allocation_percentage,
+        allocated_amount=allocated, source=body.source, reason=body.reason, created_by=user.id,
+    )
+    session.add(alloc)
+    await session.commit()
+    await session.refresh(alloc)
+    return AllocationRead.model_validate(alloc)
+
+
+@router.get("/financial-segments/{segment_id}/allocations", response_model=list[AllocationRead])
+async def list_allocations(
+    segment_id: uuid.UUID,
+    session: AsyncSession = Depends(get_session),
+    user: AuthUser = Depends(get_current_user),
+) -> list[AllocationRead]:
+    seg = await _owned_segment(session, segment_id, user)
+    return [AllocationRead.model_validate(a) for a in await segment_allocations(session, seg)]
+
+
+@router.delete("/financial-allocations/{allocation_id}", status_code=204)
+async def delete_allocation(
+    allocation_id: uuid.UUID,
+    session: AsyncSession = Depends(get_session),
+    user: AuthUser = Depends(get_current_user),
+) -> None:
+    alloc = await session.get(FinancialAllocation, allocation_id)
+    if alloc is None:
+        raise HTTPException(status_code=404, detail="allocation not found")
+    seg = await session.get(FinancialSegment, alloc.segment_id)
+    await assert_owner(session, seg.engagement_id, user)
+    await session.delete(alloc)
     await session.commit()

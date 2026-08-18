@@ -545,6 +545,18 @@ export interface SegmentAdjustment {
   created_by: string | null
   created_at: string | null
 }
+export interface SegmentAllocation {
+  id: string
+  cost_pool: string
+  pool_amount: number
+  allocation_base: string
+  allocation_percentage: number
+  allocated_amount: number
+  source: string | null
+  reason: string | null
+  created_by: string | null
+  created_at: string | null
+}
 export interface SegmentPnL {
   segment_id: string
   name: string
@@ -555,9 +567,12 @@ export interface SegmentPnL {
   row_count: number
   adjustments: SegmentAdjustment[]
   adjustments_total: number
+  allocations: SegmentAllocation[]
+  allocations_total: number
   adjusted_operating_result: number
 }
 export const FINANCIAL_ADJUSTMENT_TYPES = ["exclude_non_operating", "reclassify", "gaap_adjustment", "topside_adjustment", "manual_adjustment", "tp_true_up"] as const
+export const FINANCIAL_ALLOCATION_BASES = ["revenue", "headcount", "fte", "direct_cost", "time_spent", "units", "transaction_volume", "custom"] as const
 export const SEGMENT_RULE_FIELDS = ["account_code", "account_name", "cost_center", "business_unit"] as const
 export const SEGMENT_RULE_OPERATORS = ["equals", "in", "contains"] as const
 export interface FinancialRowsPage {
@@ -840,6 +855,14 @@ const realApi = {
 
   deleteSegmentAdjustment: (adjustmentId: string): Promise<void> =>
     afetch(`${BASE}/financial-adjustments/${adjustmentId}`, { method: "DELETE" }).then(parseVoid),
+
+  addSegmentAllocation: (segmentId: string, body: { cost_pool: string; pool_amount: number; allocation_base: string; allocation_percentage: number; source?: string; reason?: string }): Promise<SegmentAllocation> =>
+    afetch(`${BASE}/financial-segments/${segmentId}/allocations`, {
+      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
+    }).then(r => parse<SegmentAllocation>(r)),
+
+  deleteSegmentAllocation: (allocationId: string): Promise<void> =>
+    afetch(`${BASE}/financial-allocations/${allocationId}`, { method: "DELETE" }).then(parseVoid),
 }
 
 // On the public /demo route, serve canned data from lib/demo-api instead of the network so the real

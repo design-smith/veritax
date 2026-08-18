@@ -1232,6 +1232,29 @@ class FinancialAdjustment(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
+class FinancialAllocation(Base):
+    """A shared-cost allocation into a segment (Class 3 §22-23): a cost pool split by an allocation base. The
+    allocated amount is computed server-side (pool × percentage) and full provenance is preserved (pool, base,
+    percentage, source, result). Never mutates raw rows (§9)."""
+
+    __tablename__ = "financial_allocations"
+    __table_args__ = (Index("ix_financial_allocations_segment", "segment_id"),)
+
+    id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
+    segment_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("financial_segments.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    cost_pool: Mapped[str] = mapped_column(Text, nullable=False)
+    pool_amount: Mapped[float] = mapped_column(Numeric, nullable=False)
+    allocation_base: Mapped[str] = mapped_column(Text, nullable=False)   # revenue|headcount|fte|direct_cost|...
+    allocation_percentage: Mapped[float] = mapped_column(Numeric, nullable=False)
+    allocated_amount: Mapped[float] = mapped_column(Numeric, nullable=False)  # = pool_amount × percentage/100 (server)
+    source: Mapped[str | None] = mapped_column(Text, nullable=True)      # where the base came from (§23)
+    reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_by: Mapped[uuid.UUID | None] = mapped_column(nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
 class FinancialColumnMapping(Base):
     """A saved, versioned column mapping (Class 3 §14) keyed by user + header signature, so a repeat engagement
     with the same source format reuses last time's mapping. Stores {canonical_field: source_header}."""

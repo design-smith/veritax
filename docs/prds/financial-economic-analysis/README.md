@@ -46,8 +46,8 @@ quartiles/adjustments, reconcile, alter rows, or decide whether a number is in a
 | S5 | Account classification (operating/non-operating/…; deterministic + LLM-assisted) + override w/ audit | AFK | S2 | ✅ DONE |
 | S6 | Segments + segmented P&L — segment container, direct mapping, include/exclude; drill-down; segmentation editor | AFK | S2 | ✅ DONE |
 | S7 | Adjustments (exclude/GAAP/topside/manual) — auditable, raw immutable; workpaper UI | AFK | S6 | ✅ DONE |
-| S8 | Allocations — shared-cost split by base + provenance; allocation UI | AFK | S7 | ▶ NEXT |
-| S9 | Financial reconciliation — FS→TB→Segment, configurable tolerance, deterministic status; tie-out UI | AFK | S6 | pending |
+| S8 | Allocations — shared-cost split by base + provenance; allocation UI | AFK | S7 | ✅ DONE |
+| S9 | Financial reconciliation — FS→TB→Segment, configurable tolerance, deterministic status; tie-out UI | AFK | S6 | ▶ NEXT |
 | S10 | TNMM core — tested party (practitioner-selected, links FAR) + PLI registry (deterministic) + calc + lifecycle; TNMM UI | AFK | S6, S7, S8 | pending |
 | S11 | Benchmark import — comparables + accepted/rejected + rejection log; benchmark UI | AFK | S10 | pending |
 | S12 | Arm's-length range & conclusion (jurisdiction-aware) — REUSE Class 1 engine; within/below/above; conclusion UI | AFK | S11, S10 | pending |
@@ -247,3 +247,19 @@ TNMM (§81).
     S6 regression 5. `tsc` + `pnpm build` clean. **Full backend suite 346 passed** (342 + 4).
   - Acceptance (S7): adjustments record original/adjustment/adjusted + reason/user/timestamp ✓ · raw never
     modified ✓ · adjusted P&L reflects them ✓ · workpaper shows original + treatment + reason ✓.
+
+- [x] **S8 — Allocations** — BUILT, full-suite gate running. USER-VISIBLE (Allocations section in the segment).
+  - `models.py`: `FinancialAllocation` (segment_id, cost_pool, pool_amount, allocation_base ∈ revenue/headcount/
+    fte/direct_cost/time_spent/units/transaction_volume/custom, allocation_percentage, allocated_amount, source,
+    reason, created_by, created_at). New table via create_all. **`allocated_amount` is computed server-side**
+    (pool × percentage/100) — a client-supplied result is ignored (§74).
+  - `financial_segments.py`: `segment_pnl` now returns `allocations` (full provenance: pool/base/percentage/
+    source/result, §23) + `allocations_total`, folded into `adjusted_operating_result` (= operating + adjustments
+    + allocations). `routers/financials.py`: POST/GET/DELETE `/financial-segments/{id}/allocations`.
+  - Frontend: an Allocations section in the segment detail (cost pool + pool amount + base + % → allocated amount
+    with source) reflected in the adjusted operating result + P&L summary.
+  - **Verification:** `test_financial_allocations.py` **5 passed** (allocated_amount computed server-side;
+    client-supplied result ignored; reflected in adjusted result; delete; invalid base 422) + S7 regression 4.
+    `tsc` + `pnpm build` clean. **Full backend suite 351 passed** (346 + 5).
+  - Acceptance (S8): shared costs allocate by a chosen base + % ✓ · provenance (pool/base/%/calculation/result)
+    stored + traceable ✓ · allocated amounts appear in the segment P&L ✓.
