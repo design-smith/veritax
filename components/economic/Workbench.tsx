@@ -9,7 +9,7 @@ import { useCallback, useEffect, useRef, useState } from "react"
 import { FileSpreadsheet, Layers, Calculator, BarChart3, Flag, Info, Upload, Loader2, Columns3, Sparkles, AlertTriangle, Plus, Trash2 } from "lucide-react"
 import { api, FINANCIAL_CLASSIFICATIONS, SEGMENT_RULE_FIELDS, SEGMENT_RULE_OPERATORS, FINANCIAL_ADJUSTMENT_TYPES, FINANCIAL_ALLOCATION_BASES,
   type FinancialDatasetRead, type FinancialRowRead, type FinancialMappingRead,
-  type FinancialSegmentRead, type SegmentPnL } from "@/lib/api"
+  type FinancialSegmentRead, type SegmentPnL, type FinancialReconciliationRead } from "@/lib/api"
 
 export type WorkbenchView = "financials" | "segmentation" | "tnmm" | "benchmark" | "conclusion"
 
@@ -168,6 +168,84 @@ function FinancialsView({ engagementId }: { engagementId: string }) {
               ))}
             </div>
           )}
+
+      {datasets && datasets.length > 0 && <TieOutPanel engagementId={engagementId} />}
+    </div>
+  )
+}
+
+const RECON_STATUS_COLORS: Record<string, string> = {
+  reconciled: "var(--color-text-success-soft, #1a7f37)",
+  reconciled_with_rounding: "var(--color-text-success-soft, #1a7f37)",
+  reconciled_with_explained_difference: "var(--color-text-caution-soft, #8a5a00)",
+  unreconciled: "var(--color-text-danger-soft, #b3261e)",
+  review_required: "var(--color-text-caution-soft, #8a5a00)",
+}
+
+function TieOutPanel({ engagementId }: { engagementId: string }) {
+  const [datasets, setDatasets] = useState<FinancialDatasetRead[]>([])
+  const [segments, setSegments] = useState<FinancialSegmentRead[]>([])
+  const [recons, setRecons] = useState<FinancialReconciliationRead[]>([])
+  const [label, setLabel] = useState("")
+  const [src, setSrc] = useState("")
+  const [tgt, setTgt] = useState("")
+  const [tolerance, setTolerance] = useState("")
+
+  const refresh = useCallback(async () => {
+    const [ds, sg, rc] = await Promise.all([
+      api.listFinancialDatasets(engagementId), api.listFinancialSegments(engagementId), api.listReconciliations(engagementId),
+    ])
+    setDatasets(ds); setSegments(sg); setRecons(rc)
+  }, [engagementId])
+  useEffect(() => { void refresh() }, [refresh])
+
+  const options = [
+    ...datasets.map(d => ({ value: `dataset:${d.id}`, label: `Dataset · ${d.source_filename ?? d.id.slice(0, 8)}` })),
+    ...segments.map(s => ({ value: `segment:${s.id}`, label: `Segment · ${s.name}` })),
+  ]
+  const nameFor = (kind: string, id: string) =>
+    kind === "dataset"
+      ? (datasets.find(d => d.id === id)?.source_filename ?? "dataset")
+      : (segments.find(s => s.id === id)?.name ?? "segment")
+
+  async function create() {
+    if (!label.trim() || !src || !tgt) return
+    const [sk, si] = src.split(":"); const [tk, ti] = tgt.split(":")
+    await api.createReconciliation(engagementId, {
+      label: label.trim(), source: { kind: sk, id: si }, target: { kind: tk, id: ti },
+      tolerance: tolerance ? parseFloat(tolerance) : undefined,
+    })
+    setLabel(""); setSrc(""); setTgt(""); setTolerance("")
+    await refresh()
+  }
+  async function del(id: string) { await api.deleteReconciliation(id); await refresh() }
+
+  return (
+    <div style={{ marginTop: "1.25rem", border: "1px solid var(--color-border)", borderRadius: "0.75rem", overflow: "hidden", background: "var(--color-surface)" }}>
+      <div style={{ padding: "0.875rem 1.125rem", borderBottom: "1px solid var(--color-border-subtle)", fontSize: "var(--font-text-sm-size)", fontWeight: "var(--font-weight-semibold)", color: "var(--color-text)" }}>Financial tie-out</div>
+      <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "var(--font-text-xs-size)" }}>
+        <tbody>
+          {recons.map(r => (
+            <tr key={r.id} style={{ color: "var(--color-text-secondary)" }}>
+              <td style={{ padding: "0.4375rem 1.125rem", borderBottom: "1px solid var(--color-border-subtle)" }}>{r.label}</td>
+              <td style={{ padding: "0.4375rem 1.125rem", borderBottom: "1px solid var(--color-border-subtle)", color: "var(--color-text-tertiary)" }}>{nameFor(r.source_kind, r.source_id)} → {nameFor(r.target_kind, r.target_id)}</td>
+              <td style={{ padding: "0.4375rem 1.125rem", borderBottom: "1px solid var(--color-border-subtle)", textAlign: "right", fontVariantNumeric: "tabular-nums" }}>{r.difference === null ? "—" : fmtNum(r.difference)}</td>
+              <td style={{ padding: "0.4375rem 1.125rem", borderBottom: "1px solid var(--color-border-subtle)", color: RECON_STATUS_COLORS[r.status] ?? "var(--color-text-secondary)", fontWeight: "var(--font-weight-medium)" }}>{r.status.replace(/_/g, " ")}</td>
+              <td style={{ padding: "0.4375rem 1.125rem", borderBottom: "1px solid var(--color-border-subtle)" }}>
+                <button type="button" onClick={() => void del(r.id)} style={{ border: "none", background: "transparent", cursor: "pointer", color: "var(--color-text-tertiary)" }} title="Remove"><Trash2 size={13} /></button>
+              </td>
+            </tr>
+          ))}
+          {recons.length === 0 && <tr><td colSpan={5} style={{ padding: "0.625rem 1.125rem", color: "var(--color-text-tertiary)" }}>No tie-outs yet.</td></tr>}
+        </tbody>
+      </table>
+      <div style={{ display: "flex", gap: "0.375rem", flexWrap: "wrap", alignItems: "center", padding: "0.75rem 1.125rem", borderTop: "1px solid var(--color-border-subtle)" }}>
+        <input value={label} onChange={e => setLabel(e.target.value)} placeholder="label (e.g. FS → TB)" style={{ ...miniSelect, width: "10rem" }} />
+        <select value={src} onChange={e => setSrc(e.target.value)} style={miniSelect}><option value="">source…</option>{options.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}</select>
+        <select value={tgt} onChange={e => setTgt(e.target.value)} style={miniSelect}><option value="">target…</option>{options.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}</select>
+        <input value={tolerance} onChange={e => setTolerance(e.target.value)} placeholder="tolerance" inputMode="decimal" style={{ ...miniSelect, width: "6rem" }} />
+        <button type="button" onClick={create} style={toolbarBtn}><Plus size={13} /> Reconcile</button>
+      </div>
     </div>
   )
 }

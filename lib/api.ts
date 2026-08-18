@@ -575,6 +575,24 @@ export const FINANCIAL_ADJUSTMENT_TYPES = ["exclude_non_operating", "reclassify"
 export const FINANCIAL_ALLOCATION_BASES = ["revenue", "headcount", "fte", "direct_cost", "time_spent", "units", "transaction_volume", "custom"] as const
 export const SEGMENT_RULE_FIELDS = ["account_code", "account_name", "cost_center", "business_unit"] as const
 export const SEGMENT_RULE_OPERATORS = ["equals", "in", "contains"] as const
+export interface FinancialReconciliationRead {
+  id: string
+  engagement_id: string
+  label: string
+  source_kind: string
+  source_id: string
+  target_kind: string
+  target_id: string
+  source_total: number | null
+  target_total: number | null
+  difference: number | null
+  difference_pct: number | null
+  tolerance: number
+  rounding: number
+  status: string
+  explanation: string | null
+  created_at: string | null
+}
 export interface FinancialRowsPage {
   dataset_id: string
   total: number
@@ -863,6 +881,18 @@ const realApi = {
 
   deleteSegmentAllocation: (allocationId: string): Promise<void> =>
     afetch(`${BASE}/financial-allocations/${allocationId}`, { method: "DELETE" }).then(parseVoid),
+
+  // Class 3 — reconciliation / tie-out
+  listReconciliations: (engagementId: string): Promise<FinancialReconciliationRead[]> =>
+    afetch(`${BASE}/engagements/${engagementId}/reconciliations`).then(r => parse<FinancialReconciliationRead[]>(r)),
+
+  createReconciliation: (engagementId: string, body: { label: string; source: { kind: string; id: string }; target: { kind: string; id: string }; tolerance?: number; rounding?: number; explanation?: string }): Promise<FinancialReconciliationRead> =>
+    afetch(`${BASE}/engagements/${engagementId}/reconciliations`, {
+      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
+    }).then(r => parse<FinancialReconciliationRead>(r)),
+
+  deleteReconciliation: (reconciliationId: string): Promise<void> =>
+    afetch(`${BASE}/reconciliations/${reconciliationId}`, { method: "DELETE" }).then(parseVoid),
 }
 
 // On the public /demo route, serve canned data from lib/demo-api instead of the network so the real

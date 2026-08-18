@@ -47,8 +47,8 @@ quartiles/adjustments, reconcile, alter rows, or decide whether a number is in a
 | S6 | Segments + segmented P&L — segment container, direct mapping, include/exclude; drill-down; segmentation editor | AFK | S2 | ✅ DONE |
 | S7 | Adjustments (exclude/GAAP/topside/manual) — auditable, raw immutable; workpaper UI | AFK | S6 | ✅ DONE |
 | S8 | Allocations — shared-cost split by base + provenance; allocation UI | AFK | S7 | ✅ DONE |
-| S9 | Financial reconciliation — FS→TB→Segment, configurable tolerance, deterministic status; tie-out UI | AFK | S6 | ▶ NEXT |
-| S10 | TNMM core — tested party (practitioner-selected, links FAR) + PLI registry (deterministic) + calc + lifecycle; TNMM UI | AFK | S6, S7, S8 | pending |
+| S9 | Financial reconciliation — FS→TB→Segment, configurable tolerance, deterministic status; tie-out UI | AFK | S6 | ✅ DONE |
+| S10 | TNMM core — tested party (practitioner-selected, links FAR) + PLI registry (deterministic) + calc + lifecycle; TNMM UI | AFK | S6, S7, S8 | ▶ NEXT |
 | S11 | Benchmark import — comparables + accepted/rejected + rejection log; benchmark UI | AFK | S10 | pending |
 | S12 | Arm's-length range & conclusion (jurisdiction-aware) — REUSE Class 1 engine; within/below/above; conclusion UI | AFK | S11, S10 | pending |
 | S13 | TP adjustment — illustrative adjustment to practitioner target, approval state, never auto-post; UI | AFK | S12 | pending |
@@ -263,3 +263,21 @@ TNMM (§81).
     `tsc` + `pnpm build` clean. **Full backend suite 351 passed** (346 + 5).
   - Acceptance (S8): shared costs allocate by a chosen base + % ✓ · provenance (pool/base/%/calculation/result)
     stored + traceable ✓ · allocated amounts appear in the segment P&L ✓.
+
+- [x] **S9 — Financial reconciliation** — BUILT, full-suite gate running. USER-VISIBLE (Financial tie-out panel).
+  - `financial_reconciliation.py::reconcile(source_total, target_total, tolerance, rounding)` — pure deterministic
+    status ∈ reconciled / reconciled_with_rounding / reconciled_with_explained_difference / unreconciled /
+    review_required (§26-27); a missing total → review_required; a difference is never hidden.
+  - `financial_reconciliations` table (source/target kind+id, both totals, difference, difference_pct, tolerance,
+    rounding, status, explanation) via create_all. Totals computed SERVER-SIDE: `dataset_total` (SQL sum over a
+    dataset's rows) + `segment_total` (SQL sum over the segment's matched rows). Endpoints: POST/GET/DELETE
+    `/engagements/{id}/reconciliations` with a source/target ref ({kind: dataset|segment, id}).
+  - Frontend: a Financial tie-out panel in the Financials view (§28) — list with status badge + difference + a
+    create form picking source/target dataset-or-segment and a tolerance.
+  - **Verification:** `test_financial_reconciliation.py` **6 passed** (2 pure: status thresholds incl. rounding/
+    tolerance/unreconciled/review_required + difference/pct; 4 integration: dataset↔dataset reconciled, material
+    gap unreconciled + surfaced, dataset↔segment tie-out, list + delete). `tsc` + `pnpm build` clean. **Full
+    backend suite 357 passed** (351 + 6).
+  - Acceptance (S9): deterministic w/ configurable tolerance ✓ · FS→TB and TB→Segment reconcile where data
+    exists ✓ · differences classified not hidden ✓ · rounding vs material gap → different statuses ✓ · tie-out
+    UI ✓.

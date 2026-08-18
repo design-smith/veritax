@@ -28,6 +28,7 @@ from ..deps import (
 from ..financial_classification import CLASSIFICATIONS, ClassificationSuggester
 from ..financial_intake import CANONICAL_FIELDS, detect_columns, header_signature, parse_financial_file
 from ..financial_mapping import ColumnMappingSuggester, find_saved_mapping, save_mapping
+from ..financial_reconciliation import reconcile
 from ..financial_segments import (
     ADJUSTMENT_TYPES,
     ALLOCATION_BASES,
@@ -38,14 +39,16 @@ from ..financial_segments import (
     segment_allocations,
     segment_pnl,
     segment_rows,
+    segment_total,
 )
-from ..financial_store import create_dataset, dataset_summary, reapply_mapping
+from ..financial_store import create_dataset, dataset_summary, dataset_total, reapply_mapping
 from ..ingest import get_or_create_uploaded_source, store_upload
 from ..models import (
     Engagement,
     FinancialAdjustment,
     FinancialAllocation,
     FinancialDataset,
+    FinancialReconciliation,
     FinancialRow,
     FinancialSegment,
     SegmentRule,
@@ -694,4 +697,106 @@ async def delete_allocation(
     seg = await session.get(FinancialSegment, alloc.segment_id)
     await assert_owner(session, seg.engagement_id, user)
     await session.delete(alloc)
+    await session.commit()
+
+
+# ── Reconciliation / financial tie-out (S9, §25-28) ───────────────────────────
+class ReconcileRef(BaseModel):
+    kind: str   # dataset|segment
+    id: uuid.UUID
+
+
+class ReconciliationCreate(BaseModel):
+    label: str
+    source: ReconcileRef
+    target: ReconcileRef
+    tolerance: float = 0.0
+    rounding: float = 1.0
+    explanation: str | None = None
+
+
+class ReconciliationRead(BaseModel):
+    id: uuid.UUID
+    engagement_id: uuid.UUID
+    label: str
+    source_kind: str
+    source_id: uuid.UUID
+    target_kind: str
+    target_id: uuid.UUID
+    source_total: float | None
+    target_total: float | None
+    difference: float | None
+    difference_pct: float | None
+    tolerance: float
+    rounding: float
+    status: str
+    explanation: str | None
+    created_at: datetime | None
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+async def _ref_total(session: AsyncSession, engagement_id: uuid.UUID, ref: ReconcileRef) -> float | None:
+    """Server-side total for a reconciliation reference; 404 if it isn't in this engagement, 422 for a bad kind."""
+    if ref.kind == "dataset":
+        ds = await session.get(FinancialDataset, ref.id)
+        if ds is None or ds.engagement_id != engagement_id:
+            raise HTTPException(status_code=404, detail="dataset not found in this engagement")
+        return await dataset_total(session, ds.id)
+    if ref.kind == "segment":
+        seg = await session.get(FinancialSegment, ref.id)
+        if seg is None or seg.engagement_id != engagement_id:
+            raise HTTPException(status_code=404, detail="segment not found in this engagement")
+        return await segment_total(session, seg)
+    raise HTTPException(status_code=422, detail=f"unknown reference kind: {ref.kind}")
+
+
+@router.post("/engagements/{engagement_id}/reconciliations", response_model=ReconciliationRead, status_code=201)
+async def create_reconciliation(
+    engagement_id: uuid.UUID,
+    body: ReconciliationCreate,
+    session: AsyncSession = Depends(get_session),
+    _owner: Engagement = Depends(require_engagement_owner),
+) -> ReconciliationRead:
+    src_total = await _ref_total(session, engagement_id, body.source)
+    tgt_total = await _ref_total(session, engagement_id, body.target)
+    result = reconcile(src_total, tgt_total, tolerance=body.tolerance, rounding=body.rounding)
+    rec = FinancialReconciliation(
+        engagement_id=engagement_id, label=body.label,
+        source_kind=body.source.kind, source_id=body.source.id,
+        target_kind=body.target.kind, target_id=body.target.id,
+        source_total=src_total, target_total=tgt_total,
+        difference=result["difference"], difference_pct=result["difference_pct"],
+        tolerance=body.tolerance, rounding=body.rounding, status=result["status"], explanation=body.explanation,
+    )
+    session.add(rec)
+    await session.commit()
+    await session.refresh(rec)
+    return ReconciliationRead.model_validate(rec)
+
+
+@router.get("/engagements/{engagement_id}/reconciliations", response_model=list[ReconciliationRead])
+async def list_reconciliations(
+    engagement_id: uuid.UUID,
+    session: AsyncSession = Depends(get_session),
+    _owner: Engagement = Depends(require_engagement_owner),
+) -> list[ReconciliationRead]:
+    recs = (await session.execute(
+        select(FinancialReconciliation).where(FinancialReconciliation.engagement_id == engagement_id)
+        .order_by(FinancialReconciliation.created_at)
+    )).scalars().all()
+    return [ReconciliationRead.model_validate(r) for r in recs]
+
+
+@router.delete("/reconciliations/{reconciliation_id}", status_code=204)
+async def delete_reconciliation(
+    reconciliation_id: uuid.UUID,
+    session: AsyncSession = Depends(get_session),
+    user: AuthUser = Depends(get_current_user),
+) -> None:
+    rec = await session.get(FinancialReconciliation, reconciliation_id)
+    if rec is None:
+        raise HTTPException(status_code=404, detail="reconciliation not found")
+    await assert_owner(session, rec.engagement_id, user)
+    await session.delete(rec)
     await session.commit()

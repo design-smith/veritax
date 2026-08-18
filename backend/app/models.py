@@ -1255,6 +1255,33 @@ class FinancialAllocation(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
+class FinancialReconciliation(Base):
+    """A deterministic tie-out between two totals (Class 3 §25-28): FS↔TB, TB↔Segment, Segment↔analysis. Stores
+    both totals, the difference, and a status under a configurable tolerance. Differences are never hidden."""
+
+    __tablename__ = "financial_reconciliations"
+    __table_args__ = (Index("ix_financial_reconciliations_engagement", "engagement_id"),)
+
+    id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
+    engagement_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("engagements.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    label: Mapped[str] = mapped_column(Text, nullable=False)
+    source_kind: Mapped[str] = mapped_column(Text, nullable=False)   # dataset|segment
+    source_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+    target_kind: Mapped[str] = mapped_column(Text, nullable=False)
+    target_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+    source_total: Mapped[float | None] = mapped_column(Numeric, nullable=True)
+    target_total: Mapped[float | None] = mapped_column(Numeric, nullable=True)
+    difference: Mapped[float | None] = mapped_column(Numeric, nullable=True)
+    difference_pct: Mapped[float | None] = mapped_column(Numeric, nullable=True)
+    tolerance: Mapped[float] = mapped_column(Numeric, nullable=False, default=0)
+    rounding: Mapped[float] = mapped_column(Numeric, nullable=False, default=1)
+    status: Mapped[str] = mapped_column(Text, nullable=False)
+    explanation: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
 class FinancialColumnMapping(Base):
     """A saved, versioned column mapping (Class 3 §14) keyed by user + header signature, so a repeat engagement
     with the same source format reuses last time's mapping. Stores {canonical_field: source_header}."""

@@ -149,6 +149,13 @@ async def segment_adjustments(session: AsyncSession, segment: FinancialSegment) 
     )).scalars().all())
 
 
+async def segment_total(session: AsyncSession, segment: FinancialSegment) -> float | None:
+    """SQL sum of the segment's matched-row amounts (for reconciliation, §25). None when nothing matches."""
+    rules = await _rules(session, segment)
+    total = (await session.execute(_base_query([func.sum(FinancialRow.amount)], segment, rules))).scalar()
+    return float(total) if total is not None else None
+
+
 async def segment_rows(session: AsyncSession, segment: FinancialSegment, *, limit: int, offset: int):
     """Matched rows for drill-down (§24) — original rows, never mutated."""
     rules = await _rules(session, segment)

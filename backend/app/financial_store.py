@@ -83,6 +83,14 @@ async def reapply_mapping(session: AsyncSession, dataset: FinancialDataset, mapp
         await session.execute(update(FinancialRow), updates)
 
 
+async def dataset_total(session: AsyncSession, dataset_id: uuid.UUID) -> float | None:
+    """SQL sum of a dataset's row amounts (for reconciliation, §25). None when the dataset has no amounts."""
+    total = (await session.execute(
+        select(func.sum(FinancialRow.amount)).where(FinancialRow.dataset_id == dataset_id)
+    )).scalar()
+    return float(total) if total is not None else None
+
+
 async def dataset_summary(session: AsyncSession, dataset_id: uuid.UUID) -> dict:
     """Row count + totals by currency, computed in SQL (§73) — never by loading every row."""
     rows = (await session.execute(
