@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useRef, useState, type CSSProperties } from "react"
 import { useRouter } from "next/navigation"
 import dynamic from "next/dynamic"
-import { Activity, CalendarDays, ChevronDown, FileText, GraduationCap, PanelLeftClose, PanelLeftOpen, ShieldCheck } from "lucide-react"
+import { Activity, CalendarDays, ChevronDown, FileText, GraduationCap, LogOut, PanelLeftClose, Search, ShieldCheck, Star } from "lucide-react"
 import PlanningStep, { type PlanningDocumentMap, type PlanningSourceRow, type SourceId } from "@/components/steps/planning"
 import DemoTour, { type TourStep } from "@/components/DemoTour"
 import Confetti from "@/components/Confetti"
@@ -16,6 +16,10 @@ import { createClient } from "@/lib/supabase/client"
 import { LoadingIndicator } from "@/components/ui/indicator"
 import { ActionModal } from "@/components/ui/action-modal"
 import { diagnoseApiFailure, withActions, type ActionableIssue, type ActionableIssueBase, type ActionableErrorAction } from "@/lib/actionable-errors"
+import SearchPage from "@/components/company/SearchPage"
+import CompanyRecord from "@/components/company/CompanyRecord"
+import { loadIndex, type IndexRow } from "@/lib/companies"
+import { useSavedCompanies } from "@/lib/saved-companies"
 
 // FullCalendar is browser-only — load it client-side so it never runs during the build prerender.
 const CompliancePage = dynamic(() => import("@/components/compliance"), { ssr: false })
@@ -127,6 +131,14 @@ function replaceWorkspaceUrl(projectId: string | null, step: Step) {
   window.history.replaceState(null, "", `${url.pathname}${url.search}${url.hash}`)
 }
 
+function canonicalizeSearchUrl() {
+  if (typeof window === "undefined") return
+  const url = new URL(window.location.href)
+  if (![...url.searchParams.keys()].some(k => k === "project" || k === "engagement" || k === "file" || k === "step")) return
+  url.search = ""
+  window.history.replaceState(null, "", url.pathname)
+}
+
 function describeAppError(error: unknown) {
   return {
     name: error instanceof Error ? error.name : "UnknownError",
@@ -165,8 +177,16 @@ function BootSkeleton({ offline = false, onRetry }: { offline?: boolean; onRetry
         padding: "1.5rem 0.75rem",
         display: "flex", flexDirection: "column", gap: 2,
       }}>
-        <div style={{ display: "flex", alignItems: "center", padding: "0 0.75rem", marginBottom: "1.5rem", minHeight: 24 }}>
-          <span style={{ fontFamily: "var(--font-wordmark)", fontSize: "20px", fontWeight: 300, letterSpacing: 0, lineHeight: 1, color: "#000" }}>Veritax</span>
+        <div style={{ display: "flex", alignItems: "center", gap: "0.5rem", padding: "0 0.75rem", marginBottom: "1.5rem", minHeight: 24 }}>
+          <img src="/VeritaxLogo-notext.svg" alt="Veritax" style={{ width: 22, height: 22, objectFit: "contain", flexShrink: 0 }} />
+        </div>
+        <div style={{ padding: "0.6rem 0.75rem", display: "flex", alignItems: "center", gap: "0.5rem" }}>
+          <SkeletonBlock style={{ width: 16, height: 16, borderRadius: 4 }} />
+          <SkeletonBlock style={{ width: 58, height: 14 }} />
+        </div>
+        <div style={{ padding: "0.6rem 0.75rem", display: "flex", alignItems: "center", gap: "0.5rem" }}>
+          <SkeletonBlock style={{ width: 16, height: 16, borderRadius: 4 }} />
+          <SkeletonBlock style={{ width: 118, height: 14 }} />
         </div>
         <div style={{ padding: "0.6rem 0.75rem", display: "flex", alignItems: "center", gap: "0.5rem" }}>
           <SkeletonBlock style={{ width: 16, height: 16, borderRadius: 4 }} />
@@ -183,20 +203,7 @@ function BootSkeleton({ offline = false, onRetry }: { offline?: boolean; onRetry
       </aside>
 
       <main style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column", overflow: "hidden" }}>
-        <nav style={{
-          borderBottom: "1px solid #e5e5e5",
-          background: "#fff",
-          padding: "0 2rem",
-          display: "flex",
-          alignItems: "center",
-          gap: "2rem",
-          height: 48,
-          flexShrink: 0,
-        }} aria-hidden="true">
-          {[92, 118, 74, 68].map(w => <SkeletonBlock key={w} style={{ width: w, height: 13 }} />)}
-        </nav>
-
-        <div style={{ flex: 1, padding: "2rem", overflow: "hidden" }}>
+        <div style={{ flex: 1, padding: "3rem 1.5rem", overflow: "hidden" }}>
           {offline ? (
             <section style={{ maxWidth: 520, marginTop: "10vh" }}>
               <p style={{ margin: 0, fontSize: "var(--font-text-xs-size)", color: "var(--color-text-tertiary)", textTransform: "uppercase", letterSpacing: "0.05em" }}>
@@ -222,27 +229,16 @@ function BootSkeleton({ offline = false, onRetry }: { offline?: boolean; onRetry
               </button>
             </section>
           ) : (
-            <section style={{ maxWidth: 980 }}>
+            <section style={{ maxWidth: 820, margin: "0 auto" }}>
               <div style={{ display: "flex", alignItems: "center", gap: "0.5rem", marginBottom: "1.5rem", color: "var(--color-text-secondary)", fontSize: "var(--font-text-sm-size)" }}>
                 <LoadingIndicator size={14} />
                 <span>Opening workspace</span>
               </div>
-              <SkeletonBlock style={{ width: 132, height: 11, marginBottom: 12 }} />
-              <SkeletonBlock style={{ width: 360, maxWidth: "70%", height: 28, marginBottom: 30 }} />
-              <div style={{ display: "grid", gridTemplateColumns: "minmax(240px, 0.8fr) minmax(260px, 1.2fr)", gap: "1.5rem" }}>
-                <div style={{ display: "flex", flexDirection: "column", gap: 18 }}>
-                  <SkeletonBlock style={{ width: "100%", height: 30 }} />
-                  <SkeletonBlock style={{ width: "82%", height: 30 }} />
-                  <SkeletonBlock style={{ width: "74%", height: 30 }} />
-                </div>
-                <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
-                  {[0, 1, 2, 3].map(i => (
-                    <div key={i} style={{ border: "1px solid var(--color-border)", borderRadius: "var(--radius-md)", padding: "1rem" }}>
-                      <SkeletonBlock style={{ width: i === 1 ? "46%" : "58%", height: 14, marginBottom: 12 }} />
-                      <SkeletonBlock style={{ width: "100%", height: 46 }} />
-                    </div>
-                  ))}
-                </div>
+              <SkeletonBlock style={{ width: "100%", height: 56, borderRadius: 14, marginBottom: 16 }} />
+              <div style={{ display: "flex", gap: 8, marginBottom: 28 }}>
+                <SkeletonBlock style={{ width: 88, height: 32, borderRadius: 999 }} />
+                <SkeletonBlock style={{ width: 108, height: 32, borderRadius: 999 }} />
+                <SkeletonBlock style={{ width: 96, height: 32, borderRadius: 999 }} />
               </div>
             </section>
           )}
@@ -271,7 +267,11 @@ export default function Page({ enableTour = false }: { enableTour?: boolean } = 
   const [collapsed, setCollapsed] = useState(false)   // left panel: collapsed shows the logo only
   const [logoHover, setLogoHover] = useState(false)
   const [mounted, setMounted] = useState<Set<Step>>(new Set([1]))  // steps stay mounted once visited
-  const [page, setPage] = useState<"workflow" | "compliance" | "monitoring" | "defense">("workflow")
+  const [page, setPage] = useState<"workflow" | "compliance" | "monitoring" | "defense" | "company-search">(enableTour ? "workflow" : "company-search")
+  const [companyOpen, setCompanyOpen] = useState(true)
+  const [companies, setCompanies] = useState<IndexRow[]>([])
+  const [selectedCompany, setSelectedCompany] = useState<string | null>(null)
+  const [savedSlugs] = useSavedCompanies()
   const [apiOffline, setApiOffline] = useState(false)
   const [draftReady, setDraftReady] = useState(false)
   const [bootStatus, setBootStatus] = useState<BootStatus>("loading")
@@ -286,6 +286,9 @@ export default function Page({ enableTour = false }: { enableTour?: boolean } = 
   const scopeShownRef = useRef(false)
   const sourcesShownRef = useRef(false)
   const tourWasOpenedRef = useRef(false)
+
+  // Company index (all researched companies) — powers the sidebar saved-list name lookup + the search page.
+  useEffect(() => { loadIndex().then(setCompanies).catch(() => setCompanies([])) }, [])
 
   const openIssue = useCallback((
     base: ActionableIssueBase,
@@ -428,6 +431,7 @@ export default function Page({ enableTour = false }: { enableTour?: boolean } = 
         return
       }
       const fromUrl = readWorkspaceUrl()
+      if (!enableTour && fromUrl.projectId) setPage("workflow")
       const stored = localStorage.getItem(LS_ID)
       const requestedId = fromUrl.projectId || stored
       let resumed = requestedId ? await loadEngagement(requestedId, undefined, enableTour) : false
@@ -488,9 +492,10 @@ export default function Page({ enableTour = false }: { enableTour?: boolean } = 
     stageEntered(stage)
   }, [enableTour, bootStatus, page, step])
   useEffect(() => {
-    if (bootStatus !== "ready" || page !== "workflow") return
-    replaceWorkspaceUrl(engagementId, step)
-  }, [bootStatus, engagementId, page, step])
+    if (bootStatus !== "ready") return
+    if (page === "workflow") replaceWorkspaceUrl(engagementId, step)
+    else if (page === "company-search" && !enableTour) canonicalizeSearchUrl()
+  }, [bootStatus, enableTour, engagementId, page, step])
   useEffect(() => { setMounted(m => (m.has(step) ? m : new Set([...m, step]))) }, [step])  // mount a step on first visit, keep it
   useEffect(() => {
     if (!engagementId) return
@@ -547,6 +552,11 @@ export default function Page({ enableTour = false }: { enableTour?: boolean } = 
       revealSources(eng)
     }
   }, [enableTour, tourOpen, tourStep, revealScope, revealSources])
+
+  function openSearch() {
+    setSelectedCompany(null)
+    setPage("company-search")
+  }
 
   function newFile() {
     // Start a fresh Local File pipeline: jump into Planning immediately, then create the engagement
@@ -628,6 +638,22 @@ export default function Page({ enableTour = false }: { enableTour?: boolean } = 
   }
 
   const newFileActive = page === "workflow" && engagementId !== null && files.every(f => f.id !== engagementId)
+  const railBtn = (active: boolean): CSSProperties => ({
+    display: "flex",
+    alignItems: "center",
+    justifyContent: collapsed ? "center" : "flex-start",
+    gap: "0.5rem",
+    width: collapsed ? 36 : "100%",
+    height: collapsed ? 36 : undefined,
+    padding: collapsed ? 0 : "0.6rem 0.75rem",
+    border: "none",
+    borderRadius: "6px",
+    background: active ? "#ececec" : "transparent",
+    cursor: "pointer",
+    fontSize: "14px",
+    fontWeight: 400,
+    color: "#000",
+  })
 
   if (bootStatus === "loading") return (
     <>
@@ -655,24 +681,20 @@ export default function Page({ enableTour = false }: { enableTour?: boolean } = 
         alignItems: collapsed ? "center" : "stretch",
         transition: "width 160ms ease",
       }}>
-        {/* Header — expanded: wordmark only; collapsed: logo only (hover to reveal the expand icon) */}
+        {/* Header — expanded: logo + wordmark; collapsed: logo only (hover to reveal the expand icon) */}
         {collapsed ? (
           <button
             type="button"
             onClick={() => setCollapsed(false)}
-            onMouseEnter={() => setLogoHover(true)}
-            onMouseLeave={() => setLogoHover(false)}
             aria-label="Expand sidebar"
             title="Expand"
             style={{
               display: "flex", alignItems: "center", justifyContent: "center",
-              width: 36, height: 36, marginBottom: "1.5rem", padding: 0,
+              width: 36, height: 36, marginBottom: "0.5rem", padding: 0,
               border: "none", background: "transparent", cursor: "pointer", borderRadius: "6px",
             }}
           >
-            {logoHover
-              ? <PanelLeftOpen size={20} strokeWidth={1.5} style={{ color: "#000" }} />
-              : <img src="/VeritaxLogo.png" alt="Veritax" style={{ width: 24, height: 24, objectFit: "contain" }} />}
+            <img src="/VeritaxLogo-notext.svg" alt="Veritax" style={{ width: 24, height: 24, objectFit: "contain" }} />
           </button>
         ) : (
           <div
@@ -680,7 +702,9 @@ export default function Page({ enableTour = false }: { enableTour?: boolean } = 
             onMouseLeave={() => setLogoHover(false)}
             style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "0.5rem", padding: "0 0.75rem", marginBottom: "1.5rem", minHeight: 24 }}
           >
-            <span style={{ fontFamily: "var(--font-wordmark)", fontSize: "20px", fontWeight: 300, letterSpacing: 0, lineHeight: 1, color: "#000" }}>Veritax</span>
+            <div style={{ display: "flex", alignItems: "center", gap: "0.5rem", minWidth: 0 }}>
+              <img src="/VeritaxLogo-notext.svg" alt="Veritax" style={{ width: 22, height: 22, objectFit: "contain", flexShrink: 0 }} />
+            </div>
             <button
               type="button"
               onClick={() => setCollapsed(true)}
@@ -698,25 +722,75 @@ export default function Page({ enableTour = false }: { enableTour?: boolean } = 
           </div>
         )}
 
-        {!collapsed && (
-        <>
-        {/* Local file — a prominent page entry that collapses New file + the library */}
+        {collapsed && (
+          <div aria-hidden style={{ width: 28, height: 1, background: "#d4d4d4", flexShrink: 0, margin: "0.15rem 0 0.65rem" }} />
+        )}
+
+        {/* Search — top-level landing page. Saved companies sit in their own collapsible below. */}
         <button
           type="button"
-          onClick={() => setLocalOpen(o => !o)}
-          style={{
-            display: "flex", alignItems: "center", gap: "0.5rem",
-            padding: "0.6rem 0.75rem", border: "none", borderRadius: "6px",
-            background: "transparent", cursor: "pointer", width: "100%",
-            fontSize: "14px", fontWeight: 400, color: "#000",
-          }}
+          onClick={openSearch}
+          title="Search"
+          aria-label="Search"
+          style={railBtn(page === "company-search" && !selectedCompany)}
         >
-          <FileText size={16} strokeWidth={1.5} style={{ flexShrink: 0 }} />
-          <span style={{ flex: 1, textAlign: "left" }}>Local file</span>
-          <ChevronDown size={16} strokeWidth={1.5} style={{ color: "#888", flexShrink: 0, transform: localOpen ? "none" : "rotate(-90deg)", transition: "transform 120ms ease" }} />
+          <Search size={16} strokeWidth={1.5} style={{ flexShrink: 0 }} />
+          {!collapsed && <span style={{ flex: 1, textAlign: "left" }}>Search</span>}
         </button>
 
-        {localOpen && (
+        <button
+          type="button"
+          onClick={() => collapsed ? (setCollapsed(false), setCompanyOpen(true)) : setCompanyOpen(o => !o)}
+          title="Saved companies"
+          aria-label="Saved companies"
+          style={{ ...railBtn(false), marginTop: collapsed ? 2 : 0 }}
+        >
+          <Star size={16} strokeWidth={1.5} style={{ flexShrink: 0 }} />
+          {!collapsed && <span style={{ flex: 1, textAlign: "left" }}>Saved companies</span>}
+          {!collapsed && <ChevronDown size={16} strokeWidth={1.5} style={{ color: "#888", flexShrink: 0, transform: companyOpen ? "none" : "rotate(-90deg)", transition: "transform 120ms ease" }} />}
+        </button>
+
+        {!collapsed && companyOpen && (
+          <div style={{ maxHeight: "42vh", overflowY: "auto", marginTop: "0.25rem", display: "flex", flexDirection: "column", gap: 2 }}>
+            {[...savedSlugs].map(slug => {
+              const c = companies.find(x => x.slug === slug)
+              if (!c) return null
+              const active = page === "company-search" && selectedCompany === c.slug
+              return (
+                <button key={c.slug} type="button" onClick={() => { setSelectedCompany(c.slug); setPage("company-search") }} style={{
+                  display: "flex", flexDirection: "column", gap: 1,
+                  padding: "0.4rem 0.75rem", border: "none", borderRadius: "6px",
+                  background: active ? "#ececec" : "transparent",
+                  cursor: "pointer", textAlign: "left", width: "100%",
+                }}>
+                  <span style={{ fontSize: "13px", fontWeight: 400, color: "#000", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                    {c.name}
+                  </span>
+                  <span style={{ fontSize: "11px", color: "#888", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                    {[c.ticker, c.hq_country].filter(Boolean).join(" · ") || "—"}
+                  </span>
+                </button>
+              )
+            })}
+            {savedSlugs.size === 0 && (
+              <p style={{ fontSize: "12px", color: "#aaa", padding: "0 0.75rem" }}>No saved companies yet — search and star one.</p>
+            )}
+          </div>
+        )}
+
+        <button
+          type="button"
+          onClick={() => collapsed ? (setCollapsed(false), setLocalOpen(true)) : setLocalOpen(o => !o)}
+          title="Local file"
+          aria-label="Local file"
+          style={{ ...railBtn(false), marginTop: collapsed ? 2 : "0.25rem" }}
+        >
+          <FileText size={16} strokeWidth={1.5} style={{ flexShrink: 0 }} />
+          {!collapsed && <span style={{ flex: 1, textAlign: "left" }}>Local file</span>}
+          {!collapsed && <ChevronDown size={16} strokeWidth={1.5} style={{ color: "#888", flexShrink: 0, transform: localOpen ? "none" : "rotate(-90deg)", transition: "transform 120ms ease" }} />}
+        </button>
+
+        {!collapsed && localOpen && (
           <>
             <button
               type="button"
@@ -737,7 +811,7 @@ export default function Page({ enableTour = false }: { enableTour?: boolean } = 
               {libraryLoading && files.length === 0 ? (
                 <SidebarLibrarySkeleton />
               ) : files.map(f => {
-                const active = f.id === engagementId
+                const active = page === "workflow" && f.id === engagementId
                 return (
                   <button key={f.id} type="button" onClick={() => openFile(f)} style={{
                     display: "flex", flexDirection: "column", gap: 1,
@@ -820,7 +894,15 @@ export default function Page({ enableTour = false }: { enableTour?: boolean } = 
         <button
           type="button"
           onClick={signOut}
-          style={{
+          title="Sign out"
+          aria-label="Sign out"
+          style={collapsed ? {
+            marginTop: "auto",
+            display: "flex", alignItems: "center", justifyContent: "center",
+            width: 36, height: 36, padding: 0, border: "none",
+            borderRadius: "6px", background: "transparent",
+            color: "#555", cursor: "pointer",
+          } : {
             marginTop: "auto",
             display: "flex", alignItems: "center",
             padding: "0.5rem 0.75rem", border: "1px solid #e5e5e5",
@@ -829,15 +911,24 @@ export default function Page({ enableTour = false }: { enableTour?: boolean } = 
             cursor: "pointer", textAlign: "left", width: "100%",
           }}
         >
-          Sign out
+          {collapsed ? <LogOut size={16} strokeWidth={1.5} /> : "Sign out"}
         </button>
-        </>
-        )}
       </aside>
 
       {/* Page body */}
       <div style={{ flex: 1, display: "flex", flexDirection: "column", overflow: "hidden" }}>
-        {page === "compliance" ? (
+        {page === "company-search" ? (
+          <>
+            <div style={{ display: selectedCompany ? "none" : "flex", flex: 1, minHeight: 0, flexDirection: "column", overflow: "hidden" }}>
+              <SearchPage onOpen={setSelectedCompany} />
+            </div>
+            {selectedCompany ? (
+              <div style={{ flex: 1, minWidth: 0, minHeight: 0, display: "flex", flexDirection: "column", overflow: "hidden" }}>
+                <CompanyRecord slug={selectedCompany} onBack={() => setSelectedCompany(null)} />
+              </div>
+            ) : null}
+          </>
+        ) : page === "compliance" ? (
           <CompliancePage onOpenRequirements={() => { setPage("workflow"); setVisited(prev => new Set(prev).add(2)); setStep(2) }} />
         ) : page === "monitoring" ? (
           <MonitoringPage onOpenRisks={() => { setPage("workflow"); setVisited(prev => new Set(prev).add(4)); setStep(4) }} />

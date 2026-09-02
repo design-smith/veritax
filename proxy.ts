@@ -26,8 +26,9 @@ export async function proxy(request: NextRequest) {
 
   const path = request.nextUrl.pathname
   // Public routes: the app entry + waitlist (/login, /signup), the no-login demo, and the real login (/auth).
+  // /companies serves the standardized company-research JSON (public SEC data) the no-login demo reads.
   // Everything else requires auth.
-  const isPublic = ["/login", "/signup", "/demo", "/auth"].some(p => path.startsWith(p))
+  const isPublic = ["/login", "/signup", "/demo", "/auth", "/companies"].some(p => path.startsWith(p))
   let user = null
   try {
     const result = await supabase.auth.getUser()

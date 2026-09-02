@@ -46,3 +46,16 @@ __pycache__/
 
 # local filesystem storage (LocalStorage)
 _storage/
+
+# raw company-research payloads — 23-30MB each; the standardizer (scripts/build-companies.mjs) extracts
+# web-servable files into public/companies/ which ARE committed. Keep the raw drops out of the repo.
+/apple-inc/
+/microsoft-corp/
+
+# SEC submissions cache used by scripts/build-universe.mjs (regenerable)
+/.cache/
+
+# Company data now lives in Supabase (pushed by scripts/push_to_supabase.py). The locally-built per-company
+# JSON is just the push staging area — keep it out of git. Only the shared map geometry is served statically.
+/public/companies/*
+!/public/companies/world.geo.json
