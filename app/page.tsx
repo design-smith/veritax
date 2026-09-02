@@ -772,9 +772,6 @@ export default function Page({ enableTour = false }: { enableTour?: boolean } = 
                 </button>
               )
             })}
-            {savedSlugs.size === 0 && (
-              <p style={{ fontSize: "12px", color: "#aaa", padding: "0 0.75rem" }}>No saved companies yet — search and star one.</p>
-            )}
           </div>
         )}
 
