@@ -1,0 +1,8 @@
+# Never upload local company JSON dumps to Vercel (data lives in Supabase).
+public/companies/**
+.cache/**
+backend/**
+.venv/**
+**/.venv/**
+*.pyc
+__pycache__/
