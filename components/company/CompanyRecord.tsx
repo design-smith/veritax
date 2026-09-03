@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useMemo, useState } from "react"
+import { Fragment, useEffect, useMemo, useState } from "react"
 import { geoCentroid, geoEquirectangular, geoPath } from "d3-geo"
 import type { FeatureCollection, Geometry } from "geojson"
 import { ArrowLeft, Check, ChevronDown, Download, ExternalLink, Minus, Search, Star } from "lucide-react"
@@ -199,7 +199,6 @@ function Business({ p }: { p: CompanyProfile }) {
 // ---------------- Financials ----------------
 function FinancialsTab({ p, fin }: { p: CompanyProfile; fin: Financials | null }) {
   const d = p.derived
-  const maxRev = Math.max(1, ...p.revenue_series.map(r => r.value || 0))
   return (
     <div style={{ display: "grid", gap: "1.5rem", minWidth: 0, maxWidth: "100%" }}>
       <section><h2 style={H}>Headline metrics · latest fiscal year</h2>
@@ -214,17 +213,9 @@ function FinancialsTab({ p, fin }: { p: CompanyProfile; fin: Financials | null }
         </div>
       </section>
 
-      {p.revenue_series.length > 0 && <section><h2 style={H}>Revenue history</h2>
-        <div style={{ ...CARD, display: "grid", gap: "0.5rem" }}>
-          {p.revenue_series.map(r => (
-            <div key={r.fy} style={{ display: "grid", gridTemplateColumns: "48px minmax(0, 1fr) auto", alignItems: "center", gap: 10, fontSize: "var(--font-text-sm-size)", minWidth: 0 }}>
-              <span style={{ color: "var(--color-text-tertiary)" }}>FY{r.fy}</span>
-              <span style={{ height: 8, borderRadius: 4, background: "var(--color-background-primary-soft)", minWidth: 0 }}><span style={{ display: "block", height: 8, borderRadius: 4, width: `${Math.max(2, ((r.value || 0) / maxRev) * 100)}%`, background: "var(--color-background-primary-solid, #444)" }} /></span>
-              <span style={{ fontVariantNumeric: "tabular-nums", fontWeight: "var(--font-weight-medium)", whiteSpace: "nowrap" }}>{money(r.value, p.financials_currency)}</span>
-            </div>
-          ))}
-        </div>
-      </section>}
+      <section><h2 style={H}>Key financials · all years</h2>
+        {fin ? <KeyFinancials fin={fin} /> : <Centered>Loading…</Centered>}
+      </section>
 
       <section><h2 style={H}>Derived ratios (transfer-pricing)</h2>
         <FieldCard>
@@ -239,6 +230,81 @@ function FinancialsTab({ p, fin }: { p: CompanyProfile; fin: Financials | null }
       <section><h2 style={H}>Normalized facts · {fin?.standard || p.accounting_standard} ({p.facts_count.toLocaleString()} facts)</h2>
         {fin ? <Pivot fin={fin} /> : <Centered>Loading facts…</Centered>}
       </section>
+    </div>
+  )
+}
+
+// Curated financial highlights: line items as rows, fiscal years as columns, YoY change under each.
+const LINE_ITEMS: [string, string[]][] = [
+  ["Revenue", ["us-gaap:RevenueFromContractWithCustomerExcludingAssessedTax", "us-gaap:Revenues", "us-gaap:SalesRevenueNet", "ifrs-full:Revenue"]],
+  ["Gross profit", ["us-gaap:GrossProfit", "ifrs-full:GrossProfit"]],
+  ["EBITDA", ["__ebitda__"]],
+  ["Operating income (EBIT)", ["us-gaap:OperatingIncomeLoss", "ifrs-full:ProfitLossFromOperatingActivities"]],
+  ["Interest expense", ["us-gaap:InterestExpense", "us-gaap:InterestExpenseNonoperating", "ifrs-full:InterestExpense"]],
+  ["Pre-tax income (EBT)", ["us-gaap:IncomeLossFromContinuingOperationsBeforeIncomeTaxesExtraordinaryItemsNoncontrollingInterest", "us-gaap:IncomeLossFromContinuingOperationsBeforeIncomeTaxesMinorityInterestAndIncomeLossFromEquityMethodInvestments", "ifrs-full:ProfitLossBeforeTax"]],
+  ["Net income", ["us-gaap:NetIncomeLoss", "ifrs-full:ProfitLoss"]],
+  ["R&D expense", ["us-gaap:ResearchAndDevelopmentExpense", "ifrs-full:ResearchAndDevelopmentExpense"]],
+  ["Total assets", ["us-gaap:Assets", "ifrs-full:Assets"]],
+  ["Total equity", ["us-gaap:StockholdersEquity", "ifrs-full:Equity"]],
+  ["Operating cash flow", ["us-gaap:NetCashProvidedByUsedInOperatingActivities", "ifrs-full:CashFlowsFromUsedInOperatingActivities"]],
+]
+const DA_CONCEPTS = ["us-gaap:DepreciationDepletionAndAmortization", "us-gaap:DepreciationAmortizationAndAccretionNet", "ifrs-full:DepreciationAndAmortisationExpense"]
+
+function KeyFinancials({ fin }: { fin: Financials }) {
+  const byConcept = useMemo(() => new Map(fin.rows.map(r => [r.concept, r.values])), [fin])
+  const pick = (concepts: string[]) => { for (const c of concepts) { const v = byConcept.get(c); if (v) return v } return null }
+  const ebit = pick(["us-gaap:OperatingIncomeLoss", "ifrs-full:ProfitLossFromOperatingActivities"])
+  const da = pick(DA_CONCEPTS)
+
+  const rows = LINE_ITEMS.map(([label, concepts]) => {
+    let vals: Record<string, number | null> | null
+    if (concepts[0] === "__ebitda__") {
+      if (!ebit || !da) vals = null
+      else { vals = {}; for (const y of Object.keys(ebit)) vals[y] = (ebit[y] != null && da[y] != null) ? (ebit[y]! + da[y]!) : null }
+    } else vals = pick(concepts)
+    return { label, vals }
+  }).filter(r => r.vals && Object.values(r.vals).some(v => v != null)) as { label: string; vals: Record<string, number | null> }[]
+
+  const years = [...new Set(rows.flatMap(r => Object.keys(r.vals)))].map(Number).sort((a, b) => a - b)
+  if (!years.length) return <Centered>No annual figures available.</Centered>
+
+  const stickyL: React.CSSProperties = { position: "sticky", left: 0, zIndex: 1, background: "var(--color-surface)" }
+  const th: React.CSSProperties = { padding: "0.5rem 0.9rem", textAlign: "right", fontSize: 11, textTransform: "uppercase", letterSpacing: "0.03em", color: "var(--color-text-tertiary)", borderBottom: "1px solid var(--color-border)", whiteSpace: "nowrap", position: "sticky", top: 0, background: "var(--color-surface)" }
+  const td: React.CSSProperties = { padding: "0.5rem 0.9rem", textAlign: "right", fontSize: "var(--font-text-sm-size)", fontVariantNumeric: "tabular-nums", whiteSpace: "nowrap" }
+
+  return (
+    <div>
+      <div style={{ fontSize: "var(--font-text-xs-size)", color: "var(--color-text-tertiary)", marginBottom: 6 }}>{fin.standard} · {fin.currency || "reported currency"} · figures abbreviated (K/M/B)</div>
+      <div style={{ border: "1px solid var(--color-border)", borderRadius: "var(--radius-lg)", overflow: "hidden" }}>
+        <div style={{ overflowX: "auto" }}>
+          <table style={{ borderCollapse: "collapse", width: "100%" }}>
+            <thead>
+              <tr>
+                <th style={{ ...th, textAlign: "left", ...stickyL, zIndex: 2 }}>Fiscal year</th>
+                {years.map(y => <th key={y} style={th}>{y}</th>)}
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map(r => (
+                <Fragment key={r.label}>
+                  <tr>
+                    <td style={{ ...td, textAlign: "left", fontWeight: "var(--font-weight-medium)", color: "var(--color-text)", borderTop: "1px solid var(--color-border)", ...stickyL }}>{r.label}</td>
+                    {years.map(y => <td key={y} style={{ ...td, color: "var(--color-text)", borderTop: "1px solid var(--color-border)" }}>{r.vals[y] != null ? money(r.vals[y], fin.currency) : "—"}</td>)}
+                  </tr>
+                  <tr>
+                    <td style={{ ...td, textAlign: "left", fontStyle: "italic", fontSize: "var(--font-text-xs-size)", color: "var(--color-text-tertiary)", ...stickyL }}>Change</td>
+                    {years.map((y, i) => {
+                      const prev = i > 0 ? r.vals[years[i - 1]] : null, cur = r.vals[y]
+                      const c = (i === 0 || cur == null || prev == null || prev === 0) ? null : (cur - prev) / Math.abs(prev)
+                      return <td key={y} style={{ ...td, fontStyle: "italic", fontSize: "var(--font-text-xs-size)", color: c == null ? "var(--color-text-tertiary)" : c >= 0 ? "var(--color-text-success, #137333)" : "#b91c1c" }}>{c == null ? "" : `${c >= 0 ? "+" : ""}${(c * 100).toFixed(2)}%`}</td>
+                    })}
+                  </tr>
+                </Fragment>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
     </div>
   )
 }
