@@ -1,7 +1,7 @@
 "use client"
 
 import { useEffect, useMemo, useRef, useState, type FormEvent, type KeyboardEvent as ReactKey, type ReactNode } from "react"
-import { Check, ChevronDown, Search, SlidersHorizontal, Star, X } from "lucide-react"
+import { Check, ChevronDown, Search, Star, X } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { SelectControl } from "@/components/ui/select-control"
 import { loadIndex, money, type IndexRow } from "@/lib/companies"
@@ -456,19 +456,95 @@ export default function SearchPage({ onOpen }: { onOpen: (slug: string) => void 
   }
 
   return (
-    <div className={ran ? "vt-search is-active" : "vt-search"}>
-      <form className="vt-search-toolbar" onSubmit={onSubmit}>
-        {ran ? (
-          <button type="button" className="vt-search-title" onClick={resetHome} aria-label="Back to search">
-            <img src="/VeritaxLogo.svg?v=2" alt="" />
-          </button>
-        ) : (
-          <h1 className="vt-search-title">
-            <img src="/VeritaxLogo.svg?v=2" alt="Veritax" />
-          </h1>
-        )}
-        <div className="vt-search-home">
-        <div className="vt-search-toolbar-row">
+    <div className="vt-search vt-search--split">
+      {/* permanent filter panel */}
+      <aside className="vt-search-panel" aria-label="Filters">
+        <div className="vt-search-panel-head">
+          <span>Filters{moreN ? ` · ${moreN}` : ""}</span>
+          {moreN ? (
+            <button type="button" className="vt-search-panel-clear" onClick={() => setDraft(s => ({ ...s, classQ: "", classCodes: [], filters: emptyFilters() }))}>Clear</button>
+          ) : null}
+        </div>
+        <div className="vt-search-panel-body">
+          <Collapsible label="Classification" count={draft.classCodes.length} defaultOpen>
+            <div className="vt-search-class-row" ref={classRef}>
+              <div className="vt-search-class-scheme">
+                <span className="vt-sr-only">Classification system</span>
+                <SelectControl
+                  size="md"
+                  variant="outline"
+                  block
+                  className="vt-search-scheme-trigger"
+                  value={draft.scheme}
+                  onValueChange={v => { setDraft(s => ({ ...s, scheme: v as Scheme, classQ: "", classCodes: [] })); setClassOpen(false) }}
+                >
+                  <SelectControl.Item value="sic">SIC</SelectControl.Item>
+                  <SelectControl.Item value="naics">NAICS</SelectControl.Item>
+                  <SelectControl.Item value="nace">NACE</SelectControl.Item>
+                </SelectControl>
+              </div>
+              <div className="vt-search-class-field">
+                {draft.classCodes.map(code => (
+                  <button key={code} type="button" className="vt-search-class-chip" aria-label={`Remove ${code}`} onClick={() => toggleClass(code)}>
+                    {code}
+                    <X size={10} strokeWidth={2} />
+                  </button>
+                ))}
+                <label htmlFor="vt-search-class" className="vt-sr-only">Search {draft.scheme.toUpperCase()} codes</label>
+                <input
+                  id="vt-search-class"
+                  className="vt-search-class-type"
+                  value={draft.classQ}
+                  placeholder={draft.classCodes.length ? "Add code" : schemePlaceholder}
+                  autoComplete="off"
+                  onChange={e => { setDraft(s => ({ ...s, classQ: e.target.value })); setClassOpen(true) }}
+                  onFocus={() => setClassOpen(true)}
+                  onKeyDown={onClassKey}
+                />
+                {classOpen && classHits.length > 0 && (
+                  <ul className="vt-search-class-menu" role="listbox" aria-multiselectable="true" aria-label={`${draft.scheme.toUpperCase()} codes`}>
+                    {classHits.map((c, i) => {
+                      const on = draft.classCodes.includes(c.code)
+                      return (
+                        <li key={c.code} role="presentation">
+                          <button type="button" className={i === classIdx || on ? "vt-search-class-opt is-active" : "vt-search-class-opt"} aria-selected={on} onClick={() => toggleClass(c.code)} onMouseEnter={() => setClassIdx(i)}>
+                            <span>
+                              <span className="vt-search-class-code">{c.code}</span>
+                              {c.label ? <span className="vt-search-class-label">{c.label}</span> : null}
+                            </span>
+                            {on ? <Check size={12} strokeWidth={2.5} aria-hidden /> : null}
+                          </button>
+                        </li>
+                      )
+                    })}
+                  </ul>
+                )}
+              </div>
+            </div>
+          </Collapsible>
+          <FilterSelect label="Industry" sel={draft.filters.sector} opts={counts(r => r.sector)} onToggle={v => toggle("sector", v)} searchable />
+          <FilterSelect label="Headquarters" sel={draft.filters.hq} opts={counts(r => r.hq_country, true)} onToggle={v => toggle("hq", v)} searchable />
+          <FilterSelect label="Revenue" sel={draft.filters.rev} opts={orderBands(REV_BANDS.map(b => b[0]), counts(r => r.revenue_latest != null ? revBand(r.revenue_latest) : null))} onToggle={v => toggle("rev", v)} />
+          <FilterSelect label="Operates in" sel={draft.filters.op} opts={counts(r => r.op_countries, true)} onToggle={v => toggle("op", v)} searchable />
+          <FilterSelect label="Region" sel={draft.filters.region} opts={counts(r => r.hq_region)} onToggle={v => toggle("region", v)} />
+          <FilterSelect label="Exchange" sel={draft.filters.exchange} opts={counts(r => r.exchange)} onToggle={v => toggle("exchange", v)} />
+          <FilterSelect label="Accounting" sel={draft.filters.std} opts={counts(r => r.accounting_standard)} onToggle={v => toggle("std", v)} />
+          <Collapsible label="Characteristics" count={(draft.filters.hasRnd ? 1 : 0) + (draft.filters.hasPatents ? 1 : 0) + (draft.filters.hasIntl ? 1 : 0)}>
+            <div className="vt-search-filter-opts">
+              <button type="button" className={draft.filters.hasRnd ? "vt-search-chip is-on" : "vt-search-chip"} onClick={() => setDraft(s => ({ ...s, filters: { ...s.filters, hasRnd: !s.filters.hasRnd } }))}>R&D</button>
+              <button type="button" className={draft.filters.hasPatents ? "vt-search-chip is-on" : "vt-search-chip"} onClick={() => setDraft(s => ({ ...s, filters: { ...s.filters, hasPatents: !s.filters.hasPatents } }))}>Patents</button>
+              <button type="button" className={draft.filters.hasIntl ? "vt-search-chip is-on" : "vt-search-chip"} onClick={() => setDraft(s => ({ ...s, filters: { ...s.filters, hasIntl: !s.filters.hasIntl } }))}>International</button>
+            </div>
+          </Collapsible>
+        </div>
+        <div className="vt-search-panel-foot">
+          <Button type="button" variant="solid" size="sm" block onClick={runSearch}>Search</Button>
+        </div>
+      </aside>
+
+      {/* search bar + results */}
+      <div className="vt-search-main">
+        <form className="vt-search-bar" onSubmit={onSubmit}>
           <div className="vt-search-instrument">
             <button type="submit" className="vt-search-submit" aria-label="Search">
               <Search size={20} strokeWidth={1.5} />
@@ -493,196 +569,92 @@ export default function SearchPage({ onOpen }: { onOpen: (slug: string) => void 
                 </Button>
               </div>
             )}
-            <span className="vt-search-split" aria-hidden />
-            <button
-              type="button"
-              className="vt-search-more"
-              aria-expanded={drawer}
-              aria-controls="vt-search-drawer"
-              aria-label={moreN ? `Filters, ${moreN} applied` : "Filters"}
-              onClick={() => setDrawer(true)}
-            >
-              <SlidersHorizontal size={16} strokeWidth={1.5} aria-hidden />
-              {moreN ? <span className="vt-search-more-n">{moreN}</span> : null}
-            </button>
           </div>
-        </div>
+        </form>
 
-        {!ran && recent.length > 0 && (
-          <div className="vt-search-idle">
-            <div className="vt-search-idle-inner">
-              <p className="vt-search-count">Recent searches</p>
-              {recent.map(item => {
-                const { title, meta } = queryLabel(item)
-                return (
-                  <button
-                    key={JSON.stringify(item)}
-                    type="button"
-                    className="vt-search-hint"
-                    onClick={() => applyQuery(deserializeQuery(item))}
-                  >
-                    <span className="vt-search-hint-body">
-                      <span className="vt-search-name">{title}</span>
-                      {meta ? <span className="vt-search-meta">{meta}</span> : null}
-                    </span>
-                  </button>
-                )
-              })}
-            </div>
-          </div>
-        )}
-        </div>
-      </form>
-
-      {ran && (
-        <div className="vt-search-body">
-          <div className="vt-search-table-meta">
-            {results.length.toLocaleString()} {results.length === 1 ? "company" : "companies"}
-          </div>
-          {results.length === 0 ? (
-            <p className="vt-search-empty">No companies match. Change a filter and search again.</p>
-          ) : (
-            <div className="vt-search-table-wrap">
-              <table className="vt-search-table">
-                <thead>
-                  <tr>
-                    {th("name", "Company")}
-                    {th("ticker", "Ticker")}
-                    {th("class", classCol)}
-                    {th("sector", "Industry")}
-                    {th("hq", "HQ")}
-                    {th("revenue", "Revenue", true)}
-                    <th aria-label="Save" />
-                  </tr>
-                </thead>
-                <tbody ref={listRef}>
-                  {results.map((r, i) => {
-                    const isSaved = saved.has(r.slug)
-                    const cls = classFields(r, applied.scheme)
-                    return (
-                      <tr
-                        key={r.slug}
-                        data-active={i === activeIdx || undefined}
-                        className={i === activeIdx ? "is-active" : undefined}
-                        onClick={() => onOpen(r.slug)}
-                        onMouseEnter={() => setActiveIdx(i)}
-                      >
-                        <td><span className="vt-search-name">{r.name}</span></td>
-                        <td className="is-muted">{r.ticker ?? ""}</td>
-                        <td className="is-muted">{[cls.code, cls.label && cls.label !== cls.code ? cls.label : null].filter(Boolean).join(" · ")}</td>
-                        <td className="is-muted">{r.sector ?? ""}</td>
-                        <td className="is-muted">{r.hq_country ?? ""}</td>
-                        <td className="is-num">{money(r.revenue_latest, r.currency)}</td>
-                        <td>
-                          <button
-                            type="button"
-                            className={isSaved ? "vt-search-star is-on" : "vt-search-star"}
-                            title={isSaved ? "Remove from saved" : "Save company"}
-                            aria-label={isSaved ? "Remove from saved" : "Save company"}
-                            onClick={e => { e.stopPropagation(); toggleSave(r.slug) }}
-                          >
-                            <Star size={15} strokeWidth={1.5} fill={isSaved ? "currentColor" : "none"} />
-                          </button>
-                        </td>
+        <div className="vt-search-main-body">
+          {ran ? (
+            <div className="vt-search-body">
+              <div className="vt-search-table-meta">
+                {results.length.toLocaleString()} {results.length === 1 ? "company" : "companies"}
+              </div>
+              {results.length === 0 ? (
+                <p className="vt-search-empty">No companies match. Change a filter and search again.</p>
+              ) : (
+                <div className="vt-search-table-wrap">
+                  <table className="vt-search-table">
+                    <thead>
+                      <tr>
+                        {th("name", "Company")}
+                        {th("ticker", "Ticker")}
+                        {th("class", classCol)}
+                        {th("sector", "Industry")}
+                        {th("hq", "HQ")}
+                        {th("revenue", "Revenue", true)}
+                        <th aria-label="Save" />
                       </tr>
+                    </thead>
+                    <tbody ref={listRef}>
+                      {results.map((r, i) => {
+                        const isSaved = saved.has(r.slug)
+                        const cls = classFields(r, applied.scheme)
+                        return (
+                          <tr
+                            key={r.slug}
+                            data-active={i === activeIdx || undefined}
+                            className={i === activeIdx ? "is-active" : undefined}
+                            onClick={() => onOpen(r.slug)}
+                            onMouseEnter={() => setActiveIdx(i)}
+                          >
+                            <td><span className="vt-search-name">{r.name}</span></td>
+                            <td className="is-muted">{r.ticker ?? ""}</td>
+                            <td className="is-muted">{[cls.code, cls.label && cls.label !== cls.code ? cls.label : null].filter(Boolean).join(" · ")}</td>
+                            <td className="is-muted">{r.sector ?? ""}</td>
+                            <td className="is-muted">{r.hq_country ?? ""}</td>
+                            <td className="is-num">{money(r.revenue_latest, r.currency)}</td>
+                            <td>
+                              <button
+                                type="button"
+                                className={isSaved ? "vt-search-star is-on" : "vt-search-star"}
+                                title={isSaved ? "Remove from saved" : "Save company"}
+                                aria-label={isSaved ? "Remove from saved" : "Save company"}
+                                onClick={e => { e.stopPropagation(); toggleSave(r.slug) }}
+                              >
+                                <Star size={15} strokeWidth={1.5} fill={isSaved ? "currentColor" : "none"} />
+                              </button>
+                            </td>
+                          </tr>
+                        )
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+          ) : (
+            <div className="vt-search-intro">
+              {recent.length > 0 ? (
+                <>
+                  <p className="vt-search-count">Recent searches</p>
+                  {recent.map(item => {
+                    const { title, meta } = queryLabel(item)
+                    return (
+                      <button key={JSON.stringify(item)} type="button" className="vt-search-hint" onClick={() => applyQuery(deserializeQuery(item))}>
+                        <span className="vt-search-hint-body">
+                          <span className="vt-search-name">{title}</span>
+                          {meta ? <span className="vt-search-meta">{meta}</span> : null}
+                        </span>
+                      </button>
                     )
                   })}
-                </tbody>
-              </table>
+                </>
+              ) : (
+                <p className="vt-search-hint-empty">Pick filters on the left or type a company name, then hit Search.</p>
+              )}
             </div>
           )}
         </div>
-      )}
-
-      {drawer && (
-        <>
-          <button type="button" className="vt-search-drawer-scrim" aria-label="Close filters" onClick={() => setDrawer(false)} />
-          <aside id="vt-search-drawer" className="vt-search-drawer" role="dialog" aria-labelledby="vt-search-drawer-title">
-            <div className="vt-search-drawer-head">
-              <h2 id="vt-search-drawer-title" className="vt-search-drawer-title">Advanced filters</h2>
-              <Button type="button" variant="ghost" size="xs" aria-label="Close filters" onClick={() => setDrawer(false)}>
-                <X size={16} strokeWidth={1.5} />
-              </Button>
-            </div>
-            <div className="vt-search-drawer-body">
-              <Collapsible label="Classification" count={draft.classCodes.length} defaultOpen>
-                <div className="vt-search-class-row" ref={classRef}>
-                  <div className="vt-search-class-scheme">
-                    <span className="vt-sr-only">Classification system</span>
-                    <SelectControl
-                      size="md"
-                      variant="outline"
-                      block
-                      className="vt-search-scheme-trigger"
-                      value={draft.scheme}
-                      onValueChange={v => { setDraft(s => ({ ...s, scheme: v as Scheme, classQ: "", classCodes: [] })); setClassOpen(false) }}
-                    >
-                      <SelectControl.Item value="sic">SIC</SelectControl.Item>
-                      <SelectControl.Item value="naics">NAICS</SelectControl.Item>
-                      <SelectControl.Item value="nace">NACE</SelectControl.Item>
-                    </SelectControl>
-                  </div>
-                  <div className="vt-search-class-field">
-                    {draft.classCodes.map(code => (
-                      <button key={code} type="button" className="vt-search-class-chip" aria-label={`Remove ${code}`} onClick={() => toggleClass(code)}>
-                        {code}
-                        <X size={10} strokeWidth={2} />
-                      </button>
-                    ))}
-                    <label htmlFor="vt-search-class" className="vt-sr-only">Search {draft.scheme.toUpperCase()} codes</label>
-                    <input
-                      id="vt-search-class"
-                      className="vt-search-class-type"
-                      value={draft.classQ}
-                      placeholder={draft.classCodes.length ? "Add code" : schemePlaceholder}
-                      autoComplete="off"
-                      onChange={e => { setDraft(s => ({ ...s, classQ: e.target.value })); setClassOpen(true) }}
-                      onFocus={() => setClassOpen(true)}
-                      onKeyDown={onClassKey}
-                    />
-                    {classOpen && classHits.length > 0 && (
-                      <ul className="vt-search-class-menu" role="listbox" aria-multiselectable="true" aria-label={`${draft.scheme.toUpperCase()} codes`}>
-                        {classHits.map((c, i) => {
-                          const on = draft.classCodes.includes(c.code)
-                          return (
-                            <li key={c.code} role="presentation">
-                              <button type="button" className={i === classIdx || on ? "vt-search-class-opt is-active" : "vt-search-class-opt"} aria-selected={on} onClick={() => toggleClass(c.code)} onMouseEnter={() => setClassIdx(i)}>
-                                <span>
-                                  <span className="vt-search-class-code">{c.code}</span>
-                                  {c.label ? <span className="vt-search-class-label">{c.label}</span> : null}
-                                </span>
-                                {on ? <Check size={12} strokeWidth={2.5} aria-hidden /> : null}
-                              </button>
-                            </li>
-                          )
-                        })}
-                      </ul>
-                    )}
-                  </div>
-                </div>
-              </Collapsible>
-              <FilterSelect label="Industry" sel={draft.filters.sector} opts={counts(r => r.sector)} onToggle={v => toggle("sector", v)} searchable />
-              <FilterSelect label="Headquarters" sel={draft.filters.hq} opts={counts(r => r.hq_country, true)} onToggle={v => toggle("hq", v)} searchable />
-              <FilterSelect label="Revenue" sel={draft.filters.rev} opts={orderBands(REV_BANDS.map(b => b[0]), counts(r => r.revenue_latest != null ? revBand(r.revenue_latest) : null))} onToggle={v => toggle("rev", v)} />
-              <FilterSelect label="Operates in" sel={draft.filters.op} opts={counts(r => r.op_countries, true)} onToggle={v => toggle("op", v)} searchable />
-              <FilterSelect label="Region" sel={draft.filters.region} opts={counts(r => r.hq_region)} onToggle={v => toggle("region", v)} />
-              <FilterSelect label="Exchange" sel={draft.filters.exchange} opts={counts(r => r.exchange)} onToggle={v => toggle("exchange", v)} />
-              <FilterSelect label="Accounting" sel={draft.filters.std} opts={counts(r => r.accounting_standard)} onToggle={v => toggle("std", v)} />
-              <Collapsible label="Characteristics" count={(draft.filters.hasRnd ? 1 : 0) + (draft.filters.hasPatents ? 1 : 0) + (draft.filters.hasIntl ? 1 : 0)}>
-                <div className="vt-search-filter-opts">
-                  <button type="button" className={draft.filters.hasRnd ? "vt-search-chip is-on" : "vt-search-chip"} onClick={() => setDraft(s => ({ ...s, filters: { ...s.filters, hasRnd: !s.filters.hasRnd } }))}>R&D</button>
-                  <button type="button" className={draft.filters.hasPatents ? "vt-search-chip is-on" : "vt-search-chip"} onClick={() => setDraft(s => ({ ...s, filters: { ...s.filters, hasPatents: !s.filters.hasPatents } }))}>Patents</button>
-                  <button type="button" className={draft.filters.hasIntl ? "vt-search-chip is-on" : "vt-search-chip"} onClick={() => setDraft(s => ({ ...s, filters: { ...s.filters, hasIntl: !s.filters.hasIntl } }))}>International</button>
-                </div>
-              </Collapsible>
-            </div>
-            <div className="vt-search-drawer-foot">
-              <Button type="button" variant="outline" size="sm" onClick={() => setDraft(s => ({ ...s, classQ: "", classCodes: [], filters: emptyFilters() }))}>Clear filters</Button>
-              <Button type="button" variant="outline" size="sm" className="vt-search-go" onClick={runSearch}>Search</Button>
-            </div>
-          </aside>
-        </>
-      )}
+      </div>
     </div>
   )
 }
