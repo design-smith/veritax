@@ -1163,7 +1163,8 @@
 .vt-search-saved-row .vt-search-hint-body { min-width: 0; display: block; overflow: hidden; }
 /* single-line truncation; on hover scroll left to reveal the rest */
 .vt-search-saved-row .vt-search-name { display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; will-change: transform; }
-.vt-search-saved-row .vt-search-name.is-scrolling { text-overflow: clip; animation: vt-scroll-x 2.4s ease-in-out forwards; }
+/* while scrolling, the parent (hint-body) does the clipping so translateX(-dx) stops exactly when the end is flush right */
+.vt-search-saved-row .vt-search-name.is-scrolling { overflow: visible; text-overflow: clip; animation: vt-scroll-x 2.4s ease-in-out forwards; }
 @keyframes vt-scroll-x { from { transform: translateX(0); } to { transform: translateX(calc(-1 * var(--vt-dx, 0px))); } }
 .vt-search-saved-del {
   flex-shrink: 0; border: none; background: none; cursor: pointer; padding: 4px;
