@@ -1,7 +1,7 @@
 "use client"
 
-import { useEffect, useMemo, useRef, useState, type FormEvent, type KeyboardEvent as ReactKey } from "react"
-import { Check, Search, SlidersHorizontal, Star, X } from "lucide-react"
+import { useEffect, useMemo, useRef, useState, type FormEvent, type KeyboardEvent as ReactKey, type ReactNode } from "react"
+import { Check, ChevronDown, Search, SlidersHorizontal, Star, X } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { SelectControl } from "@/components/ui/select-control"
 import { loadIndex, money, type IndexRow } from "@/lib/companies"
@@ -605,9 +605,8 @@ export default function SearchPage({ onOpen }: { onOpen: (slug: string) => void 
               </Button>
             </div>
             <div className="vt-search-drawer-body">
-              <div className="vt-search-filter-group" ref={classRef}>
-                <span className="vt-search-filter-label">Classification</span>
-                <div className="vt-search-class-row">
+              <Collapsible label="Classification" count={draft.classCodes.length} defaultOpen>
+                <div className="vt-search-class-row" ref={classRef}>
                   <div className="vt-search-class-scheme">
                     <span className="vt-sr-only">Classification system</span>
                     <SelectControl
@@ -625,13 +624,7 @@ export default function SearchPage({ onOpen }: { onOpen: (slug: string) => void 
                   </div>
                   <div className="vt-search-class-field">
                     {draft.classCodes.map(code => (
-                      <button
-                        key={code}
-                        type="button"
-                        className="vt-search-class-chip"
-                        aria-label={`Remove ${code}`}
-                        onClick={() => toggleClass(code)}
-                      >
+                      <button key={code} type="button" className="vt-search-class-chip" aria-label={`Remove ${code}`} onClick={() => toggleClass(code)}>
                         {code}
                         <X size={10} strokeWidth={2} />
                       </button>
@@ -653,13 +646,7 @@ export default function SearchPage({ onOpen }: { onOpen: (slug: string) => void 
                           const on = draft.classCodes.includes(c.code)
                           return (
                             <li key={c.code} role="presentation">
-                              <button
-                                type="button"
-                                className={i === classIdx || on ? "vt-search-class-opt is-active" : "vt-search-class-opt"}
-                                aria-selected={on}
-                                onClick={() => toggleClass(c.code)}
-                                onMouseEnter={() => setClassIdx(i)}
-                              >
+                              <button type="button" className={i === classIdx || on ? "vt-search-class-opt is-active" : "vt-search-class-opt"} aria-selected={on} onClick={() => toggleClass(c.code)} onMouseEnter={() => setClassIdx(i)}>
                                 <span>
                                   <span className="vt-search-class-code">{c.code}</span>
                                   {c.label ? <span className="vt-search-class-label">{c.label}</span> : null}
@@ -673,22 +660,21 @@ export default function SearchPage({ onOpen }: { onOpen: (slug: string) => void 
                     )}
                   </div>
                 </div>
-              </div>
-              <FilterGroup label="Industry" sel={draft.filters.sector} opts={counts(r => r.sector).slice(0, 16)} onToggle={v => toggle("sector", v)} />
-              <FilterGroup label="Headquarters" sel={draft.filters.hq} opts={counts(r => r.hq_country, true).slice(0, 16)} onToggle={v => toggle("hq", v)} />
-              <FilterGroup label="Revenue" sel={draft.filters.rev} opts={orderBands(REV_BANDS.map(b => b[0]), counts(r => r.revenue_latest != null ? revBand(r.revenue_latest) : null))} onToggle={v => toggle("rev", v)} />
-              <FilterGroup label="Operates in" sel={draft.filters.op} opts={counts(r => r.op_countries, true).slice(0, 16)} onToggle={v => toggle("op", v)} />
-              <FilterGroup label="Region" sel={draft.filters.region} opts={counts(r => r.hq_region)} onToggle={v => toggle("region", v)} />
-              <FilterGroup label="Exchange" sel={draft.filters.exchange} opts={counts(r => r.exchange)} onToggle={v => toggle("exchange", v)} />
-              <FilterGroup label="Accounting" sel={draft.filters.std} opts={counts(r => r.accounting_standard)} onToggle={v => toggle("std", v)} />
-              <div className="vt-search-filter-group">
-                <span className="vt-search-filter-label">Flags</span>
+              </Collapsible>
+              <FilterSelect label="Industry" sel={draft.filters.sector} opts={counts(r => r.sector)} onToggle={v => toggle("sector", v)} searchable />
+              <FilterSelect label="Headquarters" sel={draft.filters.hq} opts={counts(r => r.hq_country, true)} onToggle={v => toggle("hq", v)} searchable />
+              <FilterSelect label="Revenue" sel={draft.filters.rev} opts={orderBands(REV_BANDS.map(b => b[0]), counts(r => r.revenue_latest != null ? revBand(r.revenue_latest) : null))} onToggle={v => toggle("rev", v)} />
+              <FilterSelect label="Operates in" sel={draft.filters.op} opts={counts(r => r.op_countries, true)} onToggle={v => toggle("op", v)} searchable />
+              <FilterSelect label="Region" sel={draft.filters.region} opts={counts(r => r.hq_region)} onToggle={v => toggle("region", v)} />
+              <FilterSelect label="Exchange" sel={draft.filters.exchange} opts={counts(r => r.exchange)} onToggle={v => toggle("exchange", v)} />
+              <FilterSelect label="Accounting" sel={draft.filters.std} opts={counts(r => r.accounting_standard)} onToggle={v => toggle("std", v)} />
+              <Collapsible label="Characteristics" count={(draft.filters.hasRnd ? 1 : 0) + (draft.filters.hasPatents ? 1 : 0) + (draft.filters.hasIntl ? 1 : 0)}>
                 <div className="vt-search-filter-opts">
                   <button type="button" className={draft.filters.hasRnd ? "vt-search-chip is-on" : "vt-search-chip"} onClick={() => setDraft(s => ({ ...s, filters: { ...s.filters, hasRnd: !s.filters.hasRnd } }))}>R&D</button>
                   <button type="button" className={draft.filters.hasPatents ? "vt-search-chip is-on" : "vt-search-chip"} onClick={() => setDraft(s => ({ ...s, filters: { ...s.filters, hasPatents: !s.filters.hasPatents } }))}>Patents</button>
                   <button type="button" className={draft.filters.hasIntl ? "vt-search-chip is-on" : "vt-search-chip"} onClick={() => setDraft(s => ({ ...s, filters: { ...s.filters, hasIntl: !s.filters.hasIntl } }))}>International</button>
                 </div>
-              </div>
+              </Collapsible>
             </div>
             <div className="vt-search-drawer-foot">
               <Button type="button" variant="outline" size="sm" onClick={() => setDraft(s => ({ ...s, classQ: "", classCodes: [], filters: emptyFilters() }))}>Clear filters</Button>
@@ -701,19 +687,71 @@ export default function SearchPage({ onOpen }: { onOpen: (slug: string) => void 
   )
 }
 
-function FilterGroup({ label, sel, opts, onToggle }: { label: string; sel: StringSet; opts: [string, number][]; onToggle: (v: string) => void }) {
-  if (opts.length === 0) return null
+function Collapsible({ label, count, defaultOpen = false, children }: { label: string; count?: number; defaultOpen?: boolean; children: ReactNode }) {
+  const [open, setOpen] = useState(defaultOpen)
   return (
-    <div className="vt-search-filter-group">
-      <span className="vt-search-filter-label">{label}</span>
-      <div className="vt-search-filter-opts">
-        {opts.map(([v, n]) => (
-          <button key={v} type="button" className={sel.has(v) ? "vt-search-chip is-on" : "vt-search-chip"} onClick={() => onToggle(v)}>
-            {v} <span style={{ color: "var(--color-text-secondary)" }}>{n}</span>
+    <div className="vt-search-cat">
+      <button type="button" className="vt-search-cat-head" onClick={() => setOpen(o => !o)} aria-expanded={open}>
+        <span className="vt-search-cat-name">{label}{count ? <span className="vt-search-cat-count">{count}</span> : null}</span>
+        <ChevronDown size={15} strokeWidth={1.5} className="vt-search-cat-chev" style={{ transform: open ? "rotate(180deg)" : "none" }} aria-hidden />
+      </button>
+      {open && <div className="vt-search-cat-body">{children}</div>}
+    </div>
+  )
+}
+
+// A collapsible filter category whose values are picked from a searchable dropdown (chips for selected).
+function FilterSelect({ label, sel, opts, onToggle, searchable = false }: { label: string; sel: StringSet; opts: [string, number][]; onToggle: (v: string) => void; searchable?: boolean }) {
+  const [menu, setMenu] = useState(false)
+  const [q, setQ] = useState("")
+  const ref = useRef<HTMLDivElement>(null)
+  useEffect(() => {
+    if (!menu) return
+    const close = (e: MouseEvent) => { if (ref.current && !ref.current.contains(e.target as Node)) setMenu(false) }
+    document.addEventListener("mousedown", close)
+    return () => document.removeEventListener("mousedown", close)
+  }, [menu])
+  if (opts.length === 0) return null
+  const shown = q ? opts.filter(([v]) => v.toLowerCase().includes(q.toLowerCase())) : opts
+  return (
+    <Collapsible label={label} count={sel.size}>
+      <div className="vt-search-class-field" ref={ref} onClick={() => setMenu(true)}>
+        {[...sel].map(v => (
+          <button key={v} type="button" className="vt-search-class-chip" aria-label={`Remove ${v}`} onClick={e => { e.stopPropagation(); onToggle(v) }}>
+            {v}
+            <X size={10} strokeWidth={2} />
           </button>
         ))}
+        <input
+          className="vt-search-class-type"
+          value={q}
+          placeholder={sel.size ? "Add" : `Select ${label.toLowerCase()}`}
+          autoComplete="off"
+          readOnly={!searchable}
+          onChange={e => setQ(e.target.value)}
+          onFocus={() => setMenu(true)}
+        />
+        {menu && (
+          <ul className="vt-search-class-menu" role="listbox" aria-multiselectable="true" aria-label={label}>
+            {shown.slice(0, 60).map(([v, n]) => {
+              const on = sel.has(v)
+              return (
+                <li key={v} role="presentation">
+                  <button type="button" className={on ? "vt-search-class-opt is-active" : "vt-search-class-opt"} aria-selected={on} onClick={() => onToggle(v)}>
+                    <span>
+                      <span className="vt-search-class-code">{v}</span>
+                      <span className="vt-search-class-label">{n}</span>
+                    </span>
+                    {on ? <Check size={12} strokeWidth={2.5} aria-hidden /> : null}
+                  </button>
+                </li>
+              )
+            })}
+            {shown.length === 0 && <li role="presentation"><span className="vt-search-class-opt" style={{ color: "var(--color-text-tertiary)" }}>No matches</span></li>}
+          </ul>
+        )}
       </div>
-    </div>
+    </Collapsible>
   )
 }
 
