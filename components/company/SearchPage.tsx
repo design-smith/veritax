@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useMemo, useRef, useState, type FormEvent, type KeyboardEvent as ReactKey, type ReactNode } from "react"
+import { useEffect, useMemo, useRef, useState, type FormEvent, type KeyboardEvent as ReactKey, type MouseEvent as ReactMouse, type ReactNode } from "react"
 import { Check, ChevronDown, Search, Star, X } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { SelectControl } from "@/components/ui/select-control"
@@ -27,7 +27,12 @@ const SUBS_BANDS: [string, (n: number) => boolean][] = [
 const subsBand = (n: number) => SUBS_BANDS.find(([, fn]) => fn(n))?.[0] ?? "None"
 
 const emptySetMap = (): SetMap => Object.fromEntries(FACETS.map(k => [k, new Set<string>()])) as SetMap
-const emptyFilters = (): Filters => ({ inc: emptySetMap(), exc: emptySetMap(), hasRnd: false, hasPatents: false, hasIntl: false })
+const emptyFilters = (): Filters => {
+  const inc = emptySetMap()
+  // Default search scope: North + South America headquarters.
+  inc.region = new Set(["Americas"])
+  return { inc, exc: emptySetMap(), hasRnd: false, hasPatents: false, hasIntl: false }
+}
 const emptyQuery = (): Query => ({ q: "", scheme: "sic", classQ: "", classCodes: [], filters: emptyFilters() })
 
 function classFields(r: IndexRow, scheme: Scheme): { code: string | null; label: string | null } {
@@ -92,7 +97,7 @@ function labelOf(q: Query): string {
   if (q.filters.hasPatents) bits.push("Patents")
   if (q.filters.hasIntl) bits.push("International")
   if (!bits.length) return "All companies"
-  return bits.length > 4 ? `${bits.slice(0, 4).join(" · ")} +${bits.length - 4}` : bits.join(" · ")
+  return bits.length > 3 ? `${bits.slice(0, 3).join(" · ")} …` : bits.join(" · ")
 }
 
 export default function SearchPage({ onOpen }: { onOpen: (slug: string) => void }) {
@@ -259,16 +264,19 @@ export default function SearchPage({ onOpen }: { onOpen: (slug: string) => void 
           {searches.length > 0 && (
             <Collapsible label="Saved searches" count={searches.length} defaultOpen>
               <div className="vt-search-saved">
-                {searches.map(s => (
-                  <div key={s.id} className="vt-search-saved-row">
-                    <button type="button" className="vt-search-hint" onClick={() => setQuery(deserializeQuery(s))}>
-                      <span className="vt-search-hint-body"><span className="vt-search-name">{s.name}</span></span>
-                    </button>
-                    <button type="button" className="vt-search-saved-del" aria-label={`Delete saved search ${s.name}`} onClick={() => removeSaved(s.id)}>
-                      <X size={13} strokeWidth={1.5} />
-                    </button>
-                  </div>
-                ))}
+                {searches.map(s => {
+                  const label = labelOf(deserializeQuery(s))
+                  return (
+                    <div key={s.id} className="vt-search-saved-row" onMouseEnter={marqueeOn} onMouseLeave={marqueeOff}>
+                      <button type="button" className="vt-search-hint" title={label} onClick={() => setQuery(deserializeQuery(s))}>
+                        <span className="vt-search-hint-body"><span className="vt-search-name">{label}</span></span>
+                      </button>
+                      <button type="button" className="vt-search-saved-del" aria-label={`Delete saved search ${label}`} onClick={() => removeSaved(s.id)}>
+                        <X size={13} strokeWidth={1.5} />
+                      </button>
+                    </div>
+                  )
+                })}
               </div>
             </Collapsible>
           )}
@@ -466,4 +474,17 @@ function FilterSelect({ label, opts, inc, exc, onToggle, searchable = false }: {
 function orderBands(order: string[], o: [string, number][]): [string, number][] {
   const m = new Map(o)
   return order.filter(x => m.has(x)).map(x => [x, m.get(x)!] as [string, number])
+}
+
+// On hover, if the label overflows its row, scroll it left to reveal the rest (distance measured live).
+function marqueeOn(e: ReactMouse<HTMLDivElement>) {
+  const el = e.currentTarget.querySelector<HTMLElement>(".vt-search-name")
+  if (!el) return
+  const dx = el.scrollWidth - el.clientWidth
+  if (dx > 4) { el.style.setProperty("--vt-dx", `${dx}px`); el.classList.add("is-scrolling") }
+}
+function marqueeOff(e: ReactMouse<HTMLDivElement>) {
+  const el = e.currentTarget.querySelector<HTMLElement>(".vt-search-name")
+  if (!el) return
+  el.classList.remove("is-scrolling"); el.style.removeProperty("--vt-dx")
 }

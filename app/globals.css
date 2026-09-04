@@ -1159,11 +1159,18 @@
 /* saved searches list */
 .vt-search-saved { display: flex; flex-direction: column; gap: 2px; }
 .vt-search-saved-row { display: flex; align-items: center; gap: 4px; }
-.vt-search-saved-row .vt-search-hint { flex: 1; min-width: 0; }
+.vt-search-saved-row .vt-search-hint { flex: 1; min-width: 0; overflow: hidden; }
+.vt-search-saved-row .vt-search-hint-body { min-width: 0; display: block; overflow: hidden; }
+/* single-line truncation; on hover scroll left to reveal the rest */
+.vt-search-saved-row .vt-search-name { display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; will-change: transform; }
+.vt-search-saved-row .vt-search-name.is-scrolling { text-overflow: clip; animation: vt-scroll-x 2.4s ease-in-out forwards; }
+@keyframes vt-scroll-x { from { transform: translateX(0); } to { transform: translateX(calc(-1 * var(--vt-dx, 0px))); } }
 .vt-search-saved-del {
   flex-shrink: 0; border: none; background: none; cursor: pointer; padding: 4px;
   border-radius: var(--radius-sm); color: var(--color-text-tertiary); display: inline-flex;
+  opacity: 0; transition: opacity 120ms ease;
 }
+.vt-search-saved-row:hover .vt-search-saved-del, .vt-search-saved-del:focus-visible { opacity: 1; }
 .vt-search-saved-del:hover, .vt-search-saved-del:focus-visible { color: var(--color-text); background: var(--color-background-primary-soft); }
 .vt-search-drawer-head {
   display: flex;
