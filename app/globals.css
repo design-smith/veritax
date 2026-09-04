@@ -1155,6 +1155,16 @@
 .vt-search-mode button.is-on { background: var(--color-background-primary-soft); border-color: var(--color-border-strong, #999); color: var(--color-text); }
 .vt-search-mode button.is-on.is-exclude { background: #fdecec; border-color: #f0b4b4; color: #b91c1c; }
 .vt-search-class-chip.is-exclude { background: #fdecec; border-color: #f0b4b4; color: #b91c1c; }
+
+/* saved searches list */
+.vt-search-saved { display: flex; flex-direction: column; gap: 2px; }
+.vt-search-saved-row { display: flex; align-items: center; gap: 4px; }
+.vt-search-saved-row .vt-search-hint { flex: 1; min-width: 0; }
+.vt-search-saved-del {
+  flex-shrink: 0; border: none; background: none; cursor: pointer; padding: 4px;
+  border-radius: var(--radius-sm); color: var(--color-text-tertiary); display: inline-flex;
+}
+.vt-search-saved-del:hover, .vt-search-saved-del:focus-visible { color: var(--color-text); background: var(--color-background-primary-soft); }
 .vt-search-drawer-head {
   display: flex;
   align-items: center;

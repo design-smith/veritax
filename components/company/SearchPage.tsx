@@ -66,6 +66,35 @@ function activeCount(q: Query): number {
 }
 const isActive = (q: Query) => q.q.trim() !== "" || q.classQ.trim() !== "" || activeCount(q) > 0
 
+// ---- saved searches (persisted filter sets) ----
+type StoredQuery = { id: string; name: string; q: string; scheme: Scheme; classCodes: string[]; inc: Record<string, string[]>; exc: Record<string, string[]>; hasRnd: boolean; hasPatents: boolean; hasIntl: boolean }
+const SAVED_KEY = "veritax.savedSearches"
+function fingerprint(q: Query): string {
+  return JSON.stringify([q.q.trim(), q.scheme, [...q.classCodes].sort(), FACETS.map(k => [...q.filters.inc[k]].sort()), FACETS.map(k => [...q.filters.exc[k]].sort()), q.filters.hasRnd, q.filters.hasPatents, q.filters.hasIntl])
+}
+function serializeQuery(q: Query, name: string): StoredQuery {
+  const inc: Record<string, string[]> = {}, exc: Record<string, string[]> = {}
+  for (const k of FACETS) { inc[k] = [...q.filters.inc[k]]; exc[k] = [...q.filters.exc[k]] }
+  return { id: fingerprint(q), name, q: q.q.trim(), scheme: q.scheme, classCodes: [...q.classCodes], inc, exc, hasRnd: q.filters.hasRnd, hasPatents: q.filters.hasPatents, hasIntl: q.filters.hasIntl }
+}
+function deserializeQuery(s: StoredQuery): Query {
+  const inc = emptySetMap(), exc = emptySetMap()
+  for (const k of FACETS) { inc[k] = new Set(s.inc?.[k] || []); exc[k] = new Set(s.exc?.[k] || []) }
+  const scheme: Scheme = s.scheme === "naics" || s.scheme === "nace" ? s.scheme : "sic"
+  return { q: s.q || "", scheme, classQ: "", classCodes: Array.isArray(s.classCodes) ? s.classCodes : [], filters: { inc, exc, hasRnd: !!s.hasRnd, hasPatents: !!s.hasPatents, hasIntl: !!s.hasIntl } }
+}
+function labelOf(q: Query): string {
+  const bits: string[] = []
+  if (q.q.trim()) bits.push(`"${q.q.trim()}"`)
+  if (q.classCodes.length) bits.push(`${q.scheme.toUpperCase()} ${q.classCodes.join(", ")}`)
+  for (const k of FACETS) { for (const v of q.filters.inc[k]) bits.push(v); for (const v of q.filters.exc[k]) bits.push(`−${v}`) }
+  if (q.filters.hasRnd) bits.push("R&D")
+  if (q.filters.hasPatents) bits.push("Patents")
+  if (q.filters.hasIntl) bits.push("International")
+  if (!bits.length) return "All companies"
+  return bits.length > 4 ? `${bits.slice(0, 4).join(" · ")} +${bits.length - 4}` : bits.join(" · ")
+}
+
 export default function SearchPage({ onOpen }: { onOpen: (slug: string) => void }) {
   const [rows, setRows] = useState<IndexRow[] | null>(null)
   const [err, setErr] = useState(false)
@@ -74,12 +103,14 @@ export default function SearchPage({ onOpen }: { onOpen: (slug: string) => void 
   const [classIdx, setClassIdx] = useState(0)
   const [sort, setSort] = useState("revenue")
   const [activeIdx, setActiveIdx] = useState(0)
+  const [searches, setSearches] = useState<StoredQuery[]>([])
   const [saved, toggleSave] = useSavedCompanies()
   const inputRef = useRef<HTMLInputElement>(null)
   const classRef = useRef<HTMLDivElement>(null)
   const listRef = useRef<HTMLTableSectionElement>(null)
 
   useEffect(() => { loadIndex().then(setRows).catch(() => setErr(true)) }, [])
+  useEffect(() => { try { const raw = JSON.parse(localStorage.getItem(SAVED_KEY) || "[]"); if (Array.isArray(raw)) setSearches(raw) } catch { /* ignore */ } }, [])
   useEffect(() => {
     const close = (e: MouseEvent) => { if (classRef.current && !classRef.current.contains(e.target as Node)) setClassOpen(false) }
     document.addEventListener("mousedown", close)
@@ -172,6 +203,10 @@ export default function SearchPage({ onOpen }: { onOpen: (slug: string) => void 
   }
   const toggleFlag = (k: "hasRnd" | "hasPatents" | "hasIntl") => setQuery(s => ({ ...s, filters: { ...s.filters, [k]: !s.filters[k] } }))
 
+  function persistSearches(next: StoredQuery[]) { setSearches(next); try { localStorage.setItem(SAVED_KEY, JSON.stringify(next)) } catch { /* ignore */ } }
+  function saveCurrent() { if (!isActive(query)) return; const s = serializeQuery(query, labelOf(query)); persistSearches([s, ...searches.filter(x => x.id !== s.id)].slice(0, 20)) }
+  function removeSaved(id: string) { persistSearches(searches.filter(x => x.id !== id)) }
+
   function onMainKey(e: ReactKey<HTMLInputElement>) {
     if (e.key === "Escape") { if (classOpen) setClassOpen(false); return }
     if (!active) return
@@ -221,6 +256,22 @@ export default function SearchPage({ onOpen }: { onOpen: (slug: string) => void 
           {nActive ? <button type="button" className="vt-search-panel-clear" onClick={() => setQuery(emptyQuery())}>Clear</button> : null}
         </div>
         <div className="vt-search-panel-body">
+          {searches.length > 0 && (
+            <Collapsible label="Saved searches" count={searches.length} defaultOpen>
+              <div className="vt-search-saved">
+                {searches.map(s => (
+                  <div key={s.id} className="vt-search-saved-row">
+                    <button type="button" className="vt-search-hint" onClick={() => setQuery(deserializeQuery(s))}>
+                      <span className="vt-search-hint-body"><span className="vt-search-name">{s.name}</span></span>
+                    </button>
+                    <button type="button" className="vt-search-saved-del" aria-label={`Delete saved search ${s.name}`} onClick={() => removeSaved(s.id)}>
+                      <X size={13} strokeWidth={1.5} />
+                    </button>
+                  </div>
+                ))}
+              </div>
+            </Collapsible>
+          )}
           <Collapsible label="Classification" count={query.classCodes.length} defaultOpen>
             <div className="vt-search-class-row" ref={classRef}>
               <div className="vt-search-class-scheme">
@@ -272,6 +323,9 @@ export default function SearchPage({ onOpen }: { onOpen: (slug: string) => void 
               <button type="button" className={query.filters.hasIntl ? "vt-search-chip is-on" : "vt-search-chip"} onClick={() => toggleFlag("hasIntl")}>International</button>
             </div>
           </Collapsible>
+        </div>
+        <div className="vt-search-panel-foot">
+          <Button type="button" variant="outline" size="sm" block disabled={!active} onClick={saveCurrent}>Save search</Button>
         </div>
       </aside>
 
