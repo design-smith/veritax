@@ -10,7 +10,9 @@ import {
   type CompanyProfile, type Financials, type Footprint, type Group, type IP, type KeyMetric,
 } from "@/lib/companies"
 import { useSavedCompanies } from "@/lib/saved-companies"
-import { downloadCompanyJSON, downloadCompanyZip } from "@/components/company/download"
+import { SelectControl } from "@/components/ui/select-control"
+import { computePLIs, lines, periodTotals, PLIS, yearsAvailable } from "@/lib/tp"
+import { downloadCompanyJSON, downloadCompanyZip, downloadFinancialsCSV } from "@/components/company/download"
 
 const TABS = [
   ["identity", "Identity"], ["business", "Business & Operations"],
@@ -21,7 +23,6 @@ type TabId = typeof TABS[number][0]
 
 const CARD: React.CSSProperties = { border: "1px solid var(--color-border)", borderRadius: "var(--radius-lg)", background: "var(--color-surface)", padding: "1rem 1.25rem" }
 const H: React.CSSProperties = { fontSize: "var(--font-text-xs-size)", fontWeight: "var(--font-weight-semibold)", letterSpacing: "0.04em", textTransform: "uppercase", color: "var(--color-text-tertiary)", margin: "0 0 0.75rem" }
-const pct = (v: number | null) => v == null ? "—" : (v * 100).toFixed(1) + "%"
 
 export default function CompanyRecord({ slug, onBack }: { slug: string; onBack: () => void }) {
   const [profile, setProfile] = useState<CompanyProfile | null>(null)
@@ -198,7 +199,6 @@ function Business({ p }: { p: CompanyProfile }) {
 
 // ---------------- Financials ----------------
 function FinancialsTab({ p, fin }: { p: CompanyProfile; fin: Financials | null }) {
-  const d = p.derived
   return (
     <div style={{ display: "grid", gap: "1.5rem", minWidth: 0, maxWidth: "100%" }}>
       <section><h2 style={H}>Headline metrics · latest fiscal year</h2>
@@ -217,20 +217,112 @@ function FinancialsTab({ p, fin }: { p: CompanyProfile; fin: Financials | null }
         {fin ? <KeyFinancials fin={fin} /> : <Centered>Loading…</Centered>}
       </section>
 
-      <section><h2 style={H}>Derived ratios (transfer-pricing)</h2>
-        <FieldCard>
-          <Field label="EBIT margin">{pct(d.ebit_margin)}</Field>
-          <Field label="Net cost plus">{pct(d.net_cost_plus)}</Field>
-          <Field label="Berry ratio">{d.berry != null ? d.berry.toFixed(2) : "—"}</Field>
-          <Field label="ROA">{pct(d.roa)}</Field>
-          <Field label="R&D / revenue">{pct(d.rd_to_revenue)}</Field>
-        </FieldCard>
-      </section>
+      {fin && <TPAnalysis slug={p.slug} fin={fin} />}
 
       <section><h2 style={H}>Normalized facts · {fin?.standard || p.accounting_standard} ({p.facts_count.toLocaleString()} facts)</h2>
         {fin ? <Pivot fin={fin} /> : <Centered>Loading facts…</Centered>}
       </section>
     </div>
+  )
+}
+
+// Transfer-pricing analysis: pick a multi-year period → pooled weighted-average financials + PLIs.
+const tpTh: React.CSSProperties = { padding: "0.4rem 0.6rem", textAlign: "left", fontSize: 11, textTransform: "uppercase", letterSpacing: "0.03em", color: "var(--color-text-tertiary)", borderBottom: "1px solid var(--color-border)" }
+const tpTd: React.CSSProperties = { padding: "0.4rem 0.6rem", fontSize: "var(--font-text-sm-size)", borderBottom: "1px solid var(--color-border)", whiteSpace: "nowrap" }
+const fmtPLI = (v: number | null, kind: "pct" | "ratio") => v == null ? "—" : kind === "pct" ? (v * 100).toFixed(2) + "%" : v.toFixed(2)
+
+function StatMini({ label, value }: { label: string; value: React.ReactNode }) {
+  return <div style={{ ...CARD, padding: "0.75rem 0.9rem" }}><div style={{ fontSize: 11, color: "var(--color-text-tertiary)", marginBottom: 3 }}>{label}</div><div style={{ fontSize: 18, fontWeight: "var(--font-weight-semibold)", color: "var(--color-text)" }}>{value}</div></div>
+}
+
+function YearRange({ years, value, onChange }: { years: number[]; value: [number, number]; onChange: (v: [number, number]) => void }) {
+  if (years.length < 2) return null
+  const max = years.length - 1
+  const i0 = Math.max(0, years.indexOf(value[0])), i1 = years.indexOf(value[1]) < 0 ? max : years.indexOf(value[1])
+  return (
+    <div className="vt-range">
+      <div className="vt-range-track"><div className="vt-range-fill" style={{ left: `${(i0 / max) * 100}%`, right: `${100 - (i1 / max) * 100}%` }} /></div>
+      <input type="range" className="vt-range-input" min={0} max={max} value={i0} aria-label="Start year" onChange={e => { const j = Math.min(Number(e.target.value), i1); onChange([years[j], years[i1]]) }} />
+      <input type="range" className="vt-range-input" min={0} max={max} value={i1} aria-label="End year" onChange={e => { const j = Math.max(Number(e.target.value), i0); onChange([years[i0], years[j]]) }} />
+    </div>
+  )
+}
+
+function TPAnalysis({ slug, fin }: { slug: string; fin: Financials }) {
+  const L = useMemo(() => lines(fin), [fin])
+  const years = useMemo(() => yearsAvailable(fin), [fin])
+  const [range, setRange] = useState<[number, number] | null>(null)
+  const [pliKey, setPliKey] = useState("op_margin")
+  useEffect(() => {
+    if (!years.length) { setRange(null); return }
+    setRange([years[Math.max(0, years.length - 3)], years[years.length - 1]])
+  }, [years])
+
+  if (!years.length) return <section><h2 style={H}>Transfer-pricing analysis</h2><NotResearched what="annual financials for a multi-year analysis" /></section>
+  const [y0, y1] = range ?? [years[0], years[years.length - 1]]
+  const sel = years.filter(y => y >= y0 && y <= y1)
+  const totals = periodTotals(L, sel)
+  const plis = computePLIs(L, sel)
+  const active = plis.find(p => p.key === pliKey) ?? plis[0]
+  const cur = fin.currency
+  const span = `FY${y0}${y1 !== y0 ? `–FY${y1}` : ""}`
+
+  return (
+    <section>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, flexWrap: "wrap", marginBottom: "0.75rem" }}>
+        <h2 style={{ ...H, margin: 0 }}>Transfer-pricing analysis</h2>
+        <button type="button" style={{ ...btn, gap: 6 }} onClick={() => downloadFinancialsCSV(slug, fin, sel)}><Download size={14} strokeWidth={1.5} /> Financials (CSV)</button>
+      </div>
+
+      <div style={{ ...CARD, marginBottom: "1rem" }}>
+        <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", marginBottom: years.length > 1 ? "0.6rem" : 0 }}>
+          <span style={{ fontSize: 11, textTransform: "uppercase", letterSpacing: "0.04em", color: "var(--color-text-tertiary)" }}>Analysis period · {sel.length} {sel.length === 1 ? "year" : "years"}</span>
+          <span style={{ fontWeight: "var(--font-weight-semibold)", color: "var(--color-text)" }}>{span}</span>
+        </div>
+        <YearRange years={years} value={[y0, y1]} onChange={setRange} />
+      </div>
+
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(150px, 1fr))", gap: "0.75rem", marginBottom: "1rem" }}>
+        <StatMini label={`Revenue · ${sel.length}y total`} value={money(totals.revenue, cur)} />
+        <StatMini label="EBIT · total" value={money(totals.ebit, cur)} />
+        <StatMini label="Net income · total" value={money(totals.netIncome, cur)} />
+        <StatMini label="Operating margin" value={fmtPLI(totals.opMargin, "pct")} />
+        <StatMini label="Net margin" value={fmtPLI(totals.netMargin, "pct")} />
+      </div>
+
+      <div style={CARD}>
+        <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", marginBottom: "0.4rem" }}>
+          <span style={{ fontSize: "var(--font-text-sm-size)", color: "var(--color-text-secondary)" }}>PLI</span>
+          <SelectControl size="sm" variant="outline" value={pliKey} onValueChange={setPliKey}>
+            {PLIS.map(pl => <SelectControl.Item key={pl.key} value={pl.key}>{pl.label} · {pl.short}</SelectControl.Item>)}
+          </SelectControl>
+          <span style={{ marginLeft: "auto", fontSize: 24, fontWeight: "var(--font-weight-semibold)", color: "var(--color-text)", fontVariantNumeric: "tabular-nums" }}>{fmtPLI(active.value, active.kind)}</span>
+        </div>
+        <div style={{ fontSize: 11, color: "var(--color-text-tertiary)", marginBottom: "0.6rem" }}>Pooled weighted average · {span} · {active.short}</div>
+        <div style={{ overflowX: "auto" }}>
+          <table style={{ width: "100%", borderCollapse: "collapse" }}>
+            <thead><tr><th style={tpTh}>Fiscal year</th><th style={{ ...tpTh, textAlign: "right" }}>Numerator</th><th style={{ ...tpTh, textAlign: "right" }}>Denominator</th><th style={{ ...tpTh, textAlign: "right" }}>Ratio</th></tr></thead>
+            <tbody>
+              {active.perYear.map(r => (
+                <tr key={r.year}>
+                  <td style={tpTd}>FY{r.year}</td>
+                  <td style={{ ...tpTd, textAlign: "right" }}>{money(r.num, cur)}</td>
+                  <td style={{ ...tpTd, textAlign: "right" }}>{money(r.den, cur)}</td>
+                  <td style={{ ...tpTd, textAlign: "right", fontVariantNumeric: "tabular-nums" }}>{fmtPLI(r.ratio, active.kind)}</td>
+                </tr>
+              ))}
+              <tr>
+                <td style={{ ...tpTd, fontWeight: "var(--font-weight-semibold)", color: "var(--color-text)" }}>Weighted (pooled)</td>
+                <td style={{ ...tpTd, textAlign: "right", fontWeight: "var(--font-weight-medium)" }}>{money(active.sumNum, cur)}</td>
+                <td style={{ ...tpTd, textAlign: "right", fontWeight: "var(--font-weight-medium)" }}>{money(active.sumDen, cur)}</td>
+                <td style={{ ...tpTd, textAlign: "right", fontWeight: "var(--font-weight-semibold)", color: "var(--color-text)", fontVariantNumeric: "tabular-nums" }}>{fmtPLI(active.value, active.kind)}</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+        <p style={{ fontSize: 11, color: "var(--color-text-tertiary)", margin: "0.75rem 0 0", lineHeight: 1.5 }}>PLIs indicate profitability, not comparability — screen candidates qualitatively; don&apos;t pick comparables just to hit a target margin.</p>
+      </div>
+    </section>
   )
 }
 

@@ -4,6 +4,7 @@
 // Financials (numeric) as CSV, every other tab rendered to PDF, plus the raw JSON. jsPDF + jszip are
 // dynamically imported so they stay out of the main bundle.
 import { money, type CompanyProfile, type Financials, type Footprint, type Group, type IP } from "@/lib/companies"
+import { computePLIs, lines as tpLines } from "@/lib/tp"
 
 export type Bundle = { profile: CompanyProfile; financials: Financials; footprint: Footprint; ip: IP; group: Group }
 
@@ -26,6 +27,24 @@ function financialsCSV(f: Financials): string {
   const lines = [head.map(esc).join(",")]
   for (const r of f.rows) lines.push([r.concept, r.label, r.statement, r.unit, r.currency, ...years.map(y => r.values[y] ?? "")].map(esc).join(","))
   return lines.join("\n")
+}
+
+// Financials-tab download: full statements + the selected-period pooled PLIs.
+export function downloadFinancialsCSV(slug: string, f: Financials, years: number[]) {
+  const esc = (v: unknown) => { const s = v == null ? "" : String(v); return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s }
+  const yrs = [...years].sort((a, b) => a - b)
+  const plis = computePLIs(tpLines(f), yrs)
+  const out: string[] = [financialsCSV(f), ""]
+  if (yrs.length) {
+    out.push(`Profit level indicators — pooled weighted average, FY${yrs[0]}–FY${yrs[yrs.length - 1]}`)
+    out.push(["PLI", "Basis", "Numerator (Σ)", "Denominator (Σ)", "Weighted", ...yrs.map(y => `FY${y}`)].map(esc).join(","))
+    for (const p of plis) {
+      const fmt = (r: number | null) => r == null ? "" : p.kind === "pct" ? (r * 100).toFixed(2) + "%" : r.toFixed(2)
+      const per = yrs.map(y => fmt(p.perYear.find(x => x.year === y)?.ratio ?? null))
+      out.push([p.label, p.short, p.sumNum ?? "", p.sumDen ?? "", fmt(p.value), ...per].map(esc).join(","))
+    }
+  }
+  triggerDownload(new Blob([out.join("\n")], { type: "text/csv;charset=utf-8" }), `${slug}-financials.csv`)
 }
 
 // ---- PDF helpers (jsPDF) ----
