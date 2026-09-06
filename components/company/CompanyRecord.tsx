@@ -220,7 +220,7 @@ const tpTd: React.CSSProperties = { padding: "0.4rem 0.6rem", fontSize: "var(--f
 const fmtPLI = (v: number | null, kind: "pct" | "ratio") => v == null ? "—" : kind === "pct" ? (v * 100).toFixed(2) + "%" : v.toFixed(2)
 
 function StatMini({ label, value }: { label: string; value: React.ReactNode }) {
-  return <div style={{ ...CARD, padding: "0.75rem 0.9rem" }}><div style={{ fontSize: 11, color: "var(--color-text-tertiary)", marginBottom: 3 }}>{label}</div><div style={{ fontSize: 18, fontWeight: "var(--font-weight-semibold)", color: "var(--color-text)" }}>{value}</div></div>
+  return <div style={{ ...CARD, padding: "0.5rem 0.65rem" }}><div style={{ fontSize: 10, textTransform: "uppercase", letterSpacing: "0.03em", color: "var(--color-text-tertiary)", marginBottom: 2 }}>{label}</div><div style={{ fontSize: 14, fontWeight: "var(--font-weight-semibold)", color: "var(--color-text)" }}>{value}</div></div>
 }
 
 function TPAnalysis({ slug, fin }: { slug: string; fin: Financials }) {
@@ -249,18 +249,19 @@ function TPAnalysis({ slug, fin }: { slug: string; fin: Financials }) {
         <button type="button" style={{ ...btn, gap: 6 }} onClick={() => downloadFinancialsCSV(slug, fin, sel)}><Download size={14} strokeWidth={1.5} /> Financials (CSV)</button>
       </div>
 
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(150px, 1fr))", gap: "0.75rem", marginBottom: "1rem" }}>
-        <div style={{ ...CARD, padding: "0.75rem 0.9rem" }}>
-          <div style={{ fontSize: 11, color: "var(--color-text-tertiary)", marginBottom: 6 }}>Analysis period</div>
-          <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(130px, 1fr))", gap: "0.6rem", marginBottom: "1rem", alignItems: "stretch" }}>
+        <div style={{ gridColumn: "span 2", borderRadius: "var(--radius-lg)", padding: "0.85rem 1rem", background: "linear-gradient(135deg, #eef0ff, #f6f4ff)", border: "2px solid #4f46e5", boxShadow: "0 6px 20px rgba(79,70,229,0.25)" }}>
+          <div style={{ fontSize: 11, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.06em", color: "#4f46e5", marginBottom: 8 }}>Analysis period</div>
+          <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
             <SelectControl size="sm" variant="outline" value={String(y0)} onValueChange={v => setRange([Number(v), Math.max(Number(v), y1)])}>
               {years.map(y => <SelectControl.Item key={y} value={String(y)}>{`FY${String(y).slice(2)}`}</SelectControl.Item>)}
             </SelectControl>
-            <span style={{ color: "var(--color-text-tertiary)" }}>–</span>
+            <span style={{ color: "#4f46e5", fontWeight: 600 }}>–</span>
             <SelectControl size="sm" variant="outline" value={String(y1)} onValueChange={v => setRange([Math.min(y0, Number(v)), Number(v)])}>
               {years.map(y => <SelectControl.Item key={y} value={String(y)}>{`FY${String(y).slice(2)}`}</SelectControl.Item>)}
             </SelectControl>
           </div>
+          <div style={{ fontSize: 11, color: "var(--color-text-secondary)", marginTop: 8 }}>{sel.length} {sel.length === 1 ? "year" : "years"} · pooled weighted average</div>
         </div>
         <StatMini label={`Revenue · ${sel.length}y total`} value={money(totals.revenue, cur)} />
         <StatMini label="EBIT · total" value={money(totals.ebit, cur)} />
