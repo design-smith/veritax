@@ -220,7 +220,7 @@ const tpTd: React.CSSProperties = { padding: "0.4rem 0.6rem", fontSize: "var(--f
 const fmtPLI = (v: number | null, kind: "pct" | "ratio") => v == null ? "—" : kind === "pct" ? (v * 100).toFixed(2) + "%" : v.toFixed(2)
 
 function StatMini({ label, value }: { label: string; value: React.ReactNode }) {
-  return <div style={{ ...CARD, padding: "0.5rem 0.65rem" }}><div style={{ fontSize: 10, textTransform: "uppercase", letterSpacing: "0.03em", color: "var(--color-text-tertiary)", marginBottom: 2 }}>{label}</div><div style={{ fontSize: 14, fontWeight: "var(--font-weight-semibold)", color: "var(--color-text)" }}>{value}</div></div>
+  return <div style={{ ...CARD, padding: "0.7rem 0.85rem", display: "flex", flexDirection: "column", justifyContent: "center" }}><div style={{ fontSize: 10, textTransform: "uppercase", letterSpacing: "0.03em", color: "var(--color-text-tertiary)", marginBottom: 4 }}>{label}</div><div style={{ fontSize: 19, fontWeight: "var(--font-weight-semibold)", color: "var(--color-text)", lineHeight: 1.1 }}>{value}</div></div>
 }
 
 function TPAnalysis({ slug, fin }: { slug: string; fin: Financials }) {
