@@ -7,7 +7,7 @@ import { ArrowLeft, Check, ChevronDown, Download, ExternalLink, Minus, Search, S
 import { Input } from "@/components/ui/input"
 import {
   compact, getFinancials, getFootprint, getGroup, getIP, getProfile, money,
-  type CompanyProfile, type Financials, type Footprint, type Group, type IP, type KeyMetric,
+  type CompanyProfile, type Financials, type Footprint, type Group, type IP,
 } from "@/lib/companies"
 import { useSavedCompanies } from "@/lib/saved-companies"
 import { SelectControl } from "@/components/ui/select-control"
@@ -201,23 +201,11 @@ function Business({ p }: { p: CompanyProfile }) {
 function FinancialsTab({ p, fin }: { p: CompanyProfile; fin: Financials | null }) {
   return (
     <div style={{ display: "grid", gap: "1.5rem", minWidth: 0, maxWidth: "100%" }}>
-      <section><h2 style={H}>Headline metrics · latest fiscal year</h2>
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(170px, 1fr))", gap: "0.75rem" }}>
-          {p.key_metrics.map((m: KeyMetric) => (
-            <div key={m.label} style={CARD}>
-              <div style={{ fontSize: "var(--font-text-xs-size)", color: "var(--color-text-tertiary)", marginBottom: 4 }}>{m.label}</div>
-              <div style={{ fontSize: "20px", fontWeight: "var(--font-weight-semibold)", color: "var(--color-text)" }}>{money(m.value, m.currency, m.unit)}</div>
-              <div style={{ fontSize: "11px", color: "var(--color-text-tertiary)", marginTop: 4 }}>FY{m.fy}</div>
-            </div>
-          ))}
-        </div>
-      </section>
+      {fin && <TPAnalysis slug={p.slug} fin={fin} />}
 
       <section><h2 style={H}>Key financials · all years</h2>
         {fin ? <KeyFinancials fin={fin} /> : <Centered>Loading…</Centered>}
       </section>
-
-      {fin && <TPAnalysis slug={p.slug} fin={fin} />}
 
       <section><h2 style={H}>Normalized facts · {fin?.standard || p.accounting_standard} ({p.facts_count.toLocaleString()} facts)</h2>
         {fin ? <Pivot fin={fin} /> : <Centered>Loading facts…</Centered>}
