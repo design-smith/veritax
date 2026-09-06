@@ -223,19 +223,6 @@ function StatMini({ label, value }: { label: string; value: React.ReactNode }) {
   return <div style={{ ...CARD, padding: "0.75rem 0.9rem" }}><div style={{ fontSize: 11, color: "var(--color-text-tertiary)", marginBottom: 3 }}>{label}</div><div style={{ fontSize: 18, fontWeight: "var(--font-weight-semibold)", color: "var(--color-text)" }}>{value}</div></div>
 }
 
-function YearRange({ years, value, onChange }: { years: number[]; value: [number, number]; onChange: (v: [number, number]) => void }) {
-  if (years.length < 2) return null
-  const max = years.length - 1
-  const i0 = Math.max(0, years.indexOf(value[0])), i1 = years.indexOf(value[1]) < 0 ? max : years.indexOf(value[1])
-  return (
-    <div className="vt-range">
-      <div className="vt-range-track"><div className="vt-range-fill" style={{ left: `${(i0 / max) * 100}%`, right: `${100 - (i1 / max) * 100}%` }} /></div>
-      <input type="range" className="vt-range-input" min={0} max={max} value={i0} aria-label="Start year" onChange={e => { const j = Math.min(Number(e.target.value), i1); onChange([years[j], years[i1]]) }} />
-      <input type="range" className="vt-range-input" min={0} max={max} value={i1} aria-label="End year" onChange={e => { const j = Math.max(Number(e.target.value), i0); onChange([years[i0], years[j]]) }} />
-    </div>
-  )
-}
-
 function TPAnalysis({ slug, fin }: { slug: string; fin: Financials }) {
   const L = useMemo(() => lines(fin), [fin])
   const years = useMemo(() => yearsAvailable(fin), [fin])
@@ -262,15 +249,19 @@ function TPAnalysis({ slug, fin }: { slug: string; fin: Financials }) {
         <button type="button" style={{ ...btn, gap: 6 }} onClick={() => downloadFinancialsCSV(slug, fin, sel)}><Download size={14} strokeWidth={1.5} /> Financials (CSV)</button>
       </div>
 
-      <div style={{ ...CARD, marginBottom: "1rem" }}>
-        <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", marginBottom: years.length > 1 ? "0.6rem" : 0 }}>
-          <span style={{ fontSize: 11, textTransform: "uppercase", letterSpacing: "0.04em", color: "var(--color-text-tertiary)" }}>Analysis period · {sel.length} {sel.length === 1 ? "year" : "years"}</span>
-          <span style={{ fontWeight: "var(--font-weight-semibold)", color: "var(--color-text)" }}>{span}</span>
-        </div>
-        <YearRange years={years} value={[y0, y1]} onChange={setRange} />
-      </div>
-
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(150px, 1fr))", gap: "0.75rem", marginBottom: "1rem" }}>
+        <div style={{ ...CARD, padding: "0.75rem 0.9rem" }}>
+          <div style={{ fontSize: 11, color: "var(--color-text-tertiary)", marginBottom: 6 }}>Analysis period</div>
+          <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
+            <SelectControl size="sm" variant="outline" value={String(y0)} onValueChange={v => setRange([Number(v), Math.max(Number(v), y1)])}>
+              {years.map(y => <SelectControl.Item key={y} value={String(y)}>{`FY${String(y).slice(2)}`}</SelectControl.Item>)}
+            </SelectControl>
+            <span style={{ color: "var(--color-text-tertiary)" }}>–</span>
+            <SelectControl size="sm" variant="outline" value={String(y1)} onValueChange={v => setRange([Math.min(y0, Number(v)), Number(v)])}>
+              {years.map(y => <SelectControl.Item key={y} value={String(y)}>{`FY${String(y).slice(2)}`}</SelectControl.Item>)}
+            </SelectControl>
+          </div>
+        </div>
         <StatMini label={`Revenue · ${sel.length}y total`} value={money(totals.revenue, cur)} />
         <StatMini label="EBIT · total" value={money(totals.ebit, cur)} />
         <StatMini label="Net income · total" value={money(totals.netIncome, cur)} />
