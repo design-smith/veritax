@@ -3,24 +3,26 @@
 import { useEffect, useMemo, useRef, useState, type FormEvent, type KeyboardEvent as ReactKey, type MouseEvent as ReactMouse, type ReactNode } from "react"
 import { Check, ChevronDown, Search, Star, X } from "lucide-react"
 import { Button } from "@/components/ui/button"
+import { Input } from "@/components/ui/input"
 import { SelectControl } from "@/components/ui/select-control"
 import { loadIndex, money, type IndexRow } from "@/lib/companies"
 import { useSavedCompanies } from "@/lib/saved-companies"
 
 type Scheme = "sic" | "naics" | "nace"
 type Mode = "inc" | "exc"
-type FacetKey = "sector" | "hq" | "op" | "rev" | "subs" | "region" | "exchange" | "std" | "tags" | "conf"
-const FACETS: FacetKey[] = ["sector", "hq", "op", "rev", "subs", "region", "exchange", "std", "tags", "conf"]
+type FacetKey = "sector" | "hq" | "op" | "subs" | "region" | "exchange" | "std" | "tags" | "conf"
+const FACETS: FacetKey[] = ["sector", "hq", "op", "subs", "region", "exchange", "std", "tags", "conf"]
 type SetMap = Record<FacetKey, Set<string>>
-type Filters = { inc: SetMap; exc: SetMap; hasRnd: boolean; hasPatents: boolean; hasIntl: boolean }
+type Filters = { inc: SetMap; exc: SetMap; revMin: number; revMax: number; hasRnd: boolean; hasPatents: boolean; hasIntl: boolean }
 type Query = { q: string; scheme: Scheme; classQ: string; classCodes: string[]; filters: Filters }
 
-const REV_BANDS: [string, (n: number | null) => boolean][] = [
-  [">$100B", n => n != null && n >= 100e9], ["$50–100B", n => n != null && n >= 50e9 && n < 100e9],
-  ["$10–50B", n => n != null && n >= 10e9 && n < 50e9], ["$1–10B", n => n != null && n >= 1e9 && n < 10e9],
-  ["<$1B", n => n != null && n < 1e9],
-]
-const revBand = (n: number | null) => REV_BANDS.find(([, fn]) => fn(n))?.[0] ?? "<$1B"
+// Revenue range — log scale from $1M to $1T so millions and billions are both reachable on one slider.
+const REV_MIN = 1e6, REV_MAX = 1e12, REV_STEPS = 240
+const posToVal = (p: number) => REV_MIN * Math.pow(REV_MAX / REV_MIN, p / REV_STEPS)
+const valToPos = (v: number) => Math.round(REV_STEPS * Math.log(Math.max(v, REV_MIN) / REV_MIN) / Math.log(REV_MAX / REV_MIN))
+const clampNum = (v: number, lo: number, hi: number) => Math.min(Math.max(v, lo), hi)
+const roundSig = (v: number) => { if (v <= 0) return 0; const m = Math.pow(10, Math.floor(Math.log10(v)) - 1); return Math.round(v / m) * m }
+
 const SUBS_BANDS: [string, (n: number) => boolean][] = [
   ["200+", n => n >= 200], ["51–200", n => n >= 51 && n < 200], ["11–50", n => n >= 11 && n < 51], ["1–10", n => n >= 1 && n < 11], ["None", n => n === 0],
 ]
@@ -31,7 +33,7 @@ const emptyFilters = (): Filters => {
   const inc = emptySetMap()
   // Default search scope: North + South America headquarters.
   inc.region = new Set(["Americas"])
-  return { inc, exc: emptySetMap(), hasRnd: false, hasPatents: false, hasIntl: false }
+  return { inc, exc: emptySetMap(), revMin: REV_MIN, revMax: REV_MAX, hasRnd: false, hasPatents: false, hasIntl: false }
 }
 const emptyQuery = (): Query => ({ q: "", scheme: "sic", classQ: "", classCodes: [], filters: emptyFilters() })
 
@@ -54,7 +56,6 @@ function facetVals(r: IndexRow, key: FacetKey): string[] {
     case "sector": return r.sector ? [r.sector] : []
     case "hq": return r.hq_country ? [r.hq_country] : []
     case "op": return r.op_countries
-    case "rev": return r.revenue_latest != null ? [revBand(r.revenue_latest)] : []
     case "subs": return [subsBand(r.n_subsidiaries)]
     case "region": return r.hq_region ? [r.hq_region] : []
     case "exchange": return r.exchange ? [r.exchange] : []
@@ -66,32 +67,38 @@ function facetVals(r: IndexRow, key: FacetKey): string[] {
 
 function activeCount(q: Query): number {
   let n = q.classCodes.length + (q.filters.hasRnd ? 1 : 0) + (q.filters.hasPatents ? 1 : 0) + (q.filters.hasIntl ? 1 : 0)
+  if (q.filters.revMin > REV_MIN || q.filters.revMax < REV_MAX) n += 1
   for (const k of FACETS) n += q.filters.inc[k].size + q.filters.exc[k].size
   return n
 }
 const isActive = (q: Query) => q.q.trim() !== "" || q.classQ.trim() !== "" || activeCount(q) > 0
 
 // ---- saved searches (persisted filter sets) ----
-type StoredQuery = { id: string; name: string; q: string; scheme: Scheme; classCodes: string[]; inc: Record<string, string[]>; exc: Record<string, string[]>; hasRnd: boolean; hasPatents: boolean; hasIntl: boolean }
+type StoredQuery = { id: string; name: string; q: string; scheme: Scheme; classCodes: string[]; inc: Record<string, string[]>; exc: Record<string, string[]>; revMin?: number; revMax?: number; hasRnd: boolean; hasPatents: boolean; hasIntl: boolean }
 const SAVED_KEY = "veritax.savedSearches"
 function fingerprint(q: Query): string {
-  return JSON.stringify([q.q.trim(), q.scheme, [...q.classCodes].sort(), FACETS.map(k => [...q.filters.inc[k]].sort()), FACETS.map(k => [...q.filters.exc[k]].sort()), q.filters.hasRnd, q.filters.hasPatents, q.filters.hasIntl])
+  return JSON.stringify([q.q.trim(), q.scheme, [...q.classCodes].sort(), FACETS.map(k => [...q.filters.inc[k]].sort()), FACETS.map(k => [...q.filters.exc[k]].sort()), q.filters.revMin, q.filters.revMax, q.filters.hasRnd, q.filters.hasPatents, q.filters.hasIntl])
 }
 function serializeQuery(q: Query, name: string): StoredQuery {
   const inc: Record<string, string[]> = {}, exc: Record<string, string[]> = {}
   for (const k of FACETS) { inc[k] = [...q.filters.inc[k]]; exc[k] = [...q.filters.exc[k]] }
-  return { id: fingerprint(q), name, q: q.q.trim(), scheme: q.scheme, classCodes: [...q.classCodes], inc, exc, hasRnd: q.filters.hasRnd, hasPatents: q.filters.hasPatents, hasIntl: q.filters.hasIntl }
+  return { id: fingerprint(q), name, q: q.q.trim(), scheme: q.scheme, classCodes: [...q.classCodes], inc, exc, revMin: q.filters.revMin, revMax: q.filters.revMax, hasRnd: q.filters.hasRnd, hasPatents: q.filters.hasPatents, hasIntl: q.filters.hasIntl }
 }
 function deserializeQuery(s: StoredQuery): Query {
   const inc = emptySetMap(), exc = emptySetMap()
   for (const k of FACETS) { inc[k] = new Set(s.inc?.[k] || []); exc[k] = new Set(s.exc?.[k] || []) }
   const scheme: Scheme = s.scheme === "naics" || s.scheme === "nace" ? s.scheme : "sic"
-  return { q: s.q || "", scheme, classQ: "", classCodes: Array.isArray(s.classCodes) ? s.classCodes : [], filters: { inc, exc, hasRnd: !!s.hasRnd, hasPatents: !!s.hasPatents, hasIntl: !!s.hasIntl } }
+  return { q: s.q || "", scheme, classQ: "", classCodes: Array.isArray(s.classCodes) ? s.classCodes : [], filters: { inc, exc, revMin: typeof s.revMin === "number" ? s.revMin : REV_MIN, revMax: typeof s.revMax === "number" ? s.revMax : REV_MAX, hasRnd: !!s.hasRnd, hasPatents: !!s.hasPatents, hasIntl: !!s.hasIntl } }
 }
 function labelOf(q: Query): string {
   const bits: string[] = []
   if (q.q.trim()) bits.push(`"${q.q.trim()}"`)
   if (q.classCodes.length) bits.push(`${q.scheme.toUpperCase()} ${q.classCodes.join(", ")}`)
+  if (q.filters.revMin > REV_MIN || q.filters.revMax < REV_MAX) {
+    const lo = q.filters.revMin > REV_MIN ? money(q.filters.revMin, "USD") : null
+    const hi = q.filters.revMax < REV_MAX ? money(q.filters.revMax, "USD") : null
+    bits.push(lo && hi ? `${lo}–${hi}` : lo ? `≥${lo}` : `≤${hi}`)
+  }
   for (const k of FACETS) { for (const v of q.filters.inc[k]) bits.push(v); for (const v of q.filters.exc[k]) bits.push(`−${v}`) }
   if (q.filters.hasRnd) bits.push("R&D")
   if (q.filters.hasPatents) bits.push("Patents")
@@ -164,6 +171,8 @@ export default function SearchPage({ onOpen }: { onOpen: (slug: string) => void 
         if (f.inc[k].size && !vals.some(v => f.inc[k].has(v))) return false
         if (f.exc[k].size && vals.some(v => f.exc[k].has(v))) return false
       }
+      if (f.revMin > REV_MIN && (r.revenue_latest == null || r.revenue_latest < f.revMin)) return false
+      if (f.revMax < REV_MAX && (r.revenue_latest == null || r.revenue_latest > f.revMax)) return false
       if (f.hasRnd && !r.has_rnd) return false
       if (f.hasPatents && !r.has_patents) return false
       if (f.hasIntl && !r.has_international) return false
@@ -207,6 +216,7 @@ export default function SearchPage({ onOpen }: { onOpen: (slug: string) => void 
     })
   }
   const toggleFlag = (k: "hasRnd" | "hasPatents" | "hasIntl") => setQuery(s => ({ ...s, filters: { ...s.filters, [k]: !s.filters[k] } }))
+  const setRev = (min: number, max: number) => setQuery(s => ({ ...s, filters: { ...s.filters, revMin: min, revMax: max } }))
 
   function persistSearches(next: StoredQuery[]) { setSearches(next); try { localStorage.setItem(SAVED_KEY, JSON.stringify(next)) } catch { /* ignore */ } }
   function saveCurrent() { if (!isActive(query)) return; const s = serializeQuery(query, labelOf(query)); persistSearches([s, ...searches.filter(x => x.id !== s.id)].slice(0, 20)) }
@@ -318,7 +328,9 @@ export default function SearchPage({ onOpen }: { onOpen: (slug: string) => void 
           </Collapsible>
           <FilterSelect label="Industry" opts={counts(r => r.sector)} inc={query.filters.inc.sector} exc={query.filters.exc.sector} onToggle={(m, v) => toggleFacet("sector", m, v)} searchable />
           <FilterSelect label="Headquarters" opts={counts(r => r.hq_country, true)} inc={query.filters.inc.hq} exc={query.filters.exc.hq} onToggle={(m, v) => toggleFacet("hq", m, v)} searchable />
-          <FilterSelect label="Revenue" opts={orderBands(REV_BANDS.map(b => b[0]), counts(r => r.revenue_latest != null ? revBand(r.revenue_latest) : null))} inc={query.filters.inc.rev} exc={query.filters.exc.rev} onToggle={(m, v) => toggleFacet("rev", m, v)} />
+          <Collapsible label="Revenue" count={query.filters.revMin > REV_MIN || query.filters.revMax < REV_MAX ? 1 : 0}>
+            <RevenueRange min={query.filters.revMin} max={query.filters.revMax} onChange={setRev} />
+          </Collapsible>
           <FilterSelect label="Operates in" opts={counts(r => r.op_countries, true)} inc={query.filters.inc.op} exc={query.filters.exc.op} onToggle={(m, v) => toggleFacet("op", m, v)} searchable />
           <FilterSelect label="Region" opts={counts(r => r.hq_region)} inc={query.filters.inc.region} exc={query.filters.exc.region} onToggle={(m, v) => toggleFacet("region", m, v)} />
           <FilterSelect label="Exchange" opts={counts(r => r.exchange)} inc={query.filters.inc.exchange} exc={query.filters.exc.exchange} onToggle={(m, v) => toggleFacet("exchange", m, v)} />
@@ -471,9 +483,46 @@ function FilterSelect({ label, opts, inc, exc, onToggle, searchable = false }: {
   )
 }
 
-function orderBands(order: string[], o: [string, number][]): [string, number][] {
-  const m = new Map(o)
-  return order.filter(x => m.has(x)).map(x => [x, m.get(x)!] as [string, number])
+// Revenue range: a log-scale dual slider (so M and B are both reachable) with an M/B unit dropdown per side.
+function RevenueRange({ min, max, onChange }: { min: number; max: number; onChange: (min: number, max: number) => void }) {
+  const [minUnit, setMinUnit] = useState<"M" | "B">(min >= 1e9 ? "B" : "M")
+  const [maxUnit, setMaxUnit] = useState<"M" | "B">(max >= 1e9 ? "B" : "M")
+  const minPos = valToPos(min), maxPos = valToPos(max)
+  const GAP = 4
+  const mult = (u: "M" | "B") => (u === "B" ? 1e9 : 1e6)
+  const fmtNum = (v: number, u: "M" | "B") => String(Math.round((v / mult(u)) * 100) / 100)
+  const onMinSlide = (p: number) => onChange(clampNum(roundSig(posToVal(Math.min(p, maxPos - GAP))), REV_MIN, max), max)
+  const onMaxSlide = (p: number) => onChange(min, clampNum(roundSig(posToVal(Math.max(p, minPos + GAP))), min, REV_MAX))
+  const onMinNum = (str: string) => onChange(clampNum((parseFloat(str) || 0) * mult(minUnit), REV_MIN, max), max)
+  const onMaxNum = (str: string) => onChange(min, clampNum((parseFloat(str) || 0) * mult(maxUnit), min, REV_MAX))
+  return (
+    <div className="vt-rev">
+      <div className="vt-range">
+        <div className="vt-range-track"><div className="vt-range-fill" style={{ left: `${(minPos / REV_STEPS) * 100}%`, right: `${100 - (maxPos / REV_STEPS) * 100}%` }} /></div>
+        <input type="range" className="vt-range-input" min={0} max={REV_STEPS} value={minPos} aria-label="Minimum revenue" onChange={e => onMinSlide(Number(e.target.value))} />
+        <input type="range" className="vt-range-input" min={0} max={REV_STEPS} value={maxPos} aria-label="Maximum revenue" onChange={e => onMaxSlide(Number(e.target.value))} />
+      </div>
+      <div className="vt-rev-ends">
+        <div className="vt-rev-end">
+          <span className="vt-rev-cur">$</span>
+          <Input controlSize="sm" className="vt-rev-num" inputMode="decimal" value={fmtNum(min, minUnit)} onChange={e => onMinNum(e.target.value)} aria-label="Minimum revenue value" />
+          <SelectControl size="sm" variant="outline" value={minUnit} onValueChange={v => setMinUnit(v as "M" | "B")}>
+            <SelectControl.Item value="M">M</SelectControl.Item>
+            <SelectControl.Item value="B">B</SelectControl.Item>
+          </SelectControl>
+        </div>
+        <span className="vt-rev-dash">–</span>
+        <div className="vt-rev-end">
+          <span className="vt-rev-cur">$</span>
+          <Input controlSize="sm" className="vt-rev-num" inputMode="decimal" value={fmtNum(max, maxUnit)} onChange={e => onMaxNum(e.target.value)} aria-label="Maximum revenue value" />
+          <SelectControl size="sm" variant="outline" value={maxUnit} onValueChange={v => setMaxUnit(v as "M" | "B")}>
+            <SelectControl.Item value="M">M</SelectControl.Item>
+            <SelectControl.Item value="B">B</SelectControl.Item>
+          </SelectControl>
+        </div>
+      </div>
+    </div>
+  )
 }
 
 // On hover, if the label overflows its row, scroll it left to reveal the rest (distance measured live).

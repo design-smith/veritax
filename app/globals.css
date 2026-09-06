@@ -1173,6 +1173,23 @@
 }
 .vt-search-saved-row:hover .vt-search-saved-del, .vt-search-saved-del:focus-visible { opacity: 1; }
 .vt-search-saved-del:hover, .vt-search-saved-del:focus-visible { color: var(--color-text); background: var(--color-background-primary-soft); }
+
+/* revenue range: dual log-scale slider + M/B unit dropdowns */
+.vt-rev { display: flex; flex-direction: column; gap: 0.75rem; padding: 0.35rem 0.25rem 0; }
+.vt-range { position: relative; height: 24px; }
+.vt-range-track { position: absolute; top: 50%; left: 0; right: 0; transform: translateY(-50%); height: 4px; background: var(--color-border); border-radius: 2px; }
+.vt-range-fill { position: absolute; top: 0; bottom: 0; background: var(--color-background-primary-solid, #111); border-radius: 2px; }
+.vt-range-input { position: absolute; top: 0; left: 0; width: 100%; height: 24px; margin: 0; background: transparent; pointer-events: none; -webkit-appearance: none; appearance: none; }
+.vt-range-input:focus-visible { outline: none; }
+.vt-range-input::-webkit-slider-runnable-track { height: 24px; background: transparent; border: none; }
+.vt-range-input::-moz-range-track { height: 24px; background: transparent; border: none; }
+.vt-range-input::-webkit-slider-thumb { -webkit-appearance: none; appearance: none; margin-top: 4px; width: 16px; height: 16px; border-radius: 50%; background: var(--color-surface); border: 1px solid var(--color-border-strong, #999); box-shadow: var(--shadow-100, 0 1px 2px rgba(0,0,0,.2)); cursor: pointer; pointer-events: auto; }
+.vt-range-input::-moz-range-thumb { width: 16px; height: 16px; border-radius: 50%; background: var(--color-surface); border: 1px solid var(--color-border-strong, #999); cursor: pointer; pointer-events: auto; }
+.vt-rev-ends { display: flex; align-items: center; gap: 0.4rem; }
+.vt-rev-end { display: inline-flex; align-items: center; gap: 3px; }
+.vt-rev-cur { color: var(--color-text-tertiary); font-size: var(--font-text-sm-size); }
+.vt-rev-num { width: 3rem; padding-left: 0.4rem; padding-right: 0.4rem; }
+.vt-rev-dash { color: var(--color-text-tertiary); }
 .vt-search-drawer-head {
   display: flex;
   align-items: center;
