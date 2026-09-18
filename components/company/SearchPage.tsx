@@ -5,6 +5,7 @@ import { Check, ChevronDown, Search, Star, X } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { countUniverse, loadIndex, money, searchUniverse, type IndexRow } from "@/lib/companies"
+import { useRequireAuth } from "@/lib/require-auth"
 import { useSavedCompanies } from "@/lib/saved-companies"
 import { SearchSkin, useSearchMode } from "@/lib/search-mode"
 
@@ -159,6 +160,7 @@ export default function SearchPage({ onOpen }: { onOpen: (slug: string) => void 
   const [activeIdx, setActiveIdx] = useState(0)
   const [searches, setSearches] = useState<StoredQuery[]>([])
   const [saved, toggleSave] = useSavedCompanies()
+  const requireAuth = useRequireAuth()
   const [mode, setMode] = useSearchMode()
   const inputRef = useRef<HTMLInputElement>(null)
   const classRef = useRef<HTMLDivElement>(null)
@@ -569,7 +571,7 @@ export default function SearchPage({ onOpen }: { onOpen: (slug: string) => void 
                           <td className="is-muted">{r.hq_country ?? ""}</td>
                           <td className="is-num">{money(r.revenue_latest, r.currency)}</td>
                           <td>
-                            <button type="button" className={isSaved ? "vt-search-star is-on" : "vt-search-star"} title={isSaved ? "Remove from saved" : "Save company"} aria-label={isSaved ? "Remove from saved" : "Save company"} onClick={e => { e.stopPropagation(); toggleSave(r.slug) }}>
+                            <button type="button" className={isSaved ? "vt-search-star is-on" : "vt-search-star"} title={isSaved ? "Remove from saved" : "Save company"} aria-label={isSaved ? "Remove from saved" : "Save company"} onClick={e => { e.stopPropagation(); void requireAuth().then(ok => { if (ok) toggleSave(r.slug) }) }}>
                               <Star size={15} strokeWidth={1.5} fill={isSaved ? "currentColor" : "none"} />
                             </button>
                           </td>

@@ -10,6 +10,7 @@ import {
   compact, getFinancials, getFootprint, getGroup, getIP, getProfile, money,
   type CompanyProfile, type Financials, type Footprint, type Group, type IP,
 } from "@/lib/companies"
+import { useRequireAuth } from "@/lib/require-auth"
 import { useSavedCompanies } from "@/lib/saved-companies"
 import { SelectControl } from "@/components/ui/select-control"
 import { computePLIs, lines, periodTotals, PLIS, yearsAvailable } from "@/lib/tp"
@@ -69,6 +70,7 @@ export default function CompanyRecord({ slug, onBack, fromSearch = false }: { sl
   const [tab, setTab] = useState<TabId>("identity")
   const [scrolled, setScrolled] = useState(false)
   const [saved, toggleSave] = useSavedCompanies()
+  const requireAuth = useRequireAuth()
   // lazy per-tab artifacts
   const [fin, setFin] = useState<Financials | null>(null)
   const [foot, setFoot] = useState<Footprint | null>(null)
@@ -147,6 +149,7 @@ export default function CompanyRecord({ slug, onBack, fromSearch = false }: { sl
   const isSaved = saved.has(slug)
 
   async function runDownload(kind: "zip" | "json") {
+    if (!(await requireAuth())) return
     setDlOpen(false); setDling(true)
     try {
       const [f, ft, i, g] = await Promise.all([
@@ -156,6 +159,11 @@ export default function CompanyRecord({ slug, onBack, fromSearch = false }: { sl
       if (kind === "json") downloadCompanyJSON(slug, bundle)
       else await downloadCompanyZip(slug, bundle)
     } finally { setDling(false) }
+  }
+
+  async function onToggleSave() {
+    if (!(await requireAuth())) return
+    toggleSave(slug)
   }
 
   return (
@@ -168,7 +176,7 @@ export default function CompanyRecord({ slug, onBack, fromSearch = false }: { sl
         <div className="vt-record-shade-bar">
           <RecordWho name={id.legal_name} logo={id.logo} compact />
           <div className="vt-record-shade-acts">
-            <button type="button" className="vt-record-ghost" onClick={() => toggleSave(slug)} title={isSaved ? "Saved" : "Save"}>
+            <button type="button" className="vt-record-ghost" onClick={() => void onToggleSave()} title={isSaved ? "Saved" : "Save"}>
               <Star size={14} strokeWidth={1.5} style={{ color: isSaved ? "#f5a623" : "currentColor", fill: isSaved ? "#f5a623" : "none" }} /> {isSaved ? "Saved" : "Save"}
             </button>
             <div style={{ position: "relative" }}>
@@ -217,7 +225,7 @@ export default function CompanyRecord({ slug, onBack, fromSearch = false }: { sl
 
         {tab === "identity" && <Identity p={profile} />}
         {tab === "business" && <Business p={profile} />}
-        {tab === "financials" && <FinancialsTab p={profile} fin={fin} scrolled={scrolled} onFinDownload={onFinDownload} />}
+        {tab === "financials" && <FinancialsTab p={profile} fin={fin} scrolled={scrolled} onFinDownload={onFinDownload} requireAuth={requireAuth} />}
         {tab === "structure" && <StructureTab p={profile} foot={foot} group={group} />}
         {tab === "ip" && <IPTab p={profile} ip={ip} summary={profile.ip_summary} />}
       </div>
@@ -469,11 +477,12 @@ function PliTable({ fin, sel }: { fin: Financials; sel: number[] }) {
   )
 }
 
-function FinancialsTab({ p, fin, scrolled, onFinDownload }: {
+function FinancialsTab({ p, fin, scrolled, onFinDownload, requireAuth }: {
   p: CompanyProfile
   fin: Financials | null
   scrolled: boolean
   onFinDownload: (state: { pinned: boolean; run: () => void } | null) => void
+  requireAuth: () => Promise<boolean>
 }) {
   const listing = p.identity.listings[0]
   const years = useMemo(() => fin ? yearsAvailable(fin) : [], [fin])
@@ -495,8 +504,10 @@ function FinancialsTab({ p, fin, scrolled, onFinDownload }: {
   const min = years.length ? `${years[0]}-01-01` : undefined
   const max = years.length ? `${years[years.length - 1]}-12-31` : undefined
   const runDownload = useCallback(() => {
-    if (fin) downloadFinancialsCSV(p.slug, fin, sel)
-  }, [fin, p.slug, sel])
+    void requireAuth().then(ok => {
+      if (ok && fin) downloadFinancialsCSV(p.slug, fin, sel)
+    })
+  }, [fin, p.slug, sel, requireAuth])
   const runRef = useRef(runDownload)
   runRef.current = runDownload
   useEffect(() => {
