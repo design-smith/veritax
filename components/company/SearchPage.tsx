@@ -4,7 +4,7 @@ import { useEffect, useMemo, useRef, useState, type FormEvent, type KeyboardEven
 import { Check, ChevronDown, Search, Star, X } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
-import { countUniverse, loadIndex, money, searchUniverse, type IndexRow } from "@/lib/companies"
+import { countUniverse, fetchClassCodes, fetchFacets, money, screenUniverse, type ClassCodeHit, type FacetBuckets, type IndexRow } from "@/lib/companies"
 import { useRequireAuth } from "@/lib/require-auth"
 import { useSavedCompanies } from "@/lib/saved-companies"
 import { SearchSkin, useSearchMode } from "@/lib/search-mode"
@@ -23,11 +23,6 @@ const posToVal = (p: number) => REV_MIN * Math.pow(REV_MAX / REV_MIN, p / REV_ST
 const valToPos = (v: number) => Math.round(REV_STEPS * Math.log(Math.max(v, REV_MIN) / REV_MIN) / Math.log(REV_MAX / REV_MIN))
 const clampNum = (v: number, lo: number, hi: number) => Math.min(Math.max(v, lo), hi)
 const roundSig = (v: number) => { if (v <= 0) return 0; const m = Math.pow(10, Math.floor(Math.log10(v)) - 1); return Math.round(v / m) * m }
-
-const SUBS_BANDS: [string, (n: number) => boolean][] = [
-  ["200+", n => n >= 200], ["51–200", n => n >= 51 && n < 200], ["11–50", n => n >= 11 && n < 51], ["1–10", n => n >= 1 && n < 11], ["None", n => n === 0],
-]
-const subsBand = (n: number) => SUBS_BANDS.find(([, fn]) => fn(n))?.[0] ?? "None"
 
 const emptySetMap = (): SetMap => Object.fromEntries(FACETS.map(k => [k, new Set<string>()])) as SetMap
 const emptyFilters = (): Filters => ({
@@ -78,32 +73,6 @@ function classFields(r: IndexRow, scheme: Scheme): { code: string | null; label:
   if (scheme === "nace") return { code: r.nace, label: r.nace }
   return { code: r.sic, label: r.sic_description }
 }
-function searchHaystack(r: IndexRow): string {
-  return [r.name, r.ticker, r.sic, r.sic_description, r.naics, r.nace, r.sector, r.keywords, r.hq_country, r.hq_region, r.exchange, r.activity_tags.join(" ")].join(" ")
-}
-
-function matchesClass(r: IndexRow, scheme: Scheme, codes: string[], typed: string) {
-  const needles = codes.length ? codes : typed.trim() ? [typed.trim()] : []
-  if (!needles.length) return true
-  const { code, label } = classFields(r, scheme)
-  const c = (code ?? "").toLowerCase(), l = (label ?? "").toLowerCase()
-  return needles.some(n => { const t = n.toLowerCase(); return c.startsWith(t) || l.includes(t) })
-}
-
-// The value(s) of a row for a given facet — single-valued facets return a 1-item array.
-function facetVals(r: IndexRow, key: FacetKey): string[] {
-  switch (key) {
-    case "sector": return r.sector ? [r.sector] : []
-    case "hq": return r.hq_country ? [r.hq_country] : []
-    case "op": return r.op_countries
-    case "subs": return [subsBand(r.n_subsidiaries)]
-    case "region": return r.hq_region ? [r.hq_region] : []
-    case "exchange": return r.exchange ? [r.exchange] : []
-    case "std": return r.accounting_standard ? [r.accounting_standard] : []
-    case "tags": return r.activity_tags
-    case "conf": return r.confidence ? [r.confidence] : []
-  }
-}
 
 function activeCount(q: Query): number {
   let n = q.classCodes.length + (q.filters.hasRnd ? 1 : 0) + (q.filters.hasPatents ? 1 : 0) + (q.filters.hasIntl ? 1 : 0)
@@ -111,7 +80,33 @@ function activeCount(q: Query): number {
   for (const k of FACETS) n += q.filters.inc[k].size + q.filters.exc[k].size
   return n
 }
-const isActive = (q: Query) => q.q.trim() !== "" || q.classQ.trim() !== "" || activeCount(q) > 0
+// Typing in the class field alone does not activate screening — only committed chips / other criteria.
+const isActive = (q: Query) => q.q.trim() !== "" || activeCount(q) > 0
+
+function toScreenParams(q: Query, sort: string): Parameters<typeof screenUniverse>[0] {
+  const f = q.filters
+  return {
+    q: q.q,
+    scheme: q.scheme,
+    classCodes: q.classCodes,
+    hq: [...f.inc.hq], hqExc: [...f.exc.hq],
+    op: [...f.inc.op], opExc: [...f.exc.op],
+    sector: [...f.inc.sector], sectorExc: [...f.exc.sector],
+    region: [...f.inc.region], regionExc: [...f.exc.region],
+    exchange: [...f.inc.exchange], exchangeExc: [...f.exc.exchange],
+    std: [...f.inc.std], stdExc: [...f.exc.std],
+    tags: [...f.inc.tags], tagsExc: [...f.exc.tags],
+    conf: [...f.inc.conf], confExc: [...f.exc.conf],
+    subs: [...f.inc.subs], subsExc: [...f.exc.subs],
+    revMin: f.revMin > REV_MIN ? f.revMin : null,
+    revMax: f.revMax < REV_MAX ? f.revMax : null,
+    hasRnd: f.hasRnd,
+    hasPatents: f.hasPatents,
+    hasIntl: f.hasIntl,
+    sort,
+    limit: 250,
+  }
+}
 
 // ---- saved searches (persisted filter sets) ----
 type StoredQuery = { id: string; name: string; q: string; scheme: Scheme; classCodes: string[]; inc: Record<string, string[]>; exc: Record<string, string[]>; revMin?: number; revMax?: number; hasRnd: boolean; hasPatents: boolean; hasIntl: boolean }
@@ -148,10 +143,12 @@ function labelOf(q: Query): string {
 }
 
 export default function SearchPage({ onOpen }: { onOpen: (slug: string) => void }) {
-  const [rows, setRows] = useState<IndexRow[] | null>(null)
+  const [ready, setReady] = useState(false)
   const [universe, setUniverse] = useState<number | null>(null)
-  const [remote, setRemote] = useState<IndexRow[]>([])
-  const [remoteTotal, setRemoteTotal] = useState<number | null>(null)
+  const [screened, setScreened] = useState<IndexRow[]>([])
+  const [screenTotal, setScreenTotal] = useState<number | null>(null)
+  const [facets, setFacets] = useState<FacetBuckets>({})
+  const [classHits, setClassHits] = useState<ClassCodeHit[]>([])
   const [err, setErr] = useState<string | null>(null)
   const [query, setQuery] = useState<Query>(queryFromUrl)
   const [classOpen, setClassOpen] = useState(false)
@@ -167,24 +164,62 @@ export default function SearchPage({ onOpen }: { onOpen: (slug: string) => void 
   const listRef = useRef<HTMLTableSectionElement>(null)
 
   useEffect(() => {
-    loadIndex()
-      .then(setRows)
-      .catch(e => setErr(e instanceof Error ? e.message : "The company index did not load."))
-    countUniverse().then(n => { if (n != null) setUniverse(n) }).catch(() => { /* local index still works */ })
-  }, [])
-  useEffect(() => {
-    const needle = query.q.trim()
-    if (!needle) { setRemote([]); setRemoteTotal(null); return }
     let cancelled = false
+    countUniverse()
+      .then(n => { if (!cancelled && n != null) setUniverse(n) })
+      .catch(() => { /* offline — still allow typing once ready */ })
+      .finally(() => { if (!cancelled) setReady(true) })
+    return () => { cancelled = true }
+  }, [])
+
+  const active = isActive(query)
+
+  // Warehouse screen — any active criterion (text, SIC chips, facets, …).
+  useEffect(() => {
+    if (!active) {
+      setScreened([])
+      setScreenTotal(null)
+      return
+    }
+    let cancelled = false
+    const params = toScreenParams(query, sort)
     const t = window.setTimeout(() => {
-      searchUniverse(needle).then(hit => {
+      screenUniverse(params).then(hit => {
         if (cancelled) return
-        setRemote(hit.rows)
-        setRemoteTotal(hit.total)
-      }).catch(() => { if (!cancelled) { setRemote([]); setRemoteTotal(null) } })
+        setScreened(hit.rows)
+        setScreenTotal(hit.total)
+      }).catch(() => { if (!cancelled) { setScreened([]); setScreenTotal(0) } })
     }, 220)
     return () => { cancelled = true; window.clearTimeout(t) }
-  }, [query.q])
+  }, [active, query, sort])
+
+  // Facet menus from the warehouse under the current screen (or full universe when idle).
+  useEffect(() => {
+    let cancelled = false
+    const t = window.setTimeout(() => {
+      const params = active ? toScreenParams(query, sort) : {}
+      fetchFacets(params).then(f => { if (!cancelled) setFacets(f) }).catch(() => { if (!cancelled) setFacets({}) })
+    }, active ? 280 : 0)
+    return () => { cancelled = true; window.clearTimeout(t) }
+  }, [active, query, sort])
+
+  // Classification typeahead from warehouse distinct codes.
+  useEffect(() => {
+    let cancelled = false
+    const t = window.setTimeout(() => {
+      fetchClassCodes(query.scheme, query.classQ, 40).then(rows => {
+        if (cancelled) return
+        const selected = new Set(query.classCodes)
+        const ranked = [
+          ...rows.filter(r => selected.has(r.code)),
+          ...rows.filter(r => !selected.has(r.code)),
+        ]
+        setClassHits(ranked.slice(0, 12))
+      }).catch(() => { if (!cancelled) setClassHits([]) })
+    }, 160)
+    return () => { cancelled = true; window.clearTimeout(t) }
+  }, [query.scheme, query.classQ, query.classCodes])
+
   // Mirror the country filter to the URL so a filtered search is shareable and refresh-safe.
   useEffect(() => {
     writeCountryParams(query.filters)
@@ -207,119 +242,41 @@ export default function SearchPage({ onOpen }: { onOpen: (slug: string) => void 
     return () => window.removeEventListener("keydown", onKey)
   }, [])
 
-  const catalog = useMemo(() => {
-    if (!rows) return []
-    const map = new Map<string, string>()
-    for (const r of rows) {
-      const { code, label } = classFields(r, query.scheme)
-      if (!code) continue
-      if (!map.has(code)) map.set(code, label && label !== code ? label : "")
-    }
-    return [...map.entries()].map(([code, label]) => ({ code, label })).sort((a, b) => a.code.localeCompare(b.code))
-  }, [rows, query.scheme])
-
-  const classHits = useMemo(() => {
-    const n = query.classQ.trim().toLowerCase()
-    const selected = new Set(query.classCodes)
-    const list = catalog.filter(c => !n || c.code.toLowerCase().startsWith(n) || c.label.toLowerCase().includes(n))
-    return [...list.filter(c => selected.has(c.code)), ...list.filter(c => !selected.has(c.code))].slice(0, 8)
-  }, [catalog, query.classQ, query.classCodes])
-
-  const active = isActive(query)
-
-  const results = useMemo(() => {
-    if (!rows) return []
-    const needle = query.q.trim().toLowerCase()
-    const pool = (() => {
-      if (!needle || remote.length === 0) return rows
-      const map = new Map<string, IndexRow>()
-      for (const r of rows) map.set(r.slug, r)
-      for (const r of remote) if (!map.has(r.slug)) map.set(r.slug, r)
-      return [...map.values()]
-    })()
-    const f = query.filters
-    const out = pool.filter(r => {
-      if (needle && !searchHaystack(r).toLowerCase().includes(needle)) return false
-      if (!matchesClass(r, query.scheme, query.classCodes, query.classQ)) return false
-      for (const k of FACETS) {
-        const vals = facetVals(r, k)
-        if (f.inc[k].size && !vals.some(v => f.inc[k].has(v))) return false
-        if (f.exc[k].size && vals.some(v => f.exc[k].has(v))) return false
-      }
-      if (f.revMin > REV_MIN && (r.revenue_latest == null || r.revenue_latest < f.revMin)) return false
-      if (f.revMax < REV_MAX && (r.revenue_latest == null || r.revenue_latest > f.revMax)) return false
-      if (f.hasRnd && !r.has_rnd) return false
-      if (f.hasPatents && !r.has_patents) return false
-      if (f.hasIntl && !r.has_international) return false
-      return true
-    })
-    out.sort((a, b) => {
-      if (sort === "name") return a.name.localeCompare(b.name)
-      if (sort === "ticker") return (a.ticker || "").localeCompare(b.ticker || "")
-      if (sort === "class") return (classFields(a, query.scheme).code || "").localeCompare(classFields(b, query.scheme).code || "")
-      if (sort === "hq") return (a.hq_country || "").localeCompare(b.hq_country || "")
-      if (sort === "sector") return (a.sector || "").localeCompare(b.sector || "")
-      return Number(b.revenue_latest || 0) - Number(a.revenue_latest || 0)
-    })
-    return out
-  }, [rows, remote, query, sort])
+  const results = screened
 
   const funnel = useMemo(() => {
-    if (!rows) return []
-    const allN = universe ?? rows.length
+    const allN = universe ?? 0
     const steps: { id: string; label: string; n: number }[] = [{ id: "all", label: "Companies", n: allN }]
-    let cur = rows
-    const needle = query.q.trim().toLowerCase()
-    if (needle) {
-      const map = new Map<string, IndexRow>()
-      for (const r of rows) map.set(r.slug, r)
-      for (const r of remote) if (!map.has(r.slug)) map.set(r.slug, r)
-      cur = [...map.values()].filter(r => searchHaystack(r).toLowerCase().includes(needle))
-      steps.push({ id: "q", label: query.q.trim(), n: remoteTotal ?? cur.length })
-    }
-    const apply = (id: string, label: string, pred: (r: IndexRow) => boolean) => {
-      const next = cur.filter(pred)
-      if (next.length !== cur.length) {
-        steps.push({ id, label, n: next.length })
-        cur = next
-      }
-    }
-    if (query.classCodes.length || query.classQ.trim()) {
-      apply("class", `${query.scheme.toUpperCase()} ${query.classCodes.join(", ") || query.classQ.trim()}`, r => matchesClass(r, query.scheme, query.classCodes, query.classQ))
+    if (!active) return steps
+    const n = screenTotal ?? results.length
+    if (query.q.trim()) steps.push({ id: "q", label: query.q.trim(), n })
+    if (query.classCodes.length) {
+      steps.push({ id: "class", label: `${query.scheme.toUpperCase()} ${query.classCodes.join(", ")}`, n })
     }
     for (const k of FACETS) {
-      if (query.filters.inc[k].size) apply(`inc-${k}`, [...query.filters.inc[k]].join(", "), r => facetVals(r, k).some(v => query.filters.inc[k].has(v)))
-      if (query.filters.exc[k].size) apply(`exc-${k}`, `not ${[...query.filters.exc[k]].join(", ")}`, r => !facetVals(r, k).some(v => query.filters.exc[k].has(v)))
+      if (query.filters.inc[k].size) steps.push({ id: `inc-${k}`, label: [...query.filters.inc[k]].join(", "), n })
+      if (query.filters.exc[k].size) steps.push({ id: `exc-${k}`, label: `not ${[...query.filters.exc[k]].join(", ")}`, n })
     }
     const f = query.filters
     if (f.revMin > REV_MIN || f.revMax < REV_MAX) {
       const lo = f.revMin > REV_MIN ? money(f.revMin, "USD") : null
       const hi = f.revMax < REV_MAX ? money(f.revMax, "USD") : null
-      apply("rev", lo && hi ? `${lo}–${hi}` : lo ? `≥${lo}` : `≤${hi}`, r => {
-        if (f.revMin > REV_MIN && (r.revenue_latest == null || r.revenue_latest < f.revMin)) return false
-        if (f.revMax < REV_MAX && (r.revenue_latest == null || r.revenue_latest > f.revMax)) return false
-        return true
-      })
+      steps.push({ id: "rev", label: lo && hi ? `${lo}–${hi}` : lo ? `≥${lo}` : `≤${hi}`, n })
     }
-    if (f.hasRnd) apply("rnd", "R&D", r => r.has_rnd)
-    if (f.hasPatents) apply("patents", "Patents", r => r.has_patents)
-    if (f.hasIntl) apply("intl", "International", r => r.has_international)
+    if (f.hasRnd) steps.push({ id: "rnd", label: "R&D", n })
+    if (f.hasPatents) steps.push({ id: "patents", label: "Patents", n })
+    if (f.hasIntl) steps.push({ id: "intl", label: "International", n })
     return steps
-  }, [rows, query, universe, remote, remoteTotal])
+  }, [universe, screenTotal, results.length, active, query])
 
-  useEffect(() => { setActiveIdx(0) }, [query, sort])
-  useEffect(() => { setClassIdx(0) }, [query.classQ, query.scheme])
+  useEffect(() => { setActiveIdx(0) }, [query, sort, screened])
+  useEffect(() => { setClassIdx(0) }, [query.classQ, query.scheme, classHits])
   useEffect(() => { listRef.current?.querySelector("[data-active='true']")?.scrollIntoView({ block: "nearest" }) }, [activeIdx])
 
-  function counts(valueOf: (r: IndexRow) => string[] | string | null, alpha = false): [string, number][] {
-    if (!rows) return []
-    const map = new Map<string, number>()
-    for (const r of rows) {
-      const v = valueOf(r)
-      const vals = Array.isArray(v) ? v : v != null ? [v] : []
-      for (const x of vals) map.set(x, (map.get(x) || 0) + 1)
-    }
-    return [...map.entries()].sort((a, b) => alpha ? a[0].localeCompare(b[0]) : b[1] - a[1])
+  function facetOpts(key: FacetKey, alpha = false): [string, number][] {
+    const raw = (facets[key] ?? []) as [string, number][]
+    const list = raw.filter(([v]) => v != null && v !== "")
+    return alpha ? [...list].sort((a, b) => a[0].localeCompare(b[0])) : list
   }
 
   function toggleClass(code: string) {
@@ -386,13 +343,13 @@ export default function SearchPage({ onOpen }: { onOpen: (slug: string) => void 
               </div>
             </form>
             <p className="vt-search-empty-title" style={{ position: "relative", marginTop: "1rem", fontSize: "1rem" }}>{err}</p>
-            <Button size="sm" variant="outline" onClick={() => { setErr(null); setRows(null); loadIndex().then(setRows).catch(e => setErr(e instanceof Error ? e.message : "The company index did not load.")) }}>Retry load</Button>
+            <Button size="sm" variant="outline" onClick={() => { setErr(null); setReady(false); countUniverse().then(n => { if (n != null) setUniverse(n) }).finally(() => setReady(true)) }}>Retry</Button>
           </header>
         </div>
       </div>
     )
   }
-  if (!rows) {
+  if (!ready) {
     return (
       <div className="vt-search vt-search--split is-idle" data-mode={mode} aria-busy="true">
         <SearchSkin mode={mode} onChange={setMode} />
@@ -476,7 +433,7 @@ export default function SearchPage({ onOpen }: { onOpen: (slug: string) => void 
                         <li key={c.code} role="presentation">
                           <button type="button" className={i === classIdx || on ? "vt-search-class-opt is-active" : "vt-search-class-opt"} aria-selected={on} onClick={() => toggleClass(c.code)} onMouseEnter={() => setClassIdx(i)}>
                             <span><span className="vt-search-class-code">{c.code}</span>{c.label ? <span className="vt-search-class-label">{c.label}</span> : null}</span>
-                            {on ? <Check size={12} strokeWidth={2.5} aria-hidden /> : null}
+                            <span className="vt-search-class-n">{c.n.toLocaleString()}{on ? <Check size={12} strokeWidth={2.5} aria-hidden /> : null}</span>
                           </button>
                         </li>
                       )
@@ -486,16 +443,17 @@ export default function SearchPage({ onOpen }: { onOpen: (slug: string) => void 
               </div>
             </div>
           </Collapsible>
-          <FilterSelect label="Industry" opts={counts(r => r.sector)} inc={query.filters.inc.sector} exc={query.filters.exc.sector} onToggle={(m, v) => toggleFacet("sector", m, v)} searchable />
-          <FilterSelect label="Headquarters" opts={counts(r => r.hq_country, true)} inc={query.filters.inc.hq} exc={query.filters.exc.hq} onToggle={(m, v) => toggleFacet("hq", m, v)} searchable />
+          <FilterSelect label="Industry" opts={facetOpts("sector")} inc={query.filters.inc.sector} exc={query.filters.exc.sector} onToggle={(m, v) => toggleFacet("sector", m, v)} searchable />
+          <FilterSelect label="Headquarters" opts={facetOpts("hq", true)} inc={query.filters.inc.hq} exc={query.filters.exc.hq} onToggle={(m, v) => toggleFacet("hq", m, v)} searchable />
           <Collapsible label="Revenue" count={query.filters.revMin > REV_MIN || query.filters.revMax < REV_MAX ? 1 : 0}>
             <RevenueRange min={query.filters.revMin} max={query.filters.revMax} onChange={setRev} />
           </Collapsible>
-          <FilterSelect label="Operates in" opts={counts(r => r.op_countries, true)} inc={query.filters.inc.op} exc={query.filters.exc.op} onToggle={(m, v) => toggleFacet("op", m, v)} searchable />
-          <FilterSelect label="Region" opts={counts(r => r.hq_region)} inc={query.filters.inc.region} exc={query.filters.exc.region} onToggle={(m, v) => toggleFacet("region", m, v)} />
-          <FilterSelect label="Exchange" opts={counts(r => r.exchange)} inc={query.filters.inc.exchange} exc={query.filters.exc.exchange} onToggle={(m, v) => toggleFacet("exchange", m, v)} />
-          <FilterSelect label="Accounting" opts={counts(r => r.accounting_standard)} inc={query.filters.inc.std} exc={query.filters.exc.std} onToggle={(m, v) => toggleFacet("std", m, v)} />
-          <FilterSelect label="Activity" opts={counts(r => r.activity_tags)} inc={query.filters.inc.tags} exc={query.filters.exc.tags} onToggle={(m, v) => toggleFacet("tags", m, v)} searchable />
+          <FilterSelect label="Operates in" opts={facetOpts("op", true)} inc={query.filters.inc.op} exc={query.filters.exc.op} onToggle={(m, v) => toggleFacet("op", m, v)} searchable />
+          <FilterSelect label="Subsidiaries" opts={facetOpts("subs")} inc={query.filters.inc.subs} exc={query.filters.exc.subs} onToggle={(m, v) => toggleFacet("subs", m, v)} />
+          <FilterSelect label="Region" opts={facetOpts("region")} inc={query.filters.inc.region} exc={query.filters.exc.region} onToggle={(m, v) => toggleFacet("region", m, v)} />
+          <FilterSelect label="Exchange" opts={facetOpts("exchange")} inc={query.filters.inc.exchange} exc={query.filters.exc.exchange} onToggle={(m, v) => toggleFacet("exchange", m, v)} />
+          <FilterSelect label="Accounting" opts={facetOpts("std")} inc={query.filters.inc.std} exc={query.filters.exc.std} onToggle={(m, v) => toggleFacet("std", m, v)} />
+          <FilterSelect label="Activity" opts={facetOpts("tags")} inc={query.filters.inc.tags} exc={query.filters.exc.tags} onToggle={(m, v) => toggleFacet("tags", m, v)} searchable />
           <Collapsible label="Characteristics" count={(query.filters.hasRnd ? 1 : 0) + (query.filters.hasPatents ? 1 : 0) + (query.filters.hasIntl ? 1 : 0)}>
             <div className="vt-search-filter-opts">
               <button type="button" className={query.filters.hasRnd ? "vt-search-chip is-on" : "vt-search-chip"} onClick={() => toggleFlag("hasRnd")}>R&D</button>

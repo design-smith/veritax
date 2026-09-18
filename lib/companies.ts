@@ -178,17 +178,118 @@ export async function countUniverse(): Promise<number | null> {
   }
 }
 
-export async function searchUniverse(q: string, limit = 250): Promise<{ total: number; rows: IndexRow[] }> {
-  const needle = q.trim()
-  if (!needle) return { total: 0, rows: [] }
+export type ScreenParams = {
+  q?: string
+  scheme?: "sic" | "naics" | "nace"
+  classCodes?: string[]
+  hq?: string[]
+  hqExc?: string[]
+  op?: string[]
+  opExc?: string[]
+  sector?: string[]
+  sectorExc?: string[]
+  region?: string[]
+  regionExc?: string[]
+  exchange?: string[]
+  exchangeExc?: string[]
+  std?: string[]
+  stdExc?: string[]
+  tags?: string[]
+  tagsExc?: string[]
+  conf?: string[]
+  confExc?: string[]
+  subs?: string[]
+  subsExc?: string[]
+  revMin?: number | null
+  revMax?: number | null
+  hasRnd?: boolean
+  hasPatents?: boolean
+  hasIntl?: boolean
+  sort?: string
+  limit?: number
+}
+
+function appendList(p: URLSearchParams, key: string, vals?: string[]) {
+  if (vals?.length) p.set(key, vals.join(","))
+}
+
+function screenQuery(params: ScreenParams): URLSearchParams {
+  const p = new URLSearchParams()
+  if (params.q?.trim()) p.set("q", params.q.trim())
+  if (params.scheme) p.set("scheme", params.scheme)
+  appendList(p, "class_codes", params.classCodes)
+  appendList(p, "hq", params.hq)
+  appendList(p, "hq_exc", params.hqExc)
+  appendList(p, "op", params.op)
+  appendList(p, "op_exc", params.opExc)
+  appendList(p, "sector", params.sector)
+  appendList(p, "sector_exc", params.sectorExc)
+  appendList(p, "region", params.region)
+  appendList(p, "region_exc", params.regionExc)
+  appendList(p, "exchange", params.exchange)
+  appendList(p, "exchange_exc", params.exchangeExc)
+  appendList(p, "std", params.std)
+  appendList(p, "std_exc", params.stdExc)
+  appendList(p, "tags", params.tags)
+  appendList(p, "tags_exc", params.tagsExc)
+  appendList(p, "conf", params.conf)
+  appendList(p, "conf_exc", params.confExc)
+  appendList(p, "subs", params.subs)
+  appendList(p, "subs_exc", params.subsExc)
+  if (params.revMin != null) p.set("rev_min", String(params.revMin))
+  if (params.revMax != null) p.set("rev_max", String(params.revMax))
+  if (params.hasRnd) p.set("has_rnd", "true")
+  if (params.hasPatents) p.set("has_patents", "true")
+  if (params.hasIntl) p.set("has_intl", "true")
+  if (params.sort) p.set("sort", params.sort)
+  p.set("limit", String(params.limit ?? 250))
+  return p
+}
+
+export async function screenUniverse(params: ScreenParams): Promise<{ total: number; rows: IndexRow[] }> {
   try {
-    const res = await fetch(`${API}/companies/search?q=${encodeURIComponent(needle)}&limit=${limit}`, { cache: "no-store" })
+    const res = await fetch(`${API}/companies/search?${screenQuery(params)}`, { cache: "no-store" })
     if (!res.ok) return { total: 0, rows: [] }
     const body = await res.json() as { total?: number; rows?: unknown[] }
     const rows = (body.rows ?? []).map(asIndexRow).filter((r): r is IndexRow => r != null)
     return { total: typeof body.total === "number" ? body.total : rows.length, rows }
   } catch {
     return { total: 0, rows: [] }
+  }
+}
+
+/** @deprecated Prefer screenUniverse — kept for call sites that only pass text. */
+export async function searchUniverse(q: string, limit = 250): Promise<{ total: number; rows: IndexRow[] }> {
+  return screenUniverse({ q, limit })
+}
+
+export type FacetBuckets = Record<string, [string, number][]>
+
+export async function fetchFacets(params: ScreenParams): Promise<FacetBuckets> {
+  try {
+    const p = screenQuery(params)
+    p.delete("limit")
+    p.delete("sort")
+    const res = await fetch(`${API}/companies/facets?${p}`, { cache: "no-store" })
+    if (!res.ok) return {}
+    return await res.json() as FacetBuckets
+  } catch {
+    return {}
+  }
+}
+
+export type ClassCodeHit = { code: string; label: string; n: number }
+
+export async function fetchClassCodes(scheme: "sic" | "naics" | "nace", q = "", limit = 40): Promise<ClassCodeHit[]> {
+  try {
+    const p = new URLSearchParams({ scheme, limit: String(limit) })
+    if (q.trim()) p.set("q", q.trim())
+    const res = await fetch(`${API}/companies/class-codes?${p}`, { cache: "no-store" })
+    if (!res.ok) return []
+    const body = await res.json() as { rows?: ClassCodeHit[] }
+    return Array.isArray(body.rows) ? body.rows : []
+  } catch {
+    return []
   }
 }
 

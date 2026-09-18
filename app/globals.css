@@ -1147,6 +1147,15 @@
   gap: 0.125rem;
   min-width: 0;
 }
+.vt-search-class-n {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  flex-shrink: 0;
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  color: var(--color-text-tertiary, #5d5d5d);
+}
 .vt-search-class-opt:hover,
 .vt-search-class-opt.is-active {
   background: var(--color-background-primary-soft);
