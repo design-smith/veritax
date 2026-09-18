@@ -121,14 +121,12 @@ export type IP = {
 export type Subsidiary = { name: string; jurisdiction: string | null; lei: string | null }
 export type Group = { subsidiaries: Subsidiary[] }
 
-// Search index: the compact static file at public/companies/index.json is the enriched subset
-// (filters + idle UI). The 50k+ warehouse lives in public.companies and is queried via the
-// FastAPI /companies/search endpoint — not downloaded wholesale (egress + payload).
-// Detail tabs load local files first, then the API. Never paginate Supabase from the browser.
+// Search index: public/company-index.json (root of public/ — not under /companies/, which the
+// app/[[...slug]] catch-all shadows on Vercel). The 50k+ warehouse is queried via FastAPI
+// /companies/search. Never paginate Supabase from the browser (egress / bandwidth cap).
 const API = process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:8000"
 
 export async function loadIndex(): Promise<IndexRow[]> {
-  // Static subset only. A full Supabase index download burns egress and trips the bandwidth cap.
   return loadIndexFromPublic()
 }
 
@@ -196,8 +194,11 @@ export async function searchUniverse(q: string, limit = 250): Promise<{ total: n
 
 async function loadIndexFromPublic(): Promise<IndexRow[]> {
   try {
-    const res = await fetch("/companies/index.json")
+    // Keep this path at the public/ root. `/companies/*` is claimed by [[...slug]] and returns HTML.
+    const res = await fetch("/company-index.json")
     if (!res.ok) return []
+    const type = res.headers.get("content-type") || ""
+    if (!type.includes("json")) return []
     const raw: unknown = await res.json()
     return Array.isArray(raw) ? (raw as IndexRow[]).filter(r => r && r.slug) : []
   } catch {

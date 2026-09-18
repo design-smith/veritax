@@ -5,7 +5,8 @@
 //
 // Per company: profile.json (compact, all tabs' non-heavy data), financials.json (concept x year pivot),
 // footprint.json (GLEIF entities by country), ip.json (patent list), group.json (subsidiaries).
-// Global: public/companies/index.json (one row per company — powers search/filter/table client-side).
+// Global: public/company-index.json (served at the public/ root — /companies/* is shadowed by [[...slug]]).
+// Also writes public/companies/index.json for local tooling.
 //
 // Enrichment: SIC + former names from SEC submissions (by CIK, cached); NAICS/NACE/sector via crosswalk.
 import { readFileSync, writeFileSync, mkdirSync, existsSync, readdirSync, statSync } from "node:fs"
@@ -368,5 +369,7 @@ for (const slug of slugs) {
   } catch (e) { console.log(`  ! ${slug}: ${e.message}`) }
 }
 index.sort((a, b) => (b.revenue_latest || 0) - (a.revenue_latest || 0))
-writeFileSync(join(OUT, "index.json"), JSON.stringify(index))
-console.log(`index.json: ${index.length} companies`)
+const payload = JSON.stringify(index)
+writeFileSync(join(OUT, "index.json"), payload)
+writeFileSync(join(REPO, "public", "company-index.json"), payload)
+console.log(`company-index.json: ${index.length} companies`)
