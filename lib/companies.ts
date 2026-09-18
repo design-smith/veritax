@@ -1,8 +1,6 @@
-// Company data lives in Supabase (public.companies), built locally by scripts/build-universe.mjs and pushed
-// with scripts/push_to_supabase.py. The search index is every row's `index` jsonb; each tab's detail is a
-// jsonb column loaded lazily by slug. Reads use the browser client + the public-read RLS policy.
-import { createClient } from "@/lib/supabase/client"
-
+// Company data lives in Supabase (public.companies), served to the UI through FastAPI on Fly.
+// Browser reads: static public/companies/* first, then NEXT_PUBLIC_API_BASE_URL. Never paginate
+// Supabase from the client — that burns egress and trips the bandwidth cap.
 export type IndexRow = {
   slug: string
   name: string
@@ -126,15 +124,12 @@ export type Group = { subsidiaries: Subsidiary[] }
 // Search index: the compact static file at public/companies/index.json is the enriched subset
 // (filters + idle UI). The 50k+ warehouse lives in public.companies and is queried via the
 // FastAPI /companies/search endpoint — not downloaded wholesale (egress + payload).
-// Detail tabs load local files first, then the API, then Supabase.
-let _sb: ReturnType<typeof createClient> | null = null
-const sb = () => (_sb ??= createClient())
+// Detail tabs load local files first, then the API. Never paginate Supabase from the browser.
 const API = process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:8000"
 
 export async function loadIndex(): Promise<IndexRow[]> {
-  const local = await loadIndexFromPublic()
-  if (local.length) return local
-  return loadIndexFromSupabase()
+  // Static subset only. A full Supabase index download burns egress and trips the bandwidth cap.
+  return loadIndexFromPublic()
 }
 
 function asIndexRow(raw: unknown): IndexRow | null {
@@ -208,29 +203,6 @@ async function loadIndexFromPublic(): Promise<IndexRow[]> {
   } catch {
     return []
   }
-}
-
-const INDEX_PAGE = 1000
-
-async function loadIndexFromSupabase(): Promise<IndexRow[]> {
-  const out: IndexRow[] = []
-  for (let from = 0; ; from += INDEX_PAGE) {
-    const { data, error } = await sb().from("companies").select("index").range(from, from + INDEX_PAGE - 1)
-    if (error) throw indexLoadError(error.message)
-    const chunk = (data ?? []).map(r => (r as { index: IndexRow }).index).filter(r => r && r.slug)
-    out.push(...chunk)
-    if (chunk.length < INDEX_PAGE) break
-  }
-  if (!out.length) throw indexLoadError("empty")
-  return out
-}
-
-function indexLoadError(detail: string): Error {
-  if (/egress|restricted|quota|402/i.test(detail)) {
-    return new Error("Company data is temporarily unavailable — the database hit its bandwidth cap.")
-  }
-  if (detail === "empty") return new Error("The company index is empty.")
-  return new Error("The company index did not load.")
 }
 
 async function readJson<T>(res: Response): Promise<T | null> {
