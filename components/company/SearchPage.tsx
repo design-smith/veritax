@@ -4,9 +4,9 @@ import { useEffect, useMemo, useRef, useState, type FormEvent, type KeyboardEven
 import { Check, ChevronDown, Search, Star, X } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
-import { SelectControl } from "@/components/ui/select-control"
-import { loadIndex, money, type IndexRow } from "@/lib/companies"
+import { countUniverse, loadIndex, money, searchUniverse, type IndexRow } from "@/lib/companies"
 import { useSavedCompanies } from "@/lib/saved-companies"
+import { SearchSkin, useSearchMode } from "@/lib/search-mode"
 
 type Scheme = "sic" | "naics" | "nace"
 type Mode = "inc" | "exc"
@@ -29,19 +29,58 @@ const SUBS_BANDS: [string, (n: number) => boolean][] = [
 const subsBand = (n: number) => SUBS_BANDS.find(([, fn]) => fn(n))?.[0] ?? "None"
 
 const emptySetMap = (): SetMap => Object.fromEntries(FACETS.map(k => [k, new Set<string>()])) as SetMap
-const emptyFilters = (): Filters => {
-  const inc = emptySetMap()
-  // Default search scope: North + South America headquarters.
-  inc.region = new Set(["Americas"])
-  return { inc, exc: emptySetMap(), revMin: REV_MIN, revMax: REV_MAX, hasRnd: false, hasPatents: false, hasIntl: false }
-}
+const emptyFilters = (): Filters => ({
+  inc: emptySetMap(),
+  exc: emptySetMap(),
+  revMin: REV_MIN,
+  revMax: REV_MAX,
+  hasRnd: false,
+  hasPatents: false,
+  hasIntl: false,
+})
 const emptyQuery = (): Query => ({ q: "", scheme: "sic", classQ: "", classCodes: [], filters: emptyFilters() })
+
+// ---- country filter <-> URL (shareable, refresh-safe) ----
+// The country facets (HQ + operates-in) are mirrored to the page query string so a filtered search can be
+// linked and survives a refresh. Repeated params (?hq=India&hq=United+States) keep country names that
+// contain commas intact. Written with replaceState so filter tweaks don't spam browser history.
+function readCountryParams(): { hq: string[]; hqExc: string[]; op: string[]; opExc: string[] } | null {
+  if (typeof window === "undefined") return null
+  const p = new URLSearchParams(window.location.search)
+  const hq = p.getAll("hq"), hqExc = p.getAll("hq_exc"), op = p.getAll("op"), opExc = p.getAll("op_exc")
+  if (!hq.length && !hqExc.length && !op.length && !opExc.length) return null
+  return { hq, hqExc, op, opExc }
+}
+function writeCountryParams(f: Filters) {
+  if (typeof window === "undefined") return
+  const path = window.location.pathname
+  if (path.startsWith("/company/") || path.startsWith("/project/")) return
+  const p = new URLSearchParams(window.location.search)
+  for (const k of ["hq", "hq_exc", "op", "op_exc"]) p.delete(k)
+  f.inc.hq.forEach(v => p.append("hq", v)); f.exc.hq.forEach(v => p.append("hq_exc", v))
+  f.inc.op.forEach(v => p.append("op", v)); f.exc.op.forEach(v => p.append("op_exc", v))
+  const qs = p.toString()
+  window.history.replaceState(null, "", window.location.pathname + (qs ? `?${qs}` : ""))
+}
+function queryFromUrl(): Query {
+  const q = emptyQuery()
+  const c = readCountryParams()
+  if (c) {
+    q.filters.inc.hq = new Set(c.hq); q.filters.exc.hq = new Set(c.hqExc)
+    q.filters.inc.op = new Set(c.op); q.filters.exc.op = new Set(c.opExc)
+  }
+  return q
+}
 
 function classFields(r: IndexRow, scheme: Scheme): { code: string | null; label: string | null } {
   if (scheme === "naics") return { code: r.naics, label: r.naics }
   if (scheme === "nace") return { code: r.nace, label: r.nace }
   return { code: r.sic, label: r.sic_description }
 }
+function searchHaystack(r: IndexRow): string {
+  return [r.name, r.ticker, r.sic, r.sic_description, r.naics, r.nace, r.sector, r.keywords, r.hq_country, r.hq_region, r.exchange, r.activity_tags.join(" ")].join(" ")
+}
+
 function matchesClass(r: IndexRow, scheme: Scheme, codes: string[], typed: string) {
   const needles = codes.length ? codes : typed.trim() ? [typed.trim()] : []
   if (!needles.length) return true
@@ -109,19 +148,46 @@ function labelOf(q: Query): string {
 
 export default function SearchPage({ onOpen }: { onOpen: (slug: string) => void }) {
   const [rows, setRows] = useState<IndexRow[] | null>(null)
-  const [err, setErr] = useState(false)
-  const [query, setQuery] = useState<Query>(emptyQuery)
+  const [universe, setUniverse] = useState<number | null>(null)
+  const [remote, setRemote] = useState<IndexRow[]>([])
+  const [remoteTotal, setRemoteTotal] = useState<number | null>(null)
+  const [err, setErr] = useState<string | null>(null)
+  const [query, setQuery] = useState<Query>(queryFromUrl)
   const [classOpen, setClassOpen] = useState(false)
   const [classIdx, setClassIdx] = useState(0)
   const [sort, setSort] = useState("revenue")
   const [activeIdx, setActiveIdx] = useState(0)
   const [searches, setSearches] = useState<StoredQuery[]>([])
   const [saved, toggleSave] = useSavedCompanies()
+  const [mode, setMode] = useSearchMode()
   const inputRef = useRef<HTMLInputElement>(null)
   const classRef = useRef<HTMLDivElement>(null)
   const listRef = useRef<HTMLTableSectionElement>(null)
 
-  useEffect(() => { loadIndex().then(setRows).catch(() => setErr(true)) }, [])
+  useEffect(() => {
+    loadIndex()
+      .then(setRows)
+      .catch(e => setErr(e instanceof Error ? e.message : "The company index did not load."))
+    countUniverse().then(n => { if (n != null) setUniverse(n) }).catch(() => { /* local index still works */ })
+  }, [])
+  useEffect(() => {
+    const needle = query.q.trim()
+    if (!needle) { setRemote([]); setRemoteTotal(null); return }
+    let cancelled = false
+    const t = window.setTimeout(() => {
+      searchUniverse(needle).then(hit => {
+        if (cancelled) return
+        setRemote(hit.rows)
+        setRemoteTotal(hit.total)
+      }).catch(() => { if (!cancelled) { setRemote([]); setRemoteTotal(null) } })
+    }, 220)
+    return () => { cancelled = true; window.clearTimeout(t) }
+  }, [query.q])
+  // Mirror the country filter to the URL so a filtered search is shareable and refresh-safe.
+  useEffect(() => {
+    writeCountryParams(query.filters)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [query.filters.inc.hq, query.filters.exc.hq, query.filters.inc.op, query.filters.exc.op])
   useEffect(() => { try { const raw = JSON.parse(localStorage.getItem(SAVED_KEY) || "[]"); if (Array.isArray(raw)) setSearches(raw) } catch { /* ignore */ } }, [])
   useEffect(() => {
     const close = (e: MouseEvent) => { if (classRef.current && !classRef.current.contains(e.target as Node)) setClassOpen(false) }
@@ -160,11 +226,18 @@ export default function SearchPage({ onOpen }: { onOpen: (slug: string) => void 
   const active = isActive(query)
 
   const results = useMemo(() => {
-    if (!rows || !active) return []
+    if (!rows) return []
     const needle = query.q.trim().toLowerCase()
+    const pool = (() => {
+      if (!needle || remote.length === 0) return rows
+      const map = new Map<string, IndexRow>()
+      for (const r of rows) map.set(r.slug, r)
+      for (const r of remote) if (!map.has(r.slug)) map.set(r.slug, r)
+      return [...map.values()]
+    })()
     const f = query.filters
-    const out = rows.filter(r => {
-      if (needle && ![r.name, r.ticker, r.sic, r.sic_description, r.naics, r.nace, r.sector, r.keywords, r.activity_tags.join(" ")].join(" ").toLowerCase().includes(needle)) return false
+    const out = pool.filter(r => {
+      if (needle && !searchHaystack(r).toLowerCase().includes(needle)) return false
       if (!matchesClass(r, query.scheme, query.classCodes, query.classQ)) return false
       for (const k of FACETS) {
         const vals = facetVals(r, k)
@@ -187,7 +260,50 @@ export default function SearchPage({ onOpen }: { onOpen: (slug: string) => void 
       return Number(b.revenue_latest || 0) - Number(a.revenue_latest || 0)
     })
     return out
-  }, [rows, active, query, sort])
+  }, [rows, remote, query, sort])
+
+  const funnel = useMemo(() => {
+    if (!rows) return []
+    const allN = universe ?? rows.length
+    const steps: { id: string; label: string; n: number }[] = [{ id: "all", label: "Companies", n: allN }]
+    let cur = rows
+    const needle = query.q.trim().toLowerCase()
+    if (needle) {
+      const map = new Map<string, IndexRow>()
+      for (const r of rows) map.set(r.slug, r)
+      for (const r of remote) if (!map.has(r.slug)) map.set(r.slug, r)
+      cur = [...map.values()].filter(r => searchHaystack(r).toLowerCase().includes(needle))
+      steps.push({ id: "q", label: query.q.trim(), n: remoteTotal ?? cur.length })
+    }
+    const apply = (id: string, label: string, pred: (r: IndexRow) => boolean) => {
+      const next = cur.filter(pred)
+      if (next.length !== cur.length) {
+        steps.push({ id, label, n: next.length })
+        cur = next
+      }
+    }
+    if (query.classCodes.length || query.classQ.trim()) {
+      apply("class", `${query.scheme.toUpperCase()} ${query.classCodes.join(", ") || query.classQ.trim()}`, r => matchesClass(r, query.scheme, query.classCodes, query.classQ))
+    }
+    for (const k of FACETS) {
+      if (query.filters.inc[k].size) apply(`inc-${k}`, [...query.filters.inc[k]].join(", "), r => facetVals(r, k).some(v => query.filters.inc[k].has(v)))
+      if (query.filters.exc[k].size) apply(`exc-${k}`, `not ${[...query.filters.exc[k]].join(", ")}`, r => !facetVals(r, k).some(v => query.filters.exc[k].has(v)))
+    }
+    const f = query.filters
+    if (f.revMin > REV_MIN || f.revMax < REV_MAX) {
+      const lo = f.revMin > REV_MIN ? money(f.revMin, "USD") : null
+      const hi = f.revMax < REV_MAX ? money(f.revMax, "USD") : null
+      apply("rev", lo && hi ? `${lo}–${hi}` : lo ? `≥${lo}` : `≤${hi}`, r => {
+        if (f.revMin > REV_MIN && (r.revenue_latest == null || r.revenue_latest < f.revMin)) return false
+        if (f.revMax < REV_MAX && (r.revenue_latest == null || r.revenue_latest > f.revMax)) return false
+        return true
+      })
+    }
+    if (f.hasRnd) apply("rnd", "R&D", r => r.has_rnd)
+    if (f.hasPatents) apply("patents", "Patents", r => r.has_patents)
+    if (f.hasIntl) apply("intl", "International", r => r.has_international)
+    return steps
+  }, [rows, query, universe, remote, remoteTotal])
 
   useEffect(() => { setActiveIdx(0) }, [query, sort])
   useEffect(() => { setClassIdx(0) }, [query.classQ, query.scheme])
@@ -221,10 +337,23 @@ export default function SearchPage({ onOpen }: { onOpen: (slug: string) => void 
   function persistSearches(next: StoredQuery[]) { setSearches(next); try { localStorage.setItem(SAVED_KEY, JSON.stringify(next)) } catch { /* ignore */ } }
   function saveCurrent() { if (!isActive(query)) return; const s = serializeQuery(query, labelOf(query)); persistSearches([s, ...searches.filter(x => x.id !== s.id)].slice(0, 20)) }
   function removeSaved(id: string) { persistSearches(searches.filter(x => x.id !== id)) }
+  function dropStep(id: string) {
+    if (id === "all") { setQuery(emptyQuery()); return }
+    if (id === "q") { setQuery(s => ({ ...s, q: "" })); return }
+    if (id === "class") { setQuery(s => ({ ...s, classQ: "", classCodes: [] })); return }
+    if (id === "rev") { setQuery(s => ({ ...s, filters: { ...s.filters, revMin: REV_MIN, revMax: REV_MAX } })); return }
+    if (id === "rnd") { toggleFlag("hasRnd"); return }
+    if (id === "patents") { toggleFlag("hasPatents"); return }
+    if (id === "intl") { toggleFlag("hasIntl"); return }
+    if (id.startsWith("inc-") || id.startsWith("exc-")) {
+      const mode = id.startsWith("inc-") ? "inc" : "exc"
+      const key = id.slice(4) as FacetKey
+      setQuery(s => ({ ...s, filters: { ...s.filters, [mode]: { ...s.filters[mode], [key]: new Set<string>() } } }))
+    }
+  }
 
   function onMainKey(e: ReactKey<HTMLInputElement>) {
     if (e.key === "Escape") { if (classOpen) setClassOpen(false); return }
-    if (!active) return
     if (e.key === "ArrowDown") { e.preventDefault(); setActiveIdx(i => Math.min(i + 1, Math.max(results.length - 1, 0))) }
     else if (e.key === "ArrowUp") { e.preventDefault(); setActiveIdx(i => Math.max(i - 1, 0)) }
     else if (e.key === "Enter" && results[activeIdx]) { e.preventDefault(); onOpen(results[activeIdx].slug) }
@@ -242,16 +371,43 @@ export default function SearchPage({ onOpen }: { onOpen: (slug: string) => void 
 
   if (err) {
     return (
-      <div className="vt-search">
-        <div className="vt-search-status" role="alert">
-          <p style={{ margin: 0, color: "var(--color-text)" }}>The company index did not load.</p>
-          <Button size="sm" variant="outline" onClick={() => { setErr(false); setRows(null); loadIndex().then(setRows).catch(() => setErr(true)) }}>Retry load</Button>
+      <div className="vt-search vt-search--split is-idle" data-mode={mode} role="alert">
+        <SearchSkin mode={mode} onChange={setMode} />
+        <WireGlobe />
+        <div className="vt-search-main">
+          <header className="vt-search-hero">
+            <h1>Global <em>Search</em></h1>
+            <form className="vt-search-bar" onSubmit={(e: FormEvent) => e.preventDefault()}>
+              <div className="vt-search-instrument">
+                <span className="vt-search-submit" aria-hidden><Search size={18} strokeWidth={1.5} /></span>
+                <input className="vt-search-input" placeholder="A name, ticker, industry, or country" disabled />
+              </div>
+            </form>
+            <p className="vt-search-empty-title" style={{ position: "relative", marginTop: "1rem", fontSize: "1rem" }}>{err}</p>
+            <Button size="sm" variant="outline" onClick={() => { setErr(null); setRows(null); loadIndex().then(setRows).catch(e => setErr(e instanceof Error ? e.message : "The company index did not load.")) }}>Retry load</Button>
+          </header>
         </div>
       </div>
     )
   }
   if (!rows) {
-    return <div className="vt-search"><div className="vt-search-status" aria-busy="true"><div className="vt-search-skel vt-skeleton" /></div></div>
+    return (
+      <div className="vt-search vt-search--split is-idle" data-mode={mode} aria-busy="true">
+        <SearchSkin mode={mode} onChange={setMode} />
+        <WireGlobe />
+        <div className="vt-search-main">
+          <header className="vt-search-hero">
+            <h1>Global <em>Search</em></h1>
+            <form className="vt-search-bar" onSubmit={(e: FormEvent) => e.preventDefault()}>
+              <div className="vt-search-instrument">
+                <span className="vt-search-submit" aria-hidden><Search size={18} strokeWidth={1.5} /></span>
+                <input className="vt-search-input" placeholder="A name, ticker, industry, or country" disabled />
+              </div>
+            </form>
+          </header>
+        </div>
+      </div>
+    )
   }
 
   const schemePlaceholder = query.scheme === "sic" ? "Code or industry" : query.scheme === "naics" ? "NAICS code" : "NACE code"
@@ -263,12 +419,14 @@ export default function SearchPage({ onOpen }: { onOpen: (slug: string) => void 
   }
 
   return (
-    <div className="vt-search vt-search--split">
+    <div className={active ? "vt-search vt-search--split" : "vt-search vt-search--split is-idle"} data-mode={mode}>
+      <SearchSkin mode={mode} onChange={setMode} />
+      <WireGlobe />
       {/* permanent filter panel — live: results update as you change filters */}
       <aside className="vt-search-panel" aria-label="Filters">
         <div className="vt-search-panel-head">
-          <span>Filters{nActive ? ` · ${nActive}` : ""}</span>
-          {nActive ? <button type="button" className="vt-search-panel-clear" onClick={() => setQuery(emptyQuery())}>Clear</button> : null}
+          <span>Criteria{nActive ? ` · ${nActive}` : ""}</span>
+          {nActive ? <button type="button" className="vt-search-panel-clear" onClick={() => setQuery(emptyQuery())}>Release all</button> : null}
         </div>
         <div className="vt-search-panel-body">
           {searches.length > 0 && (
@@ -279,7 +437,7 @@ export default function SearchPage({ onOpen }: { onOpen: (slug: string) => void 
                   return (
                     <div key={s.id} className="vt-search-saved-row" onMouseEnter={marqueeOn} onMouseLeave={marqueeOff}>
                       <button type="button" className="vt-search-hint" title={label} onClick={() => setQuery(deserializeQuery(s))}>
-                        <span className="vt-search-hint-body"><span className="vt-search-name">{label}</span></span>
+                        <span className="vt-search-hint-body"><span className="vt-search-saved-label">{label}</span></span>
                       </button>
                       <button type="button" className="vt-search-saved-del" aria-label={`Delete saved search ${label}`} onClick={() => removeSaved(s.id)}>
                         <X size={13} strokeWidth={1.5} />
@@ -293,13 +451,13 @@ export default function SearchPage({ onOpen }: { onOpen: (slug: string) => void 
           <Collapsible label="Classification" count={query.classCodes.length} defaultOpen>
             <div className="vt-search-class-row" ref={classRef}>
               <div className="vt-search-class-scheme">
-                <span className="vt-sr-only">Classification system</span>
-                <SelectControl size="md" variant="outline" block className="vt-search-scheme-trigger" value={query.scheme}
-                  onValueChange={v => { setQuery(s => ({ ...s, scheme: v as Scheme, classQ: "", classCodes: [] })); setClassOpen(false) }}>
-                  <SelectControl.Item value="sic">SIC</SelectControl.Item>
-                  <SelectControl.Item value="naics">NAICS</SelectControl.Item>
-                  <SelectControl.Item value="nace">NACE</SelectControl.Item>
-                </SelectControl>
+                <label htmlFor="vt-search-scheme" className="vt-sr-only">Classification system</label>
+                <select id="vt-search-scheme" className="vt-search-scheme" value={query.scheme}
+                  onChange={e => { setQuery(s => ({ ...s, scheme: e.target.value as Scheme, classQ: "", classCodes: [] })); setClassOpen(false) }}>
+                  <option value="sic">SIC</option>
+                  <option value="naics">NAICS</option>
+                  <option value="nace">NACE</option>
+                </select>
               </div>
               <div className="vt-search-class-field">
                 {query.classCodes.map(code => (
@@ -345,75 +503,84 @@ export default function SearchPage({ onOpen }: { onOpen: (slug: string) => void 
           </Collapsible>
         </div>
         <div className="vt-search-panel-foot">
-          <Button type="button" variant="outline" size="sm" block disabled={!active} onClick={saveCurrent}>Save search</Button>
+          <button type="button" className="vt-search-save" disabled={!active} onClick={saveCurrent}>Save search</button>
         </div>
       </aside>
 
-      {/* search bar + live results */}
       <div className="vt-search-main">
-        <form className="vt-search-bar" onSubmit={(e: FormEvent) => e.preventDefault()}>
-          <div className="vt-search-instrument">
-            <button type="submit" className="vt-search-submit" aria-label="Search"><Search size={20} strokeWidth={1.5} /></button>
-            <label htmlFor="vt-search-q" className="vt-sr-only">Search companies</label>
-            <input id="vt-search-q" ref={inputRef} className="vt-search-input" value={query.q} onChange={e => setQuery(s => ({ ...s, q: e.target.value }))} onKeyDown={onMainKey} placeholder="Search companies" autoComplete="off" autoCorrect="off" spellCheck={false} />
-            {query.q && (
-              <div className="vt-search-actions">
-                <Button type="button" variant="ghost" size="xs" aria-label="Clear search" onClick={() => setQuery(s => ({ ...s, q: "" }))}><X size={16} strokeWidth={1.5} /></Button>
-              </div>
-            )}
-          </div>
-        </form>
-
-        <div className="vt-search-main-body">
-          {active ? (
-            <div className="vt-search-body">
-              <div className="vt-search-table-meta">{results.length.toLocaleString()} {results.length === 1 ? "company" : "companies"}</div>
-              {results.length === 0 ? (
-                <p className="vt-search-empty">No companies match. Adjust a filter.</p>
-              ) : (
-                <div className="vt-search-table-wrap">
-                  <table className="vt-search-table">
-                    <thead>
-                      <tr>
-                        {th("name", "Company")}
-                        {th("ticker", "Ticker")}
-                        {th("class", classCol)}
-                        {th("sector", "Industry")}
-                        {th("hq", "HQ")}
-                        {th("revenue", "Revenue", true)}
-                        <th aria-label="Save" />
-                      </tr>
-                    </thead>
-                    <tbody ref={listRef}>
-                      {results.map((r, i) => {
-                        const isSaved = saved.has(r.slug)
-                        const cls = classFields(r, query.scheme)
-                        return (
-                          <tr key={r.slug} data-active={i === activeIdx || undefined} className={i === activeIdx ? "is-active" : undefined} onClick={() => onOpen(r.slug)} onMouseEnter={() => setActiveIdx(i)}>
-                            <td><span className="vt-search-name">{r.name}</span></td>
-                            <td className="is-muted">{r.ticker ?? ""}</td>
-                            <td className="is-muted">{[cls.code, cls.label && cls.label !== cls.code ? cls.label : null].filter(Boolean).join(" · ")}</td>
-                            <td className="is-muted">{r.sector ?? ""}</td>
-                            <td className="is-muted">{r.hq_country ?? ""}</td>
-                            <td className="is-num">{money(r.revenue_latest, r.currency)}</td>
-                            <td>
-                              <button type="button" className={isSaved ? "vt-search-star is-on" : "vt-search-star"} title={isSaved ? "Remove from saved" : "Save company"} aria-label={isSaved ? "Remove from saved" : "Save company"} onClick={e => { e.stopPropagation(); toggleSave(r.slug) }}>
-                                <Star size={15} strokeWidth={1.5} fill={isSaved ? "currentColor" : "none"} />
-                              </button>
-                            </td>
-                          </tr>
-                        )
-                      })}
-                    </tbody>
-                  </table>
+        <header className="vt-search-hero">
+          <h1>Global <em>Search</em></h1>
+          <form className="vt-search-bar" onSubmit={(e: FormEvent) => e.preventDefault()}>
+            <div className="vt-search-instrument">
+              <button type="submit" className="vt-search-submit" aria-label="Search"><Search size={18} strokeWidth={1.5} /></button>
+              <label htmlFor="vt-search-q" className="vt-sr-only">Search companies</label>
+              <input id="vt-search-q" ref={inputRef} className="vt-search-input" value={query.q} onChange={e => setQuery(s => ({ ...s, q: e.target.value }))} onKeyDown={onMainKey} placeholder="A name, ticker, industry, or country" autoComplete="off" autoCorrect="off" spellCheck={false} autoFocus />
+              {query.q && (
+                <div className="vt-search-actions">
+                  <button type="button" className="vt-search-clear" aria-label="Clear search" onClick={() => setQuery(s => ({ ...s, q: "" }))}><X size={16} strokeWidth={1.5} /></button>
                 </div>
               )}
             </div>
-          ) : (
-            <div className="vt-search-intro">
-              <p className="vt-search-hint-empty">Pick a filter on the left or type a company name — results update as you go.</p>
-            </div>
-          )}
+          </form>
+          <ol className="vt-search-funnel" aria-label="Screening funnel">
+            {funnel.map((step, i) => (
+              <li key={step.id}>
+                {i > 0 ? <span className="vt-search-funnel-rule" aria-hidden /> : null}
+                <button type="button" className={i === funnel.length - 1 ? "is-now" : undefined} onClick={() => dropStep(step.id)} title={step.id === "all" ? "Full universe" : `Release ${step.label}`}>
+                  <span className="vt-search-funnel-n">{step.n.toLocaleString()}</span>
+                  <span className="vt-search-funnel-l">{step.label}</span>
+                </button>
+              </li>
+            ))}
+          </ol>
+        </header>
+
+        <div className="vt-search-main-body">
+          <div className="vt-search-body">
+            {results.length === 0 ? (
+              <div className="vt-search-empty">
+                <p className="vt-search-empty-title">Nothing in this set.</p>
+                <p>Release a criterion.</p>
+              </div>
+            ) : (
+              <div className="vt-search-table-wrap">
+                <table className="vt-search-table">
+                  <thead>
+                    <tr>
+                      {th("name", "Company")}
+                      {th("ticker", "Ticker")}
+                      {th("class", classCol)}
+                      {th("sector", "Industry")}
+                      {th("hq", "HQ")}
+                      {th("revenue", "Revenue", true)}
+                      <th aria-label="Save" />
+                    </tr>
+                  </thead>
+                  <tbody ref={listRef}>
+                    {results.map((r, i) => {
+                      const isSaved = saved.has(r.slug)
+                      const cls = classFields(r, query.scheme)
+                      return (
+                        <tr key={r.slug} data-active={i === activeIdx || undefined} className={i === activeIdx ? "is-active" : undefined} onClick={() => onOpen(r.slug)} onMouseEnter={() => setActiveIdx(i)}>
+                          <td><span className="vt-search-name">{r.name}</span></td>
+                          <td className="is-muted">{r.ticker ?? ""}</td>
+                          <td className="is-muted">{[cls.code, cls.label && cls.label !== cls.code ? cls.label : null].filter(Boolean).join(" · ")}</td>
+                          <td className="is-muted">{r.sector ?? ""}</td>
+                          <td className="is-muted">{r.hq_country ?? ""}</td>
+                          <td className="is-num">{money(r.revenue_latest, r.currency)}</td>
+                          <td>
+                            <button type="button" className={isSaved ? "vt-search-star is-on" : "vt-search-star"} title={isSaved ? "Remove from saved" : "Save company"} aria-label={isSaved ? "Remove from saved" : "Save company"} onClick={e => { e.stopPropagation(); toggleSave(r.slug) }}>
+                              <Star size={15} strokeWidth={1.5} fill={isSaved ? "currentColor" : "none"} />
+                            </button>
+                          </td>
+                        </tr>
+                      )
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
         </div>
       </div>
     </div>
@@ -506,19 +673,55 @@ function RevenueRange({ min, max, onChange }: { min: number; max: number; onChan
         <div className="vt-rev-end">
           <span className="vt-rev-cur">$</span>
           <Input controlSize="sm" className="vt-rev-num" inputMode="decimal" value={fmtNum(min, minUnit)} onChange={e => onMinNum(e.target.value)} aria-label="Minimum revenue value" />
-          <SelectControl size="sm" variant="outline" value={minUnit} onValueChange={v => setMinUnit(v as "M" | "B")}>
-            <SelectControl.Item value="M">M</SelectControl.Item>
-            <SelectControl.Item value="B">B</SelectControl.Item>
-          </SelectControl>
+          <select className="vt-search-unit" value={minUnit} aria-label="Minimum revenue unit" onChange={e => setMinUnit(e.target.value as "M" | "B")}>
+            <option value="M">M</option>
+            <option value="B">B</option>
+          </select>
         </div>
         <span className="vt-rev-dash">–</span>
         <div className="vt-rev-end">
           <span className="vt-rev-cur">$</span>
           <Input controlSize="sm" className="vt-rev-num" inputMode="decimal" value={fmtNum(max, maxUnit)} onChange={e => onMaxNum(e.target.value)} aria-label="Maximum revenue value" />
-          <SelectControl size="sm" variant="outline" value={maxUnit} onValueChange={v => setMaxUnit(v as "M" | "B")}>
-            <SelectControl.Item value="M">M</SelectControl.Item>
-            <SelectControl.Item value="B">B</SelectControl.Item>
-          </SelectControl>
+          <select className="vt-search-unit" value={maxUnit} aria-label="Maximum revenue unit" onChange={e => setMaxUnit(e.target.value as "M" | "B")}>
+            <option value="M">M</option>
+            <option value="B">B</option>
+          </select>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+export function WireGlobe() {
+  return (
+    <div className="vt-globe" aria-hidden="true">
+      <div className="vt-globe-halo" />
+      <div className="vt-globe-halo is-far" />
+      <div className="vt-globe-stage">
+        <span className="vt-globe-rim" />
+        <span className="vt-globe-axis" />
+        <div className="vt-globe-spin">
+          {Array.from({ length: 12 }, (_, i) => (
+            <span key={`m${i}`} className="vt-globe-mer" style={{ transform: `rotateY(${i * 15}deg)` }} />
+          ))}
+          {[
+            [0, "is-eq"],
+            [23.5, "is-dash"],
+            [-23.5, "is-dash"],
+            [45, ""],
+            [-45, ""],
+            [66.5, ""],
+            [-66.5, ""],
+          ].map(([lat, cls]) => {
+            const rad = (Number(lat) * Math.PI) / 180
+            return (
+              <span
+                key={String(lat)}
+                className={cls ? `vt-globe-lat ${cls}` : "vt-globe-lat"}
+                style={{ transform: `rotateX(90deg) translateZ(calc(var(--d) * ${Math.sin(rad) / 2})) scale(${Math.cos(rad)})` }}
+              />
+            )
+          })}
         </div>
       </div>
     </div>
@@ -527,13 +730,13 @@ function RevenueRange({ min, max, onChange }: { min: number; max: number; onChan
 
 // On hover, if the label overflows its row, scroll it left to reveal the rest (distance measured live).
 function marqueeOn(e: ReactMouse<HTMLDivElement>) {
-  const el = e.currentTarget.querySelector<HTMLElement>(".vt-search-name")
+  const el = e.currentTarget.querySelector<HTMLElement>(".vt-search-saved-label")
   if (!el) return
   const dx = el.scrollWidth - el.clientWidth
   if (dx > 4) { el.style.setProperty("--vt-dx", `${dx}px`); el.classList.add("is-scrolling") }
 }
 function marqueeOff(e: ReactMouse<HTMLDivElement>) {
-  const el = e.currentTarget.querySelector<HTMLElement>(".vt-search-name")
+  const el = e.currentTarget.querySelector<HTMLElement>(".vt-search-saved-label")
   if (!el) return
   el.classList.remove("is-scrolling"); el.style.removeProperty("--vt-dx")
 }

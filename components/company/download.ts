@@ -86,14 +86,14 @@ function stepPDFs(b: Bundle): Promise<[string, Blob]>[] {
   const tasks: [string, Promise<Blob>][] = []
 
   tasks.push(["overview.pdf", makePDF(id.legal_name, subtitle, [
-    { heading: "Business", text: p.business.description || "—" },
+    { heading: "Business", text: p.business.overview || p.business.description || "—" },
     { heading: "Activities", head: ["Activity", "Evidence"], body: p.business.activity_tags.map(t => [t.tag, t.evidence]) },
     { heading: "Snapshot", body: [
       ["Revenue", money(p.key_metrics.find(m => m.label === "Revenue")?.value ?? null, cur)],
       ["Net income", money(p.key_metrics.find(m => m.label === "Net income")?.value ?? null, cur)],
       ["Employees", p.business.employees?.toLocaleString() ?? "—"],
       ["Subsidiaries", String(p.group_summary.n_subsidiaries)], ["Countries", String(p.footprint_summary.n_countries)],
-      ["Patents", String(p.ip_summary.count)], ["Confidence", p.sources.confidence],
+      ["Patents", String(p.ip_summary.count)],
     ] },
   ])])
 
@@ -104,7 +104,7 @@ function stepPDFs(b: Bundle): Promise<[string, Blob]>[] {
   ])])
 
   tasks.push(["business.pdf", makePDF("Business & Operations", id.legal_name, [
-    { heading: "Business description", text: p.business.description || "—" },
+    { heading: "Business description", text: p.business.overview || p.business.description || "—" },
     { heading: "Activities", head: ["Activity", "Evidence"], body: p.business.activity_tags.map(t => [t.tag, t.evidence]) },
     { heading: "Segments", text: p.business.segments.join("\n\n") || "—" },
     { heading: "R&D", body: [["Conducts R&D", p.business.rnd.conducts ? "Yes" : "No"], ["R&D spend", money(p.business.rnd.spend, cur)], ["Employees", p.business.employees?.toLocaleString() ?? "—"]] },
@@ -121,13 +121,6 @@ function stepPDFs(b: Bundle): Promise<[string, Blob]>[] {
   tasks.push(["intellectual-property.pdf", makePDF("Intellectual Property", id.legal_name, [
     { heading: "Portfolio", body: [["Total patents", String(p.ip_summary.count)], ...Object.entries(p.ip_summary.by_jurisdiction).map(([j, n]) => [`Patents · ${j}`, String(n)] as [string, string])] },
     { heading: "Patents (first 500)", head: ["Number", "Jurisdiction", "Assignee"], body: b.ip.items.slice(0, 500).map(i => [i.number || "—", i.jurisdiction || "—", i.assignee || "—"]) },
-  ])])
-
-  tasks.push(["sources-confidence.pdf", makePDF("Sources & Confidence", id.legal_name, [
-    { heading: "Coverage", head: ["Area", "Status"], body: p.sources.coverage.map(cv => [cv.area.replace(/_/g, " "), cv.status.replace(/_/g, " ")]) },
-    { heading: "Sources used", text: p.sources.families.join(", ") || "—" },
-    { heading: `Gaps (${p.sources.gaps.length})`, head: ["Field", "Description"], body: p.sources.gaps.map(g => [g.field, g.description]) },
-    { heading: "Confidence", body: [["Completeness", Math.round(p.sources.completeness * 100) + "%"], ["Overall", p.sources.confidence]] },
   ])])
 
   return tasks.map(([name, promise]) => promise.then(blob => [name, blob] as [string, Blob]))

@@ -1,78 +1,124 @@
-# Deploying Veritax
+# Deploy Veritax
 
-Two services:
+Two services + two managed deps. Do the steps in order.
 
-- **Frontend** — Next.js on **Vercel** (already connected; auto-deploys on push to `main`).
-- **Backend** — FastAPI on **Render** (this repo's `backend/`, via [`render.yaml`](render.yaml) + [`backend/Dockerfile`](backend/Dockerfile)).
+| Layer | Host | URL |
+|---|---|---|
+| UI | Vercel | `https://app.veritaxai.com` |
+| API | Fly.io (`backend/`) | `https://api.veritaxai.com` |
+| Auth + Postgres + pgvector | Supabase (existing project) | — |
+| Files | Cloudflare R2 | S3-compatible |
 
-Plus one managed dependency:
-
-- **Database** — Supabase Postgres + `pgvector`.
-
-**No object storage / S3 bucket is needed.** Uploaded files are written to the backend's local disk and read only once (during embedding, right after upload); everything after that reads from the database. On Render's free tier the disk is ephemeral, which is fine — by the time a file could be lost, its embeddings are already in the DB. (If you ever want durable file storage, set `S3_ENDPOINT_URL` + `S3_ACCESS_KEY`/`S3_SECRET_KEY`/`S3_BUCKET`/`S3_REGION` and it switches to S3/R2 automatically.)
-
-Do the steps in order — the backend needs the DB values, and the frontend needs the backend URL.
+Do **not** use Render free (sleeps, ephemeral disk) or put the FastAPI/OCR process on Vercel.
 
 ---
 
-## 1. Database — Supabase
+## 1. Supabase — DB + Auth
 
-1. Supabase → **Database → Extensions** → enable **`vector`**.
-2. **Settings → Database → Connection string → Session pooler** (not the direct host — that's IPv6-only; the pooler is IPv4 and supports asyncpg's prepared statements). It looks like:
-   ```
-   postgresql://postgres.<ref>:<password>@aws-0-<region>.pooler.supabase.com:5432/postgres
-   ```
-3. Change the scheme to `postgresql+asyncpg://` — that's your **`DATABASE_URL`**:
+Docs: [Connect to Postgres](https://supabase.com/docs/guides/database/connecting-to-postgres), [pgvector](https://supabase.com/docs/guides/database/extensions/pgvector), [auth-setup](docs/auth-setup.md).
+
+1. Dashboard → **Database → Extensions** → enable **`vector`**.
+2. Click **Connect**. Copy the **Session pooler** URI (port **5432**, host like `aws-0-<region>.pooler.supabase.com`). Not the direct `db.*.supabase.co` host (IPv6-only unless you bought the IPv4 add-on) and not transaction mode on **6543** (asyncpg prepared statements).
+3. Prefix the scheme with `+asyncpg`. URL-encode any special characters in the password:
+
    ```
    postgresql+asyncpg://postgres.<ref>:<password>@aws-0-<region>.pooler.supabase.com:5432/postgres
    ```
 
-The backend creates its own tables on startup (`create_all`), so an empty database is fine.
+   That string is **`DATABASE_URL`**.
+4. **Authentication → URL Configuration**
+   - Site URL: `https://app.veritaxai.com`
+   - Redirect URLs: `https://app.veritaxai.com/**`, `http://localhost:3000/**`, plus any `*.vercel.app` preview hosts you still use.
+5. Keep using the same project URL + anon key already in `docs/auth-setup.md`. Tables are created on API boot (`create_all`); an empty DB is fine.
 
 ---
 
-## 2. Backend — Render
+## 2. Cloudflare R2 — files
 
-1. Render → **New → Blueprint** → connect this GitHub repo. It reads `render.yaml` and proposes the `veritax-backend` web service (free plan, Docker).
-2. Fill in the environment variables (all `sync:false`, entered in the dashboard):
+Docs: [R2 S3 API](https://developers.cloudflare.com/r2/get-started/s3/), [R2 tokens](https://developers.cloudflare.com/r2/api/tokens/).
+
+1. R2 → create bucket `veritax-sources` (do this in the dashboard; the API `CreateBucket` call often fails on R2).
+2. **Manage R2 API tokens → Create API token** → Object Read & Write, scoped to that bucket.
+3. Copy **Access Key ID**, **Secret Access Key**, and the account endpoint:
+
+   ```
+   https://<ACCOUNT_ID>.r2.cloudflarestorage.com
+   ```
+
+---
+
+## 3. Fly.io — API
+
+Docs: [Deploy a Dockerfile](https://fly.io/docs/languages-and-frameworks/dockerfile/), [fly.toml](https://fly.io/docs/reference/configuration/), [secrets](https://fly.io/docs/apps/secrets/), [custom domains](https://fly.io/docs/networking/custom-domain/).
+
+Install [flyctl](https://fly.io/docs/flyctl/install/), then from `backend/` (so the Docker context is this folder, not the Next.js repo):
+
+```bash
+fly auth login
+fly launch --no-deploy
+```
+
+Keep the committed `fly.toml` (app `veritax-api`, region `iad`, port **8000**). Do **not** add Fly Postgres. Then:
+
+```bash
+fly secrets set \
+  DATABASE_URL='postgresql+asyncpg://…' \
+  SUPABASE_URL='https://<project>.supabase.co' \
+  VOYAGE_API_KEY='…' \
+  DEEPSEEK_API_KEY='…' \
+  S3_ENDPOINT_URL='https://<ACCOUNT_ID>.r2.cloudflarestorage.com' \
+  S3_ACCESS_KEY='…' \
+  S3_SECRET_KEY='…'
+
+fly deploy
+```
+
+`S3_BUCKET` / `S3_REGION=auto` / `PORT=8000` are already in `fly.toml`. Add `SUPABASE_JWT_SECRET` only if API calls 401 with that message (legacy HS256). CORS for `*.veritaxai.com` and `*.vercel.app` is already in the image.
+
+```bash
+# https://<app>.fly.dev/health  →  {"ok":true}
+# https://<app>.fly.dev/health/db  →  {"ok":true,"db":true}
+
+fly certs add api.veritaxai.com
+fly certs setup api.veritaxai.com
+```
+
+At your DNS host, add the **CNAME** (or A/AAAA) `fly certs setup` prints. Wait until `fly certs check api.veritaxai.com` is ready.
+
+`auto_stop_machines` is **off** on purpose — OCR/embed/draft run in-process after the HTTP response.
+
+---
+
+## 4. Vercel — UI
+
+Docs: [Environment variables](https://vercel.com/docs/environment-variables/managing-environment-variables), [Add a domain](https://vercel.com/docs/domains/add-a-domain). `NEXT_PUBLIC_*` is inlined at **build** time ([Next.js env](https://nextjs.org/docs/app/guides/environment-variables)) — save vars, then **redeploy**.
+
+1. Import this GitHub repo (root = Next.js app) if it is not already a Vercel project. Production branch: `main`.
+2. Project → **Settings → Environment Variables** (Production + Preview):
 
    | Env | Value |
    |---|---|
-   | `DATABASE_URL` | from step 1 |
-   | `DEEPSEEK_API_KEY` | your DeepSeek key |
-   | `VOYAGE_API_KEY` | your Voyage key |
-   | `CORS_ORIGINS` | `https://app.veritaxai.com` plus any preview/current cutover origins, comma-separated, **no trailing slash** |
+   | `NEXT_PUBLIC_SUPABASE_URL` | `https://<project>.supabase.co` |
+   | `NEXT_PUBLIC_SUPABASE_ANON_KEY` | anon/public key |
+   | `NEXT_PUBLIC_API_BASE_URL` | `https://api.veritaxai.com` |
+   | `NEXT_PUBLIC_POSTHOG_KEY` | existing write-only token, or leave unset |
+   | `NEXT_PUBLIC_POSTHOG_HOST` | `https://us.i.posthog.com` |
+   | `NEXT_PUBLIC_POSTHOG_ENABLED` | `true` only if you want analytics live |
 
-   No storage vars needed — the backend uses local disk unless you set the `S3_*` vars.
-
-3. Deploy. The URL will be `https://veritax-backend.onrender.com`.
-4. Verify: open `https://veritax-backend.onrender.com/health` → `{"ok": true}`.
-
----
-
-## 3. Point the frontend at the backend — Vercel
-
-Vercel → Project → **Settings → Environment Variables**:
-
-| Env | Value |
-|---|---|
-| `NEXT_PUBLIC_API_BASE_URL` | `https://veritax-backend.onrender.com` |
-| `NEXT_PUBLIC_SYNCFUSION_LICENSE_KEY` | your Syncfusion key |
-
-`NEXT_PUBLIC_*` are inlined at build time, so **trigger a redeploy** after saving.
-
-Attach the production app domain in Vercel:
-
-1. App project â†’ **Settings â†’ Domains** â†’ add `app.veritaxai.com`.
-2. In the DNS provider for `veritaxai.com`, create the DNS record Vercel asks for, usually `CNAME app cname.vercel-dns.com`.
-3. Wait for Vercel's domain check to show **Valid Configuration**.
-4. Set Supabase Auth **Site URL** to `https://app.veritaxai.com` and add redirect URLs for `https://app.veritaxai.com/**`, preview deployments, and `http://localhost:3000/**`.
+3. **Settings → Domains → Add** `app.veritaxai.com`. Add the **CNAME** Vercel shows (subdomains use CNAME, not an A record). Wait for **Valid Configuration**.
+4. Redeploy Production.
 
 ---
 
-## Notes / gotchas
+## 5. Smoke
 
-- **Cold starts**: the free Render service sleeps after ~15 min idle → the first request wakes it (~50 s). While the app is actively polling, it stays awake, so background jobs finish.
-- **CORS** must match the Vercel origin exactly (scheme + host, no trailing slash). Add preview URLs too if you use them.
-- If R2 rejects `CreateBucket` via the S3 API, just pre-create the `veritax-sources` bucket in the R2 dashboard — the app only needs it to exist.
-- The backend is a **persistent** process on purpose: its assessment/draft jobs run in-process after the HTTP response, which serverless platforms would kill. Don't move it to Vercel functions / Cloud Run scale-to-zero.
+1. `https://api.veritaxai.com/health` and `/health/db`
+2. Open `https://app.veritaxai.com` → sign up / OTP → land on company search
+3. New engagement → upload a PDF → status reaches embedded
+4. Planning → Draft produces text
+
+If upload works but embed fails, check `fly logs` (Voyage key or R2 creds). If login works but API 401s, `SUPABASE_URL` on Fly does not match the frontend project.
+
+---
+
+Fallback if you skip Fly: Render **Starter** (not free) via `render.yaml`, then set the same secrets plus the `S3_*` vars and point `NEXT_PUBLIC_API_BASE_URL` at the Render URL.

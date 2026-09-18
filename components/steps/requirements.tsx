@@ -131,9 +131,11 @@ function CoverageDonut({ present, partial, missing, active, onToggle, size = 52 
   )
 }
 
-export default function RequirementsStep({ engagementId, jurisdictions, onContinue, onOpenDraftSection, onDraftReadinessChange, onOpenPlanning }: {
+export default function RequirementsStep({ engagementId, jurisdictions, activeJurisdiction, onJurisdictionChange, onContinue, onOpenDraftSection, onDraftReadinessChange, onOpenPlanning }: {
   engagementId: string | null
   jurisdictions: string[]
+  activeJurisdiction: string
+  onJurisdictionChange: (jurisdiction: string) => void
   onContinue: () => void
   onOpenDraftSection: (jurisdiction: string, sectionId: string) => void
   onDraftReadinessChange?: (ready: boolean) => void
@@ -141,7 +143,6 @@ export default function RequirementsStep({ engagementId, jurisdictions, onContin
 }) {
   const [coverageByJuris, setCoverageByJuris] = useState<Record<string, CoverageResponse>>({})
   const [started, setStarted] = useState<Set<string>>(new Set())
-  const [activeJurisdiction, setActive] = useState(jurisdictions[0] ?? "")
   const [issue, setIssue] = useState<ActionableIssue | null>(null)
   const [openReqId, setOpenReqId] = useState<string | null>(null)
   const [filters, setFilters] = useState<Set<Seg>>(new Set())
@@ -290,10 +291,9 @@ export default function RequirementsStep({ engagementId, jurisdictions, onContin
   // Start assessing the FIRST jurisdiction; the backend indexes uploaded docs before matching.
   useEffect(() => {
     if (!engagementId || jurisdictions.length === 0) return
-    setActive(prev => (jurisdictions.includes(prev) ? prev : jurisdictions[0]))
-    startJurisdiction(jurisdictions[0])
+    startJurisdiction(activeJurisdiction || jurisdictions[0])
     return () => { if (pollRef.current) { clearTimeout(pollRef.current); pollRef.current = null } }
-  }, [engagementId, jurisdictions, startJurisdiction])
+  }, [engagementId, jurisdictions, activeJurisdiction, startJurisdiction])
 
   function selectJurisdiction(j: string) {
     if (j !== activeJurisdiction) {
@@ -302,7 +302,7 @@ export default function RequirementsStep({ engagementId, jurisdictions, onContin
       const codes = trackJurisdictionComparison(comparisonRef.current, j)
       if (codes) jurisdictionComparisonUsed({ country_codes: codes, country_count: codes.length })
     }
-    setActive(j)
+    onJurisdictionChange(j)
     setOpenReqId(null)
     setFilters(new Set())
     startJurisdiction(j)  // begins processing if it hasn't been yet

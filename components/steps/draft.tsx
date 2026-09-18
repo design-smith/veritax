@@ -242,10 +242,12 @@ function DraftGenerationPreview({ draft, entity, jurisdiction, complete, failedS
   )
 }
 
-export default function DraftStep({ engagementId, jurisdictions, entity, onContinue, onOpenRequirements, jumpTo, onJumped }: {
+export default function DraftStep({ engagementId, jurisdictions, entity, activeJurisdiction, onJurisdictionChange, onContinue, onOpenRequirements, jumpTo, onJumped }: {
   engagementId: string | null
   jurisdictions: string[]
   entity: string
+  activeJurisdiction: string
+  onJurisdictionChange: (jurisdiction: string) => void
   onContinue: () => void
   onOpenRequirements?: () => void
   jumpTo?: { jurisdiction: string; sectionId: string } | null
@@ -253,7 +255,6 @@ export default function DraftStep({ engagementId, jurisdictions, entity, onConti
 }) {
   const [draftByJuris, setDraftByJuris] = useState<Record<string, DraftResponse>>({})
   const [started, setStarted] = useState<Set<string>>(new Set())
-  const [activeJurisdiction, setActive] = useState(jurisdictions[0] ?? "")
   const [issue, setIssue] = useState<ActionableIssue | null>(null)
   const [retrying, setRetrying] = useState(false)
   const [editing, setEditing] = useState(false)
@@ -397,16 +398,15 @@ export default function DraftStep({ engagementId, jurisdictions, entity, onConti
     }
   }, [engagementId, markTypedDone, poll, stopJurisdictions])
 
-  // Process only the FIRST jurisdiction on entry; the rest start when selected.
+  // Process the active jurisdiction on entry; the rest start when selected.
   useEffect(() => {
     if (!engagementId || jurisdictions.length === 0) return
-    setActive(prev => (jurisdictions.includes(prev) ? prev : jurisdictions[0]))
-    startJurisdiction(jurisdictions[0])
+    startJurisdiction(activeJurisdiction || jurisdictions[0])
     return () => { if (pollRef.current) { clearTimeout(pollRef.current); pollRef.current = null } }
-  }, [engagementId, jurisdictions, startJurisdiction])
+  }, [engagementId, jurisdictions, activeJurisdiction, startJurisdiction])
 
   function selectJurisdiction(j: string) {
-    setActive(j)
+    onJurisdictionChange(j)
     startJurisdiction(j)
   }
 

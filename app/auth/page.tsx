@@ -16,16 +16,6 @@ type Mode = "login" | "signup"
 let _supa: ReturnType<typeof createClient> | null = null
 const supa = () => (_supa ??= createClient())
 
-const PRIMARY: React.CSSProperties = {
-  display: "flex", alignItems: "center", justifyContent: "center",
-  width: "100%", height: 42, borderRadius: 8, border: "1px solid #000",
-  background: "#000", color: "#fff", fontSize: 14, fontWeight: 500, cursor: "pointer",
-}
-const INPUT: React.CSSProperties = {
-  width: "100%", height: 42, padding: "0 0.875rem", borderRadius: 8, border: "1px solid #e5e5e5",
-  background: "#fff", color: "#000", fontSize: 14, outline: "none", boxSizing: "border-box",
-}
-
 export default function AuthPage() {
   const router = useRouter()
   const [mode, setMode] = useState<Mode>("login")
@@ -168,50 +158,42 @@ export default function AuthPage() {
   }
 
   return (
-    <div style={{ minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center", background: "#fafafa", color: "#000" }}>
-      <div style={{ width: 360, background: "#fff", border: "1px solid #e5e5e5", borderRadius: 12, padding: "2rem", display: "flex", flexDirection: "column", gap: "1.25rem" }}>
-        <div style={{ display: "flex", alignItems: "center", gap: "0.5rem", justifyContent: "center" }}>
-          <img src="/VeritaxLogo.png" alt="Veritax" style={{ width: 26, height: 26, objectFit: "contain" }} />
-          <span style={{ fontFamily: "var(--font-wordmark)", fontSize: 22, fontWeight: 300, letterSpacing: 0, lineHeight: 1 }}>Veritax</span>
-        </div>
+    <div className="vt-auth">
+      <div className="vt-auth-card">
+        <h1 className="vt-auth-mark">Veritax</h1>
 
-        <div style={{ display: "flex", gap: 4, background: "#f2f2f2", borderRadius: 9999, padding: 3 }}>
+        <div className="vt-auth-modes">
           {(["login", "signup"] as const).map(m => (
-            <button key={m} type="button" onClick={() => switchMode(m)} style={{
-              flex: 1, height: 32, borderRadius: 9999, border: "none", cursor: "pointer",
-              fontSize: 13, fontWeight: 500,
-              background: mode === m ? "#fff" : "transparent",
-              color: mode === m ? "#000" : "#888",
-              boxShadow: mode === m ? "0 1px 2px rgba(0,0,0,0.08)" : "none",
-            }}>{m === "login" ? "Log in" : "Sign up"}</button>
+            <button key={m} type="button" className={mode === m ? "is-on" : undefined} onClick={() => switchMode(m)}>
+              {m === "login" ? "Log in" : "Sign up"}
+            </button>
           ))}
         </div>
 
         {stage === "form" ? (
           <form onSubmit={sendCode} style={{ display: "flex", flexDirection: "column", gap: "0.5rem" }}>
             {mode === "signup" && (
-              <input style={INPUT} type="text" required autoComplete="name" placeholder="Full name"
+              <input type="text" required autoComplete="name" placeholder="Full name"
                 value={name} onChange={e => setName(e.target.value)} />
             )}
-            <input style={INPUT} type="email" required autoComplete="email" placeholder="you@company.com"
+            <input type="email" required autoComplete="email" placeholder="you@company.com"
               value={email} onChange={e => setEmail(e.target.value)} />
-            <button type="submit" style={PRIMARY} disabled={busy || !email || (mode === "signup" && !name.trim())}>
+            <button type="submit" className="vt-auth-go" disabled={busy || !email || (mode === "signup" && !name.trim())}>
               {busy ? "Sending..." : "Email me a code"}
             </button>
           </form>
         ) : (
           <form onSubmit={verify} style={{ display: "flex", flexDirection: "column", gap: "0.5rem" }}>
-            <p style={{ fontSize: 12, color: "#888", margin: 0, textAlign: "center" }}>
+            <p>
               Enter the 6-digit code sent to <strong>{email}</strong>
             </p>
-            <input style={{ ...INPUT, textAlign: "center", letterSpacing: "0.2em", fontSize: 18 }}
+            <input style={{ textAlign: "center", letterSpacing: "0.2em" }}
               type="text" autoComplete="one-time-code" placeholder="Enter code" maxLength={12}
               value={code} onChange={e => setCode(e.target.value.replace(/\s+/g, ""))} />
-            <button type="submit" style={PRIMARY} disabled={busy || code.trim().length < 6}>
+            <button type="submit" className="vt-auth-go" disabled={busy || code.trim().length < 6}>
               {busy ? "Verifying..." : "Verify and continue"}
             </button>
-            <button type="button" onClick={useDifferentEmail}
-              style={{ height: 34, border: "none", background: "transparent", color: "#888", fontSize: 12, cursor: "pointer" }}>
+            <button type="button" className="vt-auth-ghost" onClick={useDifferentEmail}>
               Use a different email
             </button>
           </form>

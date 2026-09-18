@@ -1,13 +1,14 @@
 "use client"
 
 import { useCallback, useEffect, useRef, useState, type CSSProperties } from "react"
-import { useRouter } from "next/navigation"
+import { usePathname, useRouter } from "next/navigation"
 import dynamic from "next/dynamic"
-import { Activity, CalendarDays, ChevronDown, FileText, GraduationCap, LogOut, PanelLeftClose, Search, ShieldCheck, Star } from "lucide-react"
+import { ChevronDown, GraduationCap, PanelLeftClose } from "lucide-react"
 import PlanningStep, { type PlanningDocumentMap, type PlanningSourceRow, type SourceId } from "@/components/steps/planning"
 import DemoTour, { type TourStep } from "@/components/DemoTour"
 import Confetti from "@/components/Confetti"
 import { stageEntered, stageCompleted } from "@/lib/analytics"
+import ControlledTransactionsStep from "@/components/steps/controlled-transactions"
 import RequirementsStep from "@/components/steps/requirements"
 import DraftStep from "@/components/steps/draft"
 import RisksStep from "@/components/steps/risks"
@@ -20,20 +21,22 @@ import SearchPage from "@/components/company/SearchPage"
 import CompanyRecord from "@/components/company/CompanyRecord"
 import { loadIndex, type IndexRow } from "@/lib/companies"
 import { useSavedCompanies } from "@/lib/saved-companies"
+import { useSearchMode } from "@/lib/search-mode"
 
 // FullCalendar is browser-only — load it client-side so it never runs during the build prerender.
 const CompliancePage = dynamic(() => import("@/components/compliance"), { ssr: false })
 const MonitoringPage = dynamic(() => import("@/components/monitoring"), { ssr: false })
 const DefensePage = dynamic(() => import("@/components/defense"), { ssr: false })
 
-type Step = 1 | 2 | 3 | 4
+type Step = 1 | 2 | 3 | 4 | 5
 type BootStatus = "loading" | "ready" | "offline"
 
 const NAV: { step: Step; label: string }[] = [
   { step: 1, label: "Planning" },
-  { step: 2, label: "Requirements" },
-  { step: 3, label: "Draft" },
-  { step: 4, label: "Risks" },
+  { step: 2, label: "Controlled transactions" },
+  { step: 3, label: "Requirements" },
+  { step: 4, label: "Draft" },
+  { step: 5, label: "Risks" },
 ]
 
 // Guided walkthrough for the public /demo (enableTour). Each step switches to its tab, then spotlights
@@ -41,42 +44,51 @@ const NAV: { step: Step; label: string }[] = [
 const TOUR_STEPS: TourStep[] = [
   { appStep: 1, target: "planning-scope", title: "Set the scope", text: "Choose the jurisdictions, the entity, and the fiscal year. This frames the whole Local File.", placement: "bottom-end" },
   { appStep: 1, target: "planning-sources", title: "Bring your sources", text: "Upload or connect financials, agreements, the website, and interviews — Veritax reads them for you." },
-  { appStep: 2, target: "req-jurisdictions", title: "Every jurisdiction at once", text: "Veritax checks the file against each jurisdiction's real requirements in parallel. Click a tab to see its results." },
-  { appStep: 3, target: "draft-sections", title: "The draft writes itself", text: "Every section that jurisdiction requires is generated for you, in order." },
-  { appStep: 3, target: "draft-actions", title: "Edit or export", text: "Edit any section inline, or download the finished Local File as a Word document." },
-  { appStep: 4, target: "risks-rollup", title: "Exposures & contradictions", text: "Veritax flags financial exposures and contradictions in the file, each with evidence you can open." },
+  { appStep: 3, target: "req-jurisdictions", title: "Every jurisdiction at once", text: "Veritax checks the file against each jurisdiction's real requirements in parallel. Click a tab to see its results." },
+  { appStep: 4, target: "draft-sections", title: "The draft writes itself", text: "Every section that jurisdiction requires is generated for you, in order." },
+  { appStep: 4, target: "draft-actions", title: "Edit or export", text: "Edit any section inline, or download the finished Local File as a Word document." },
+  { appStep: 5, target: "risks-rollup", title: "Exposures & contradictions", text: "Veritax flags financial exposures and contradictions in the file, each with evidence you can open." },
 ]
 
 const LS_ID = "veritax.engagementId"     // resume the file being worked on across refreshes
 const LS_STEP = "veritax.step"
 // Workflow tab → canonical analytics stage (Planning is the "evidence" stage; Draft is "local_file").
-const STEP_TO_STAGE: Record<Step, string> = { 1: "evidence", 2: "requirements", 3: "local_file", 4: "risks" }
+const STEP_TO_STAGE: Record<Step, string> = { 1: "evidence", 2: "transactions", 3: "requirements", 4: "local_file", 5: "risks" }
 const PLANNING_SOURCES = new Set<SourceId>(["financials", "agreements", "public", "interview"])
 const EMPTY_PLANNING_DOCUMENTS: PlanningDocumentMap = {}
-const STEP_URL: Record<Step, string> = {
-  1: "planning",
-  2: "requirements",
-  3: "draft",
-  4: "risks",
-}
+const STEP_SLUG: Record<Step, string> = { 1: "planning", 2: "transactions", 3: "requirements", 4: "draft", 5: "risks" }
+// Which steps are per-jurisdiction — the country belongs in their URL. Planning is not.
+const STEP_HAS_JURISDICTION: Record<Step, boolean> = { 1: false, 2: true, 3: true, 4: true, 5: true }
 
-function parseStepParam(value: string | null): Step | null {
-  if (!value) return null
-  const normalized = value.toLowerCase()
-  if (normalized === "planning" || normalized === "1") return 1
-  if (normalized === "requirements" || normalized === "2") return 2
-  if (normalized === "draft" || normalized === "3") return 3
-  if (normalized === "risks" || normalized === "4") return 4
-  return null
-}
-
-function readWorkspaceUrl() {
-  if (typeof window === "undefined") return { projectId: null as string | null, step: null as Step | null }
-  const params = new URLSearchParams(window.location.search)
-  return {
-    projectId: params.get("project") || params.get("engagement") || params.get("file"),
-    step: parseStepParam(params.get("step")),
+function stepFromSlug(slug: string | undefined): Step | null {
+  switch ((slug ?? "").toLowerCase()) {
+    case "planning": return 1
+    case "transactions": return 2
+    case "requirements": return 3
+    case "draft": return 4
+    case "risks": return 5
+    default: return null
   }
+}
+
+// The URL is the source of truth:  /  ·  /company/<slug>  ·  /project/<id>/<step>[/<country>]
+type Route =
+  | { view: "search" }
+  | { view: "company"; slug: string }
+  | { view: "workflow"; projectId: string; step: Step; jurisdiction: string | null }
+
+function parseRoute(pathname: string): Route {
+  const parts = pathname.split("/").filter(Boolean).map(p => { try { return decodeURIComponent(p) } catch { return p } })
+  if (parts[0] === "company" && parts[1]) return { view: "company", slug: parts[1] }
+  if (parts[0] === "project" && parts[1]) {
+    return { view: "workflow", projectId: parts[1], step: stepFromSlug(parts[2]) ?? 1, jurisdiction: parts[3] ?? null }
+  }
+  return { view: "search" }
+}
+
+function buildProjectPath(projectId: string, step: Step, jurisdiction: string | null): string {
+  const base = `/project/${projectId}/${STEP_SLUG[step]}`
+  return STEP_HAS_JURISDICTION[step] && jurisdiction ? `${base}/${encodeURIComponent(jurisdiction)}` : base
 }
 
 function planningDocumentsFromEngagement(engagement: Engagement): PlanningDocumentMap {
@@ -111,32 +123,6 @@ function planningSourcesFromEngagement(engagement: Engagement): Set<SourceId> {
   }
   if (engagement.website_url) selected.add("public")
   return selected
-}
-
-function canonicalizePlanningUrl() {
-  if (typeof window === "undefined") return
-  const url = new URL(window.location.href)
-  if (parseStepParam(url.searchParams.get("step")) !== 1) return
-  url.searchParams.delete("step")
-  window.history.replaceState(null, "", `${url.pathname}${url.search}${url.hash}`)
-}
-
-function replaceWorkspaceUrl(projectId: string | null, step: Step) {
-  if (typeof window === "undefined") return
-  const url = new URL(window.location.href)
-  if (projectId) url.searchParams.set("project", projectId)
-  else url.searchParams.delete("project")
-  if (step === 1) url.searchParams.delete("step")
-  else url.searchParams.set("step", STEP_URL[step])
-  window.history.replaceState(null, "", `${url.pathname}${url.search}${url.hash}`)
-}
-
-function canonicalizeSearchUrl() {
-  if (typeof window === "undefined") return
-  const url = new URL(window.location.href)
-  if (![...url.searchParams.keys()].some(k => k === "project" || k === "engagement" || k === "file" || k === "step")) return
-  url.search = ""
-  window.history.replaceState(null, "", url.pathname)
 }
 
 function describeAppError(error: unknown) {
@@ -248,8 +234,9 @@ function BootSkeleton({ offline = false, onRetry }: { offline?: boolean; onRetry
   )
 }
 
-export default function Page({ enableTour = false }: { enableTour?: boolean } = {}) {
+export default function Workspace({ enableTour = false }: { enableTour?: boolean } = {}) {
   const router = useRouter()
+  const pathname = usePathname()
   const [step, setStep]       = useState<Step>(1)
   const [visited, setVisited] = useState<Set<Step>>(new Set([1]))
   const [jurisdictions, setJ] = useState<string[]>([])
@@ -264,23 +251,37 @@ export default function Page({ enableTour = false }: { enableTour?: boolean } = 
   const [draftJump, setDraftJump] = useState<{ jurisdiction: string; sectionId: string } | null>(null)
   const [files, setFiles] = useState<EngagementSummary[]>([])
   const [localOpen, setLocalOpen] = useState(true)
-  const [collapsed, setCollapsed] = useState(false)   // left panel: collapsed shows the logo only
-  const [logoHover, setLogoHover] = useState(false)
+  const [collapsed, setCollapsed] = useState(false)   // left panel: collapsed shows the mark only
   const [mounted, setMounted] = useState<Set<Step>>(new Set([1]))  // steps stay mounted once visited
   const [page, setPage] = useState<"workflow" | "compliance" | "monitoring" | "defense" | "company-search">(enableTour ? "workflow" : "company-search")
   const [companyOpen, setCompanyOpen] = useState(true)
   const [companies, setCompanies] = useState<IndexRow[]>([])
   const [selectedCompany, setSelectedCompany] = useState<string | null>(null)
+  const [fromSearch, setFromSearch] = useState(() => {
+    if (typeof window === "undefined") return false
+    try {
+      const route = parseRoute(window.location.pathname)
+      return route.view === "company" && sessionStorage.getItem("veritax.fromSearch") === route.slug
+    } catch {
+      return false
+    }
+  })
+  const [activeJurisdiction, setActiveJurisdiction] = useState("")   // shared across per-jurisdiction steps; lives in the URL
   const [savedSlugs] = useSavedCompanies()
+  const [searchMode] = useSearchMode()
   const [apiOffline, setApiOffline] = useState(false)
   const [draftReady, setDraftReady] = useState(false)
   const [bootStatus, setBootStatus] = useState<BootStatus>("loading")
+  const [signedIn, setSignedIn] = useState(false)
   const [libraryLoading, setLibraryLoading] = useState(true)
   const [actionIssue, setActionIssue] = useState<ActionableIssue | null>(null)
   const [tourOpen, setTourOpen] = useState(false)
   const [tourStep, setTourStep] = useState(0)   // remembered walkthrough position (resume from the cap icon)
   const [confetti, setConfetti] = useState(false)
   const engagementLoadSeq = useRef(0)
+  const engagementIdRef = useRef<string | null>(engagementId)   // read current id in effects without re-subscribing
+  engagementIdRef.current = engagementId
+  const routeProjectRef = useRef<string | null>(null)          // last project id applied from the URL (detects project switch)
   const trackedStageRef = useRef<string | null>(null)   // last analytics stage fired (guards rerender/StrictMode)
   const revealEngRef = useRef<Engagement | null>(null)  // demo Planning data, revealed as the tutorial spotlights it
   const scopeShownRef = useRef(false)
@@ -318,13 +319,18 @@ export default function Page({ enableTour = false }: { enableTour?: boolean } = 
     } catch (error) {
       logAppError("list engagements", error)
       setFiles([])
+      // Anonymous search is the product. No token is not an outage — just no Local File library yet.
+      if (error instanceof Error && error.message.startsWith("API 401 ")) {
+        setSignedIn(false)
+        return false
+      }
       setApiOffline(true)
       void diagnoseAndOpen(error, "load file library", { label: "Refresh", onClick: () => window.location.reload() })
       return false
     } finally {
       setLibraryLoading(false)
     }
-  }, [])
+  }, [diagnoseAndOpen])
 
   // Rehydrate a file's scope from the backend (entity, jurisdictions, which source rows are on).
   const loadEngagement = useCallback(async (id: string, seq?: number, reveal = false): Promise<boolean> => {
@@ -406,12 +412,23 @@ export default function Page({ enableTour = false }: { enableTour?: boolean } = 
   }, [])
 
   // Resume the file being worked on (or start a fresh one), then load the library.
+  // Search does not wait on the Local File API — it is the product.
   useEffect(() => {
     let cancelled = false
     ;(async () => {
-      canonicalizePlanningUrl()
-      setBootStatus("loading")
+      const landing = parseRoute(window.location.pathname)
+      const searchFirst = !enableTour && landing.view !== "workflow"
+      if (searchFirst) {
+        setPage("company-search")
+        if (landing.view === "company") setSelectedCompany(landing.slug)
+        setBootStatus("ready")
+      } else {
+        setBootStatus("loading")
+      }
       setLibraryLoading(true)
+      const { data: sessionData } = await createClient().auth.getSession()
+      const hasSession = Boolean(sessionData.session?.access_token)
+      if (!cancelled) setSignedIn(hasSession)
       try {
         await api.health()
         if (!cancelled) setApiOffline(false)
@@ -419,63 +436,93 @@ export default function Page({ enableTour = false }: { enableTour?: boolean } = 
         logAppError("health", error)
         if (!cancelled) {
           setApiOffline(true)
-          setBootStatus("offline")
           setLibraryLoading(false)
-          void diagnoseAndOpen(
-            error,
-            "check backend health",
-            { label: "Retry", onClick: () => window.location.reload() },
-            { label: "Sign in again", onClick: () => router.replace("/auth"), variant: "ghost" },
-          )
-        }
-        return
-      }
-      const fromUrl = readWorkspaceUrl()
-      if (!enableTour && fromUrl.projectId) setPage("workflow")
-      const stored = localStorage.getItem(LS_ID)
-      const requestedId = fromUrl.projectId || stored
-      let resumed = requestedId ? await loadEngagement(requestedId, undefined, enableTour) : false
-      if (!resumed && fromUrl.projectId && stored && stored !== fromUrl.projectId) {
-        resumed = await loadEngagement(stored)
-      }
-      if (cancelled) return
-      if (resumed) {
-        // The demo always opens on Planning (step 1) so the staged fill + tutorial start from the top.
-        const resumedStep = enableTour ? 1 : (fromUrl.step ?? parseStepParam(localStorage.getItem(LS_STEP)))
-        if (resumedStep) {
-          setStep(resumedStep)
-          setVisited(new Set([1, resumedStep]))
-          setMounted(new Set([1, resumedStep]))
-          if (resumedStep >= 3) setDraftReady(true)
-        }
-      } else {
-        try {
-          const { id } = await api.createEngagement()  // uploads need an id to attach to
-          if (cancelled) return
-          setPlanningDocuments(EMPTY_PLANNING_DOCUMENTS)
-          setPlanningSourceRows([])
-          setWebsiteUrl("")
-          setSources(new Set())
-          setEngagementId(id)
-          localStorage.setItem(LS_ID, id)
-        } catch (error) {
-          logAppError("create engagement", error)
-          if (!cancelled) {
-            setApiOffline(true)
+          if (!searchFirst) {
             setBootStatus("offline")
-            setLibraryLoading(false)
             void diagnoseAndOpen(
               error,
-              "create project",
+              "check backend health",
               { label: "Retry", onClick: () => window.location.reload() },
               { label: "Sign in again", onClick: () => router.replace("/auth"), variant: "ghost" },
             )
           }
-          return
+        }
+        return
+      }
+      // Search is public. Skip Local File API calls until there is a login token.
+      if (!hasSession && !enableTour) {
+        if (!cancelled) {
+          setFiles([])
+          setLibraryLoading(false)
+          setBootStatus("ready")
+        }
+        if (!searchFirst) router.replace("/auth")
+        return
+      }
+      // ensure a background working file exists (New file + uploads need an id) — or create one.
+      const ensureBackgroundFile = async (): Promise<boolean> => {
+        const stored = localStorage.getItem(LS_ID)
+        const resumed = stored ? await loadEngagement(stored) : false
+        if (resumed || cancelled) return resumed
+        try {
+          const { id } = await api.createEngagement()
+          if (cancelled) return false
+          setPlanningDocuments(EMPTY_PLANNING_DOCUMENTS); setPlanningSourceRows([]); setWebsiteUrl(""); setSources(new Set())
+          setEngagementId(id); localStorage.setItem(LS_ID, id)
+          return true
+        } catch (error) {
+          logAppError("create engagement", error)
+          if (!cancelled) {
+            setApiOffline(true)
+            setLibraryLoading(false)
+            if (!searchFirst) {
+              setBootStatus("offline")
+              void diagnoseAndOpen(
+                error, "create project",
+                { label: "Retry", onClick: () => window.location.reload() },
+                { label: "Sign in again", onClick: () => router.replace("/auth"), variant: "ghost" },
+              )
+            }
+          }
+          return false
         }
       }
+
+      if (enableTour) {
+        // Demo: resume the seeded file with the staged reveal; always open on Planning for the tour.
+        const stored = localStorage.getItem(LS_ID)
+        const resumed = stored ? await loadEngagement(stored, undefined, true) : false
+        if (!resumed) { try { const { id } = await api.createEngagement(); if (!cancelled) { setEngagementId(id); localStorage.setItem(LS_ID, id) } } catch (e) { logAppError("create engagement (demo)", e) } }
+        if (cancelled) return
+        setPage("workflow"); setStep(1); setVisited(new Set([1])); setMounted(new Set([1]))
+      } else {
+        const route = parseRoute(window.location.pathname)
+        if (route.view === "workflow") {
+          setPage("workflow")
+          const ok = await loadEngagement(route.projectId)
+          if (cancelled) return
+          routeProjectRef.current = route.projectId
+          if (ok) {
+            setStep(route.step); setActiveJurisdiction(route.jurisdiction ?? "")
+            setVisited(new Set([route.step])); setMounted(new Set([route.step]))
+            if (route.step >= 4) setDraftReady(true)
+          } else {
+            router.replace("/")          // not found / not owned → fall back to search
+            await ensureBackgroundFile()
+          }
+        } else {
+          setPage("company-search")
+          if (route.view === "company") setSelectedCompany(route.slug)
+          const ok = await ensureBackgroundFile()
+          if (!ok && !searchFirst) return
+        }
+      }
+      if (cancelled) return
       const loadedFiles = await refreshFiles()
-      if (!cancelled) setBootStatus(loadedFiles ? "ready" : "offline")
+      if (!cancelled) {
+        if (searchFirst) setBootStatus("ready")
+        else setBootStatus(loadedFiles ? "ready" : "offline")
+      }
     })()
     return () => { cancelled = true }
   }, [loadEngagement, refreshFiles, enableTour])
@@ -491,12 +538,40 @@ export default function Page({ enableTour = false }: { enableTour?: boolean } = 
     trackedStageRef.current = stage
     stageEntered(stage)
   }, [enableTour, bootStatus, page, step])
+  // URL → state: drive the visible view from the path (in-app navigation, refresh, and back/forward all flow here).
   useEffect(() => {
-    if (bootStatus !== "ready") return
-    if (page === "workflow") replaceWorkspaceUrl(engagementId, step)
-    else if (page === "company-search" && !enableTour) canonicalizeSearchUrl()
-  }, [bootStatus, enableTour, engagementId, page, step])
+    if (enableTour || bootStatus !== "ready") return
+    const route = parseRoute(pathname)
+    if (route.view !== "workflow") {
+      setPage("company-search")
+      if (route.view === "company") {
+        setSelectedCompany(route.slug)
+        try { setFromSearch(sessionStorage.getItem("veritax.fromSearch") === route.slug) }
+        catch { setFromSearch(false) }
+      } else {
+        setSelectedCompany(null)
+        setFromSearch(false)
+      }
+      return
+    }
+    setPage("workflow"); setSelectedCompany(null)
+    const projectChanged = route.projectId !== routeProjectRef.current
+    routeProjectRef.current = route.projectId
+    setStep(route.step)
+    if (route.step >= 4) setDraftReady(true)   // deep-link into Draft/Risks unlocks the tab for viewing
+    if (route.jurisdiction) setActiveJurisdiction(route.jurisdiction)
+    if (projectChanged) { setVisited(new Set([route.step])); setMounted(new Set([route.step])) }
+    else { setVisited(prev => new Set(prev).add(route.step)); setMounted(prev => new Set(prev).add(route.step)) }
+    if (route.projectId !== engagementIdRef.current) {
+      engagementLoadSeq.current += 1
+      void loadEngagement(route.projectId, engagementLoadSeq.current)
+    }
+  }, [pathname, bootStatus, enableTour, loadEngagement])
   useEffect(() => { setMounted(m => (m.has(step) ? m : new Set([...m, step]))) }, [step])  // mount a step on first visit, keep it
+  // Keep the active jurisdiction valid once the engagement's jurisdictions load (default not shown in the URL).
+  useEffect(() => {
+    if (jurisdictions.length && !jurisdictions.includes(activeJurisdiction)) setActiveJurisdiction(jurisdictions[0])
+  }, [jurisdictions, activeJurisdiction])
   useEffect(() => {
     if (!engagementId) return
     api.recoverPipeline(engagementId).catch(error => {
@@ -506,16 +581,40 @@ export default function Page({ enableTour = false }: { enableTour?: boolean } = 
     })
   }, [diagnoseAndOpen, engagementId])
 
+  // Go to a workflow step (optionally for a specific country). Non-demo navigates the URL (the source of
+  // truth); demo has no URL, so it flips state directly.
+  const goWorkflow = useCallback((s: Step, jurisdiction?: string | null) => {
+    if (enableTour) {
+      setPage("workflow"); setStep(s)
+      setVisited(prev => new Set(prev).add(s)); setMounted(prev => new Set(prev).add(s))
+      if (jurisdiction) setActiveJurisdiction(jurisdiction)
+      return
+    }
+    const id = engagementIdRef.current
+    if (!id) return
+    const jur = jurisdiction !== undefined ? jurisdiction : (STEP_HAS_JURISDICTION[s] ? (activeJurisdiction || null) : null)
+    router.push(buildProjectPath(id, s, jur))
+  }, [enableTour, activeJurisdiction, router])
+
+  const openCompany = useCallback((slug: string, via: "search" | "saved" = "saved") => {
+    const from = via === "search"
+    setFromSearch(from)
+    try {
+      if (from) sessionStorage.setItem("veritax.fromSearch", slug)
+      else sessionStorage.removeItem("veritax.fromSearch")
+    } catch { /* ignore */ }
+    if (enableTour) { setSelectedCompany(slug); setPage("company-search"); return }
+    router.push(`/company/${encodeURIComponent(slug)}`)
+  }, [enableTour, router])
+
   function navigate(s: Step) {
-    if (s >= 3 && !draftReady) return
-    setStep(s)
-    setVisited(prev => new Set(prev).add(s))
+    if (s >= 4 && !draftReady) return
+    goWorkflow(s)
   }
 
   function continueToDraft() {
     setDraftReady(true)
-    setStep(3)
-    setVisited(prev => new Set(prev).add(3))
+    goWorkflow(4)
   }
 
   // Tour navigation: jump straight to a tab (bypassing the draft lock) so the walkthrough can show every step.
@@ -554,23 +653,32 @@ export default function Page({ enableTour = false }: { enableTour?: boolean } = 
   }, [enableTour, tourOpen, tourStep, revealScope, revealSources])
 
   function openSearch() {
-    setSelectedCompany(null)
-    setPage("company-search")
+    setFromSearch(false)
+    try { sessionStorage.removeItem("veritax.fromSearch") } catch { /* ignore */ }
+    if (enableTour) { setSelectedCompany(null); setPage("company-search"); return }
+    router.push("/")
   }
 
   function newFile() {
+    if (!signedIn) { router.replace("/auth"); return }
     // Start a fresh Local File pipeline: jump into Planning immediately, then create the engagement
     // in the background so the pipeline shows instantly even if the create call is slow.
     setEntity(""); setJ([]); setFiscalYear(""); setSources(new Set()); setDraftJump(null); setDraftReady(false)
     setWebsiteUrl("")
     setPlanningSourceRows([])
     setPlanningDocuments(EMPTY_PLANNING_DOCUMENTS)
+    setActiveJurisdiction("")
     setVisited(new Set([1])); setStep(1); setMounted(new Set([1]))
-    setPage("workflow")
+    setPage("workflow"); setSelectedCompany(null)
     setEngagementId(null)
     engagementLoadSeq.current += 1
     api.createEngagement()
-      .then(({ id }) => { setApiOffline(false); setEngagementId(id); localStorage.setItem(LS_ID, id); refreshFiles() })
+      .then(({ id }) => {
+        setApiOffline(false); setEngagementId(id); localStorage.setItem(LS_ID, id)
+        routeProjectRef.current = id
+        if (!enableTour) router.replace(buildProjectPath(id, 1, null))
+        refreshFiles()
+      })
       .catch(error => {
         setApiOffline(true)
         void diagnoseAndOpen(error, "create new project", { label: "Try again", onClick: newFile })
@@ -591,11 +699,14 @@ export default function Page({ enableTour = false }: { enableTour?: boolean } = 
     setEngagementId(id)
     localStorage.setItem(LS_ID, id)
     setDraftReady(false)
-    setVisited(new Set([1, 2]))
-    setMounted(new Set([2]))           // fresh mount for the opened file
-    setStep(2)                          // land on Requirements so progress is visible
+    setActiveJurisdiction(file.jurisdictions[0] ?? "")
+    setVisited(new Set([1, 3]))
+    setMounted(new Set([3]))           // fresh mount for the opened file
+    setStep(3)                          // land on Requirements so progress is visible
     setDraftJump(null)
-    setPage("workflow")
+    setPage("workflow"); setSelectedCompany(null)
+    routeProjectRef.current = id       // the URL effect won't re-load; we already loaded here
+    if (!enableTour) router.push(buildProjectPath(id, 3, file.jurisdictions[0] ?? null))
     void loadEngagement(id, seq)
   }
 
@@ -638,30 +749,17 @@ export default function Page({ enableTour = false }: { enableTour?: boolean } = 
   }
 
   const newFileActive = page === "workflow" && engagementId !== null && files.every(f => f.id !== engagementId)
-  const railBtn = (active: boolean): CSSProperties => ({
-    display: "flex",
-    alignItems: "center",
-    justifyContent: collapsed ? "center" : "flex-start",
-    gap: "0.5rem",
-    width: collapsed ? 36 : "100%",
-    height: collapsed ? 36 : undefined,
-    padding: collapsed ? 0 : "0.6rem 0.75rem",
-    border: "none",
-    borderRadius: "6px",
-    background: active ? "#ececec" : "transparent",
-    cursor: "pointer",
-    fontSize: "14px",
-    fontWeight: 400,
-    color: "#000",
-  })
+  const night = page === "company-search" && !selectedCompany && searchMode === "night"
+  const routeNow = parseRoute(pathname)
+  const searchFirst = !enableTour && routeNow.view !== "workflow"
 
-  if (bootStatus === "loading") return (
+  if (!searchFirst && bootStatus === "loading") return (
     <>
       <BootSkeleton />
       <ActionModal issue={actionIssue} onClose={() => setActionIssue(null)} />
     </>
   )
-  if (bootStatus === "offline") return (
+  if (!searchFirst && bootStatus === "offline") return (
     <>
       <BootSkeleton offline onRetry={() => window.location.reload()} />
       <ActionModal issue={actionIssue} onClose={() => setActionIssue(null)} />
@@ -669,308 +767,138 @@ export default function Page({ enableTour = false }: { enableTour?: boolean } = 
   )
 
   return (
-    <div style={{ display: "flex", height: "100vh", overflow: "hidden", background: "#fff", color: "#000" }}>
+    <div className={night ? "vt-app vt-app--night" : "vt-app"}>
 
-      {/* App-level left panel — pages. Collapses to a logo-only rail. */}
-      <aside style={{
-        width: collapsed ? 60 : 220, flexShrink: 0,
-        borderRight: "1px solid #e5e5e5",
-        background: "#fafafa",
-        padding: collapsed ? "1.5rem 0" : "1.5rem 0.75rem",
-        display: "flex", flexDirection: "column", gap: 2,
-        alignItems: collapsed ? "center" : "stretch",
-        transition: "width 160ms ease",
-      }}>
-        {/* Header — expanded: logo + wordmark; collapsed: logo only (hover to reveal the expand icon) */}
+      <aside className={collapsed ? "vt-app-rail is-collapsed" : "vt-app-rail"}>
         {collapsed ? (
-          <button
-            type="button"
-            onClick={() => setCollapsed(false)}
-            aria-label="Expand sidebar"
-            title="Expand"
-            style={{
-              display: "flex", alignItems: "center", justifyContent: "center",
-              width: 36, height: 36, marginBottom: "0.5rem", padding: 0,
-              border: "none", background: "transparent", cursor: "pointer", borderRadius: "6px",
-            }}
-          >
-            <img src="/VeritaxLogo-notext.svg" alt="Veritax" style={{ width: 24, height: 24, objectFit: "contain" }} />
-          </button>
+          <button type="button" className="vt-app-rail-mark" onClick={() => setCollapsed(false)} aria-label="Expand sidebar" title="Expand">V</button>
         ) : (
-          <div
-            onMouseEnter={() => setLogoHover(true)}
-            onMouseLeave={() => setLogoHover(false)}
-            style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "0.5rem", padding: "0 0.75rem", marginBottom: "1.5rem", minHeight: 24 }}
-          >
-            <div style={{ display: "flex", alignItems: "center", gap: "0.5rem", minWidth: 0 }}>
-              <img src="/VeritaxLogo-notext.svg" alt="Veritax" style={{ width: 22, height: 22, objectFit: "contain", flexShrink: 0 }} />
-            </div>
-            <button
-              type="button"
-              onClick={() => setCollapsed(true)}
-              aria-label="Collapse sidebar"
-              title="Collapse"
-              style={{
-                display: "flex", alignItems: "center", justifyContent: "center",
-                width: 24, height: 24, padding: 0, border: "none", background: "transparent",
-                cursor: "pointer", borderRadius: "4px", flexShrink: 0,
-                opacity: logoHover ? 1 : 0, transition: "opacity 120ms ease",
-              }}
-            >
-              <PanelLeftClose size={18} strokeWidth={1.5} style={{ color: "#888" }} />
+          <div className="vt-app-rail-head">
+            <p className="vt-app-rail-mark">Veritax</p>
+            <button type="button" className="vt-app-rail-collapse" onClick={() => setCollapsed(true)} aria-label="Collapse sidebar" title="Collapse">
+              <PanelLeftClose size={16} strokeWidth={1.5} />
             </button>
           </div>
         )}
 
-        {collapsed && (
-          <div aria-hidden style={{ width: 28, height: 1, background: "#d4d4d4", flexShrink: 0, margin: "0.15rem 0 0.65rem" }} />
-        )}
-
-        {/* Search — top-level landing page. Saved companies sit in their own collapsible below. */}
         <button
           type="button"
+          className={page === "company-search" && !selectedCompany ? "vt-app-rail-btn is-on" : "vt-app-rail-btn"}
           onClick={openSearch}
-          title="Search"
-          aria-label="Search"
-          style={railBtn(page === "company-search" && !selectedCompany)}
         >
-          <Search size={16} strokeWidth={1.5} style={{ flexShrink: 0 }} />
-          {!collapsed && <span style={{ flex: 1, textAlign: "left" }}>Search</span>}
+          {collapsed ? "S" : "Search"}
         </button>
 
         <button
           type="button"
+          className="vt-app-rail-btn"
           onClick={() => collapsed ? (setCollapsed(false), setCompanyOpen(true)) : setCompanyOpen(o => !o)}
-          title="Saved companies"
-          aria-label="Saved companies"
-          style={{ ...railBtn(false), marginTop: collapsed ? 2 : 0 }}
         >
-          <Star size={16} strokeWidth={1.5} style={{ flexShrink: 0 }} />
-          {!collapsed && <span style={{ flex: 1, textAlign: "left" }}>Saved companies</span>}
-          {!collapsed && <ChevronDown size={16} strokeWidth={1.5} style={{ color: "#888", flexShrink: 0, transform: companyOpen ? "none" : "rotate(-90deg)", transition: "transform 120ms ease" }} />}
+          {collapsed ? "C" : "Saved companies"}
+          {!collapsed && <ChevronDown size={14} strokeWidth={1.5} style={{ marginLeft: "auto", transform: companyOpen ? "none" : "rotate(-90deg)", transition: "transform 120ms ease" }} />}
         </button>
 
         {!collapsed && companyOpen && (
-          <div style={{ maxHeight: "42vh", overflowY: "auto", marginTop: "0.25rem", display: "flex", flexDirection: "column", gap: 2 }}>
+          <div className="vt-app-rail-sub">
             {[...savedSlugs].map(slug => {
               const c = companies.find(x => x.slug === slug)
               if (!c) return null
               const active = page === "company-search" && selectedCompany === c.slug
               return (
-                <button key={c.slug} type="button" onClick={() => { setSelectedCompany(c.slug); setPage("company-search") }} style={{
-                  display: "flex", flexDirection: "column", gap: 1,
-                  padding: "0.4rem 0.75rem", border: "none", borderRadius: "6px",
-                  background: active ? "#ececec" : "transparent",
-                  cursor: "pointer", textAlign: "left", width: "100%",
-                }}>
-                  <span style={{ fontSize: "13px", fontWeight: 400, color: "#000", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                    {c.name}
-                  </span>
-                  <span style={{ fontSize: "11px", color: "#888", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                    {[c.ticker, c.hq_country].filter(Boolean).join(" · ") || "—"}
-                  </span>
+                <button key={c.slug} type="button" className={active ? "vt-app-rail-item is-on" : "vt-app-rail-item"} onClick={() => openCompany(c.slug, "saved")}>
+                  <span className="vt-app-rail-item-name">{c.name}</span>
+                  <span className="vt-app-rail-item-meta">{[c.ticker, c.hq_country].filter(Boolean).join(" · ") || "—"}</span>
                 </button>
               )
             })}
           </div>
         )}
 
+        {/* Local file generator — Stage 1 search is the product; keep this out of the rail.
         <button
           type="button"
+          className="vt-app-rail-btn"
           onClick={() => collapsed ? (setCollapsed(false), setLocalOpen(true)) : setLocalOpen(o => !o)}
-          title="Local file"
-          aria-label="Local file"
-          style={{ ...railBtn(false), marginTop: collapsed ? 2 : "0.25rem" }}
         >
-          <FileText size={16} strokeWidth={1.5} style={{ flexShrink: 0 }} />
-          {!collapsed && <span style={{ flex: 1, textAlign: "left" }}>Local file</span>}
-          {!collapsed && <ChevronDown size={16} strokeWidth={1.5} style={{ color: "#888", flexShrink: 0, transform: localOpen ? "none" : "rotate(-90deg)", transition: "transform 120ms ease" }} />}
+          {collapsed ? "L" : "Local file"}
+          {!collapsed && <ChevronDown size={14} strokeWidth={1.5} style={{ marginLeft: "auto", transform: localOpen ? "none" : "rotate(-90deg)", transition: "transform 120ms ease" }} />}
         </button>
 
         {!collapsed && localOpen && (
           <>
-            <button
-              type="button"
-              onClick={newFile}
-              style={{
-                display: "flex", alignItems: "center", gap: "0.375rem",
-                padding: "0.5rem 0.75rem", border: "none",
-                borderRadius: "6px", background: newFileActive ? "#ececec" : "transparent",
-                color: "#000", fontSize: "13px", fontWeight: 400,
-                cursor: "pointer", textAlign: "left", width: "100%",
-              }}
-            >
+            <button type="button" className={newFileActive ? "vt-app-rail-btn is-on" : "vt-app-rail-btn"} onClick={newFile}>
               + New file
             </button>
-
-            {/* File library — the user's engagements */}
-            <div style={{ maxHeight: "42vh", overflowY: "auto", marginTop: "0.5rem", display: "flex", flexDirection: "column", gap: 2 }}>
+            <div className="vt-app-rail-sub">
               {libraryLoading && files.length === 0 ? (
                 <SidebarLibrarySkeleton />
               ) : files.map(f => {
                 const active = page === "workflow" && f.id === engagementId
                 return (
-                  <button key={f.id} type="button" onClick={() => openFile(f)} style={{
-                    display: "flex", flexDirection: "column", gap: 1,
-                    padding: "0.4rem 0.75rem", border: "none", borderRadius: "6px",
-                    background: active ? "#ececec" : "transparent",
-                    cursor: "pointer", textAlign: "left", width: "100%",
-                  }}>
-                    <span style={{ fontSize: "13px", fontWeight: 400, color: "#000", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                      {f.entity_name || "Untitled"}
-                    </span>
-                    <span style={{ fontSize: "11px", color: "#888", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                      {f.jurisdictions.join(", ") || "No jurisdictions"}
-                    </span>
+                  <button key={f.id} type="button" className={active ? "vt-app-rail-item is-on" : "vt-app-rail-item"} onClick={() => openFile(f)}>
+                    <span className="vt-app-rail-item-name">{f.entity_name || "Untitled"}</span>
+                    <span className="vt-app-rail-item-meta">{f.jurisdictions.join(", ") || "No jurisdictions"}</span>
                   </button>
                 )
               })}
               {!libraryLoading && files.length === 0 && (
-                <p style={{ fontSize: "12px", color: "#aaa", padding: "0 0.75rem" }}>No files yet</p>
+                <p className="vt-app-rail-empty">{signedIn ? "No files yet" : "Sign in to keep files"}</p>
               )}
             </div>
           </>
         )}
-
-        {/* Compliance / Monitoring / Defense hidden for now — flip `false` to restore the three pages. */}
-        {false && (
-        <>
-        <button
-          type="button"
-          disabled
-          title="Coming soon"
-          style={{
-            display: "flex", alignItems: "center", gap: "0.5rem", marginTop: "0.25rem",
-            padding: "0.6rem 0.75rem", border: "none", borderRadius: "6px",
-            background: "transparent",
-            cursor: "not-allowed", width: "100%",
-            fontSize: "14px", fontWeight: 400, color: "#aaa",
-            opacity: 0.55,
-          }}
-        >
-          <CalendarDays size={16} strokeWidth={1.5} style={{ flexShrink: 0, color: "#aaa" }} />
-          <span style={{ flex: 1, textAlign: "left" }}>Compliance</span>
-        </button>
+        */}
 
         <button
           type="button"
-          disabled
-          title="Coming soon"
-          style={{
-            display: "flex", alignItems: "center", gap: "0.5rem", marginTop: "0.25rem",
-            padding: "0.6rem 0.75rem", border: "none", borderRadius: "6px",
-            background: "transparent",
-            cursor: "not-allowed", width: "100%",
-            fontSize: "14px", fontWeight: 400, color: "#aaa",
-            opacity: 0.55,
-          }}
+          className="vt-app-rail-btn vt-app-rail-out"
+          onClick={signedIn ? signOut : () => router.replace("/auth")}
+          title={signedIn ? "Sign out" : "Sign in"}
+          aria-label={signedIn ? "Sign out" : "Sign in"}
         >
-          <Activity size={16} strokeWidth={1.5} style={{ flexShrink: 0, color: "#aaa" }} />
-          <span style={{ flex: 1, textAlign: "left" }}>Monitoring</span>
-        </button>
-
-        <button
-          type="button"
-          disabled
-          title="Coming soon"
-          style={{
-            display: "flex", alignItems: "center", gap: "0.5rem", marginTop: "0.25rem",
-            padding: "0.6rem 0.75rem", border: "none", borderRadius: "6px",
-            background: "transparent",
-            cursor: "not-allowed", width: "100%",
-            fontSize: "14px", fontWeight: 400, color: "#aaa",
-            opacity: 0.55,
-          }}
-        >
-          <ShieldCheck size={16} strokeWidth={1.5} style={{ flexShrink: 0, color: "#aaa" }} />
-          <span style={{ flex: 1, textAlign: "left" }}>Defense</span>
-        </button>
-        </>
-        )}
-
-        <button
-          type="button"
-          onClick={signOut}
-          title="Sign out"
-          aria-label="Sign out"
-          style={collapsed ? {
-            marginTop: "auto",
-            display: "flex", alignItems: "center", justifyContent: "center",
-            width: 36, height: 36, padding: 0, border: "none",
-            borderRadius: "6px", background: "transparent",
-            color: "#555", cursor: "pointer",
-          } : {
-            marginTop: "auto",
-            display: "flex", alignItems: "center",
-            padding: "0.5rem 0.75rem", border: "1px solid #e5e5e5",
-            borderRadius: "6px", background: "#fff",
-            color: "#555", fontSize: "13px", fontWeight: 400,
-            cursor: "pointer", textAlign: "left", width: "100%",
-          }}
-        >
-          {collapsed ? <LogOut size={16} strokeWidth={1.5} /> : "Sign out"}
+          {collapsed ? (signedIn ? "Out" : "In") : (signedIn ? "Sign out" : "Sign in")}
         </button>
       </aside>
 
-      {/* Page body */}
-      <div style={{ flex: 1, display: "flex", flexDirection: "column", overflow: "hidden" }}>
+      <div className="vt-app-main">
         {page === "company-search" ? (
           <>
             <div style={{ display: selectedCompany ? "none" : "flex", flex: 1, minHeight: 0, flexDirection: "column", overflow: "hidden" }}>
-              <SearchPage onOpen={setSelectedCompany} />
+              <SearchPage onOpen={slug => openCompany(slug, "search")} />
             </div>
             {selectedCompany ? (
               <div style={{ flex: 1, minWidth: 0, minHeight: 0, display: "flex", flexDirection: "column", overflow: "hidden" }}>
-                <CompanyRecord slug={selectedCompany} onBack={() => setSelectedCompany(null)} />
+                <CompanyRecord slug={selectedCompany} onBack={openSearch} fromSearch={fromSearch} />
               </div>
             ) : null}
           </>
         ) : page === "compliance" ? (
-          <CompliancePage onOpenRequirements={() => { setPage("workflow"); setVisited(prev => new Set(prev).add(2)); setStep(2) }} />
+          <CompliancePage onOpenRequirements={() => goWorkflow(3)} />
         ) : page === "monitoring" ? (
-          <MonitoringPage onOpenRisks={() => { setPage("workflow"); setVisited(prev => new Set(prev).add(4)); setStep(4) }} />
+          <MonitoringPage onOpenRisks={() => goWorkflow(5)} />
         ) : page === "defense" ? (
           <DefensePage
             onOpenMonitoring={() => setPage("monitoring")}
-            onOpenRisks={() => { setPage("workflow"); setVisited(prev => new Set(prev).add(4)); setStep(4) }}
+            onOpenRisks={() => goWorkflow(5)}
           />
         ) : (
           <>
 
         {/* Horizontal section tabs */}
-        <nav style={{
-          borderBottom: "1px solid #e5e5e5",
-          background: "#fff",
-          padding: "0 2rem",
-          display: "flex",
-          alignItems: "stretch",
-          height: 48,
-          flexShrink: 0,
-        }}>
+        <nav className="vt-app-tabs">
           {NAV.map(({ step: s, label }) => {
             const active = step === s
-            const seen   = visited.has(s)
-            const locked = s >= 3 && !draftReady
+            const locked = s >= 4 && !draftReady
             return (
               <button
                 key={s}
                 type="button"
+                className={active ? "vt-app-tab is-on" : "vt-app-tab"}
                 disabled={locked}
                 title={locked ? "Complete Requirements before drafting" : undefined}
                 onClick={() => navigate(s)}
-                style={{
-                  display: "flex", alignItems: "center", gap: "0.4rem",
-                  padding: "0 1rem", border: "none",
-                  borderBottom: active ? "2px solid #000" : "2px solid transparent",
-                  background: "transparent", cursor: locked ? "not-allowed" : "pointer",
-                  color: locked ? "#c7c7c7" : active ? "#000" : seen ? "#000" : "#bbb",
-                  fontSize: "13px",
-                  fontWeight: active ? 600 : 400,
-                  opacity: locked ? 0.55 : 1,
-                  transition: "color 150ms ease, border-color 150ms ease",
-                }}
               >
-                <span style={{ fontSize: "10px", letterSpacing: "0.06em", color: locked ? "#d0d0d0" : active ? "#000" : seen ? "#888" : "#ccc" }}>0{s}</span>
+                <span className="vt-app-tab-n">0{s}</span>
                 <span>{label}</span>
               </button>
             )
@@ -1018,35 +946,48 @@ export default function Page({ enableTour = false }: { enableTour?: boolean } = 
           )}
           {mounted.has(2) && (
             <div className={step === 2 ? "vt-step-panel vt-step-panel-active" : "vt-step-panel"} style={{ flex: 1, minWidth: 0, display: step === 2 ? "flex" : "none" }}>
-              <RequirementsStep
-                key={`requirements-${engagementId ?? "pending"}`}
+              <ControlledTransactionsStep
+                key={`transactions-${engagementId ?? "pending"}`}
                 engagementId={engagementId} jurisdictions={jurisdictions}
-                onContinue={continueToDraft}
-                onOpenDraftSection={(jurisdiction, sectionId) => { setDraftJump({ jurisdiction, sectionId }); continueToDraft() }}
-                onDraftReadinessChange={setDraftReady}
-                onOpenPlanning={() => navigate(1)}
+                activeJurisdiction={activeJurisdiction} onJurisdictionChange={j => goWorkflow(2, j)}
+                onContinue={() => navigate(3)}
               />
             </div>
           )}
           {mounted.has(3) && (
             <div className={step === 3 ? "vt-step-panel vt-step-panel-active" : "vt-step-panel"} style={{ flex: 1, minWidth: 0, display: step === 3 ? "flex" : "none" }}>
-              <DraftStep
-                key={`draft-${engagementId ?? "pending"}`}
-                engagementId={engagementId} jurisdictions={jurisdictions} entity={entity}
-                onContinue={() => navigate(4)}
-                onOpenRequirements={() => navigate(2)}
-                jumpTo={draftJump} onJumped={() => setDraftJump(null)}
+              <RequirementsStep
+                key={`requirements-${engagementId ?? "pending"}`}
+                engagementId={engagementId} jurisdictions={jurisdictions}
+                activeJurisdiction={activeJurisdiction} onJurisdictionChange={j => goWorkflow(3, j)}
+                onContinue={continueToDraft}
+                onOpenDraftSection={(jurisdiction, sectionId) => { setDraftJump({ jurisdiction, sectionId }); setDraftReady(true); goWorkflow(4, jurisdiction) }}
+                onDraftReadinessChange={setDraftReady}
+                onOpenPlanning={() => navigate(1)}
               />
             </div>
           )}
           {mounted.has(4) && (
             <div className={step === 4 ? "vt-step-panel vt-step-panel-active" : "vt-step-panel"} style={{ flex: 1, minWidth: 0, display: step === 4 ? "flex" : "none" }}>
+              <DraftStep
+                key={`draft-${engagementId ?? "pending"}`}
+                engagementId={engagementId} jurisdictions={jurisdictions} entity={entity}
+                activeJurisdiction={activeJurisdiction} onJurisdictionChange={j => goWorkflow(4, j)}
+                onContinue={() => navigate(5)}
+                onOpenRequirements={() => navigate(3)}
+                jumpTo={draftJump} onJumped={() => setDraftJump(null)}
+              />
+            </div>
+          )}
+          {mounted.has(5) && (
+            <div className={step === 5 ? "vt-step-panel vt-step-panel-active" : "vt-step-panel"} style={{ flex: 1, minWidth: 0, display: step === 5 ? "flex" : "none" }}>
               <RisksStep
                 key={`risks-${engagementId ?? "pending"}`}
                 engagementId={engagementId}
                 jurisdictions={jurisdictions}
                 entity={entity}
-                onOpenDraft={() => navigate(3)}
+                activeJurisdiction={activeJurisdiction} onJurisdictionChange={j => goWorkflow(5, j)}
+                onOpenDraft={() => navigate(4)}
                 onOpenPlanning={() => navigate(1)}
                 accessLive={enableTour}
               />

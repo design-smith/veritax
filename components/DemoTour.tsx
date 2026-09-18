@@ -12,7 +12,7 @@ export interface TourStep {
   target: string          // matches [data-tour="..."]
   title: string
   text: string
-  appStep?: 1 | 2 | 3 | 4  // switch to this workflow tab before locating the target
+  appStep?: 1 | 2 | 3 | 4 | 5  // switch to this workflow tab before locating the target
   placement?: "auto" | "top" | "bottom-end"  // where the text box sits relative to the highlight
 }
 
@@ -22,7 +22,7 @@ const TIP_W = 300
 export default function DemoTour({ steps, initialStep = 0, goToStep, onStepChange, onExit, onFinish }: {
   steps: TourStep[]
   initialStep?: number
-  goToStep: (s: 1 | 2 | 3 | 4) => void
+  goToStep: (s: 1 | 2 | 3 | 4 | 5) => void
   onStepChange: (i: number) => void
   onExit: () => void
   onFinish: () => void

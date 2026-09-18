@@ -704,6 +704,80 @@ export interface FinancialMappingSuggestions {
   suggestions: Record<string, string>
 }
 
+// Local File — controlled transactions (Local File spec §2)
+export const CT_CATEGORIES = ["services", "purchase of goods", "sale of goods", "royalty", "loan", "reimbursement", "recharge", "ip/technology", "other"] as const
+export const CT_DIRECTIONS = ["payment", "receipt"] as const
+export interface ControlledTransaction {
+  id: string
+  local_file_project_id: string
+  transaction_category: string
+  description: string | null
+  associated_enterprise_name: string | null
+  associated_enterprise_country: string | null
+  direction: string
+  local_currency: string | null
+  local_currency_amount: number | null
+  group_currency: string | null
+  group_currency_amount: number | null
+  period_start: string | null
+  period_end: string | null
+  materiality_status: string | null
+  notes: string | null
+  source_document_id: string | null
+}
+export interface LocalFileProject {
+  id: string
+  engagement_id: string
+  entity_id: string | null
+  jurisdiction: string
+  fiscal_year: string | null
+  statutory_period_start: string | null
+  statutory_period_end: string | null
+  statutory_currency: string | null
+  consolidation_period_start: string | null
+  consolidation_period_end: string | null
+  group_reporting_currency: string | null
+  status: string
+  transactions: ControlledTransaction[]
+}
+export interface ControlledTransactionInput {
+  transaction_category?: string
+  description?: string | null
+  associated_enterprise_name?: string | null
+  associated_enterprise_country?: string | null
+  direction?: string
+  local_currency?: string | null
+  local_currency_amount?: number | null
+  group_currency?: string | null
+  group_currency_amount?: number | null
+  period_start?: string | null
+  period_end?: string | null
+  materiality_status?: string | null
+  notes?: string | null
+}
+export interface LocalFileProjectPatch {
+  statutory_period_start?: string | null
+  statutory_period_end?: string | null
+  statutory_currency?: string | null
+  consolidation_period_start?: string | null
+  consolidation_period_end?: string | null
+  group_reporting_currency?: string | null
+  status?: string
+}
+export interface TxnPreviewRow { values: Record<string, unknown>; issues: string[] }
+export interface TxnPreview {
+  columns: string[]
+  detected_mapping: Record<string, string>
+  rows: TxnPreviewRow[]
+  diagnostics: FinancialDiagnostics
+}
+export interface TxnImportResult {
+  imported: number
+  skipped: number
+  diagnostics: FinancialDiagnostics
+  transactions: ControlledTransaction[]
+}
+
 const realApi = {
   health: async (): Promise<HealthResponse> => {
     let lastError: unknown = null
@@ -1034,6 +1108,46 @@ const realApi = {
     afetch(`${BASE}/tp-adjustments/${adjustmentId}`, {
       method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ status }),
     }).then(r => parse<TPAdjustmentRead>(r)),
+
+  // Local File — controlled transactions (spec §2)
+  getLocalFile: (engagementId: string, jurisdiction: string): Promise<LocalFileProject> =>
+    afetch(`${BASE}/engagements/${engagementId}/local-file/${encodeURIComponent(jurisdiction)}`).then(r => parse<LocalFileProject>(r)),
+
+  patchLocalFileProject: (projectId: string, body: LocalFileProjectPatch): Promise<LocalFileProject> =>
+    afetch(`${BASE}/local-file-projects/${projectId}`, {
+      method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
+    }).then(r => parse<LocalFileProject>(r)),
+
+  createTransaction: (projectId: string, body: ControlledTransactionInput): Promise<ControlledTransaction> =>
+    afetch(`${BASE}/local-file-projects/${projectId}/transactions`, {
+      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
+    }).then(r => parse<ControlledTransaction>(r)),
+
+  updateTransaction: (transactionId: string, body: ControlledTransactionInput): Promise<ControlledTransaction> =>
+    afetch(`${BASE}/controlled-transactions/${transactionId}`, {
+      method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
+    }).then(r => parse<ControlledTransaction>(r)),
+
+  deleteTransaction: (transactionId: string): Promise<void> =>
+    afetch(`${BASE}/controlled-transactions/${transactionId}`, { method: "DELETE" }).then(parseVoid),
+
+  downloadTransactionTemplate: async (engagementId: string): Promise<Blob> => {
+    const res = await afetch(`${BASE}/engagements/${engagementId}/controlled-transactions-template`)
+    if (!res.ok) throw new Error(`API ${res.status} ${res.url}: ${await res.text().catch(() => "")}`)
+    return res.blob()
+  },
+
+  previewTransactions: (projectId: string, file: File): Promise<TxnPreview> => {
+    const fd = new FormData()
+    fd.append("file", file)
+    return afetch(`${BASE}/local-file-projects/${projectId}/transactions/preview`, { method: "POST", body: fd }).then(r => parse<TxnPreview>(r))
+  },
+
+  importTransactions: (projectId: string, file: File): Promise<TxnImportResult> => {
+    const fd = new FormData()
+    fd.append("file", file)
+    return afetch(`${BASE}/local-file-projects/${projectId}/transactions/import`, { method: "POST", body: fd }).then(r => parse<TxnImportResult>(r))
+  },
 }
 
 // On the public /demo route, serve canned data from lib/demo-api instead of the network so the real

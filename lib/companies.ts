@@ -52,6 +52,8 @@ export type CompanyProfile = {
     jurisdiction: string | null
     headquarters: Headquarters | null
     website: string | null
+    logo?: string | null
+    founded?: string | null
     cik: string | null
     lei: string | null
     sec_file_number: string | null
@@ -71,6 +73,7 @@ export type CompanyProfile = {
   }
   business: {
     description: string | null
+    overview?: string | null
     segments: string[]
     activity_tags: ActivityTag[]
     rnd: { conducts: boolean; description: string | null; spend: number | null }
@@ -97,27 +100,161 @@ export type CountryEntity = { name: string; lei: string | null; office: string |
 export type FootprintCountry = { code: string; name: string; status: string; entities: CountryEntity[] }
 export type Footprint = { countries: FootprintCountry[]; status_counts: Record<string, number> }
 
-export type PatentItem = { type: string; number: string | null; jurisdiction: string | null; assignee: string | null; uspto: string | null }
-export type IP = { count: number; by_jurisdiction: Record<string, number>; by_type: Record<string, number>; items: PatentItem[] }
+export type PatentItem = {
+  type: string
+  title?: string | null
+  number: string | null
+  application?: string | null
+  jurisdiction: string | null
+  assignee: string | null
+  filed?: string | null
+  granted?: string | null
+  status?: string | null
+  uspto: string | null
+}
+export type IP = {
+  count: number
+  listed?: number
+  by_jurisdiction: Record<string, number>
+  by_type: Record<string, number>
+  items: PatentItem[]
+}
 
 export type Subsidiary = { name: string; jurisdiction: string | null; lei: string | null }
 export type Group = { subsidiaries: Subsidiary[] }
 
-// Company data lives in Supabase (public.companies, public-read RLS). The search index is the `index` jsonb of
-// every row; each tab's detail is a jsonb column loaded lazily by slug. The map geometry stays a static asset.
+// Search index: the compact static file at public/companies/index.json is the enriched subset
+// (filters + idle UI). The 50k+ warehouse lives in public.companies and is queried via the
+// FastAPI /companies/search endpoint — not downloaded wholesale (egress + payload).
+// Detail tabs load local files first, then the API, then Supabase.
 let _sb: ReturnType<typeof createClient> | null = null
 const sb = () => (_sb ??= createClient())
+const API = process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:8000"
 
 export async function loadIndex(): Promise<IndexRow[]> {
-  const { data, error } = await sb().from("companies").select("index")
-  if (error) throw error
-  return (data ?? []).map(r => (r as { index: IndexRow }).index)
+  const local = await loadIndexFromPublic()
+  if (local.length) return local
+  return loadIndexFromSupabase()
+}
+
+function asIndexRow(raw: unknown): IndexRow | null {
+  if (!raw || typeof raw !== "object") return null
+  const r = raw as Partial<IndexRow>
+  if (!r.slug) return null
+  return {
+    slug: r.slug,
+    name: r.name || r.slug,
+    ticker: r.ticker ?? null,
+    exchange: r.exchange ?? null,
+    hq_country: r.hq_country ?? null,
+    hq_region: r.hq_region ?? null,
+    sic: r.sic ?? null,
+    sic_description: r.sic_description ?? null,
+    naics: r.naics ?? null,
+    nace: r.nace ?? null,
+    sector: r.sector ?? null,
+    industry: r.industry ?? null,
+    activity_tags: Array.isArray(r.activity_tags) ? r.activity_tags : [],
+    op_countries: Array.isArray(r.op_countries) ? r.op_countries : [],
+    keywords: r.keywords ?? "",
+    revenue_latest: r.revenue_latest ?? null,
+    net_income_latest: r.net_income_latest ?? null,
+    employees: r.employees ?? null,
+    n_subsidiaries: r.n_subsidiaries ?? 0,
+    n_countries: r.n_countries ?? 0,
+    n_patents: r.n_patents ?? 0,
+    has_rnd: !!r.has_rnd,
+    has_patents: !!r.has_patents,
+    has_international: !!r.has_international,
+    accounting_standard: r.accounting_standard ?? "",
+    status: r.status ?? null,
+    confidence: r.confidence ?? "",
+    currency: r.currency ?? null,
+    searched_at: r.searched_at ?? "",
+  }
+}
+
+export async function countUniverse(): Promise<number | null> {
+  try {
+    const res = await fetch(`${API}/companies/count`, { cache: "no-store" })
+    if (!res.ok) return null
+    const body = await res.json() as { count?: number }
+    return typeof body.count === "number" ? body.count : null
+  } catch {
+    return null
+  }
+}
+
+export async function searchUniverse(q: string, limit = 250): Promise<{ total: number; rows: IndexRow[] }> {
+  const needle = q.trim()
+  if (!needle) return { total: 0, rows: [] }
+  try {
+    const res = await fetch(`${API}/companies/search?q=${encodeURIComponent(needle)}&limit=${limit}`, { cache: "no-store" })
+    if (!res.ok) return { total: 0, rows: [] }
+    const body = await res.json() as { total?: number; rows?: unknown[] }
+    const rows = (body.rows ?? []).map(asIndexRow).filter((r): r is IndexRow => r != null)
+    return { total: typeof body.total === "number" ? body.total : rows.length, rows }
+  } catch {
+    return { total: 0, rows: [] }
+  }
+}
+
+async function loadIndexFromPublic(): Promise<IndexRow[]> {
+  try {
+    const res = await fetch("/companies/index.json")
+    if (!res.ok) return []
+    const raw: unknown = await res.json()
+    return Array.isArray(raw) ? (raw as IndexRow[]).filter(r => r && r.slug) : []
+  } catch {
+    return []
+  }
+}
+
+const INDEX_PAGE = 1000
+
+async function loadIndexFromSupabase(): Promise<IndexRow[]> {
+  const out: IndexRow[] = []
+  for (let from = 0; ; from += INDEX_PAGE) {
+    const { data, error } = await sb().from("companies").select("index").range(from, from + INDEX_PAGE - 1)
+    if (error) throw indexLoadError(error.message)
+    const chunk = (data ?? []).map(r => (r as { index: IndexRow }).index).filter(r => r && r.slug)
+    out.push(...chunk)
+    if (chunk.length < INDEX_PAGE) break
+  }
+  if (!out.length) throw indexLoadError("empty")
+  return out
+}
+
+function indexLoadError(detail: string): Error {
+  if (/egress|restricted|quota|402/i.test(detail)) {
+    return new Error("Company data is temporarily unavailable — the database hit its bandwidth cap.")
+  }
+  if (detail === "empty") return new Error("The company index is empty.")
+  return new Error("The company index did not load.")
+}
+
+async function readJson<T>(res: Response): Promise<T | null> {
+  if (!res.ok) return null
+  const type = res.headers.get("content-type") || ""
+  if (type.includes("html")) return null
+  try {
+    return (await res.json()) as T
+  } catch {
+    return null
+  }
 }
 
 async function detail<T>(slug: string, column: string): Promise<T> {
-  const { data, error } = await sb().from("companies").select(column).eq("slug", slug).single()
-  if (error) throw error
-  return (data as unknown as Record<string, T>)[column]
+  const file = column === "group_data" ? "group.json" : `${column}.json`
+  try {
+    const local = await readJson<T>(await fetch(`/companies/${encodeURIComponent(slug)}/${file}`))
+    if (local) return local
+  } catch {
+    /* static file missing — use the warehouse API */
+  }
+  const res = await fetch(`${API}/companies/${encodeURIComponent(slug)}/${column}`, { cache: "no-store" })
+  if (!res.ok) throw new Error("Company record was not found.")
+  return (await res.json()) as T
 }
 export const getProfile = (slug: string) => detail<CompanyProfile>(slug, "profile")
 export const getFinancials = (slug: string) => detail<Financials>(slug, "financials")

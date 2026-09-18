@@ -56,6 +56,10 @@ _storage/
 /.cache/
 
 # Company data now lives in Supabase (pushed by scripts/push_to_supabase.py). The locally-built per-company
-# JSON is just the push staging area — keep it out of git. Only the shared map geometry is served statically.
+# JSON is just the push staging area — keep it out of git. Serve the compact search index statically so
+# search does not download the whole table on every visit (that blew the Supabase egress cap).
 /public/companies/*
 !/public/companies/world.geo.json
+!/public/companies/index.json
+
+.vercel

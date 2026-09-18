@@ -1,4 +1,4 @@
-# Veritax backend — FastAPI + async SQLAlchemy + pgvector. Runs on Render (or any Docker host).
+# Veritax backend — FastAPI + async SQLAlchemy + pgvector. Runs on Fly.io (or any Docker host).
 FROM python:3.12-slim
 
 WORKDIR /app
@@ -18,7 +18,7 @@ RUN pip install --no-cache-dir .
 COPY regulatory ./regulatory
 ENV PYTHONPATH=/app
 
-# Render injects $PORT; bind to it (fall back to 8000 for local `docker run`).
+# Host injects $PORT; bind to 0.0.0.0 (Fly internal_port must match). Local docker: 8000.
 ENV PORT=8000
 EXPOSE 8000
 CMD ["sh", "-c", "uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8000}"]

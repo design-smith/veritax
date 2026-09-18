@@ -2,12 +2,13 @@ from __future__ import annotations
 
 import enum
 import uuid
-from datetime import datetime
+from datetime import date, datetime
 
 from pgvector.sqlalchemy import Vector
 from sqlalchemy import (
     BigInteger,
     Boolean,
+    Date,
     DateTime,
     Enum,
     ForeignKey,
@@ -1426,6 +1427,77 @@ class FinancialColumnMapping(Base):
     mapping: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict)
     version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class LocalFileProject(Base):
+    """The Local File workspace for one local entity, one jurisdiction, one fiscal year (Local File spec §2). The
+    Local File begins with its controlled-transaction population, not document drafting — this is that population's
+    home. Statutory (local) periods/currency are kept SEPARATE from the group consolidation period/currency so the
+    same relationship can legitimately show different amounts across jurisdictions (never one ambiguous global
+    amount without its reporting-period context)."""
+
+    __tablename__ = "local_file_projects"
+    __table_args__ = (UniqueConstraint("engagement_id", "jurisdiction", name="uq_local_file_project"),)
+
+    id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
+    engagement_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("engagements.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    entity_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("entities.id"), nullable=True)
+    jurisdiction: Mapped[str] = mapped_column(Text, nullable=False)
+    fiscal_year: Mapped[str | None] = mapped_column(Text, nullable=True)
+    statutory_period_start: Mapped[date | None] = mapped_column(Date, nullable=True)
+    statutory_period_end: Mapped[date | None] = mapped_column(Date, nullable=True)
+    statutory_currency: Mapped[str | None] = mapped_column(Text, nullable=True)
+    consolidation_period_start: Mapped[date | None] = mapped_column(Date, nullable=True)
+    consolidation_period_end: Mapped[date | None] = mapped_column(Date, nullable=True)
+    group_reporting_currency: Mapped[str | None] = mapped_column(Text, nullable=True)
+    status: Mapped[str] = mapped_column(Text, nullable=False, default="draft")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+
+    transactions: Mapped[list[ControlledTransaction]] = relationship(
+        cascade="all, delete-orphan", lazy="selectin", order_by="ControlledTransaction.created_at"
+    )
+
+
+class ControlledTransaction(Base):
+    """One related-party transaction at the TP-category level (Local File spec §2) — e.g. "Provision of IT services
+    — US Parent — INR 84M", NOT an individual ERP posting (Veritax stays in the tax layer). Amounts are held in
+    both local (statutory) and group (consolidation) currency so each is stated in its reporting-period context."""
+
+    __tablename__ = "controlled_transactions"
+    __table_args__ = (Index("ix_controlled_transactions_project", "local_file_project_id"),)
+
+    id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
+    local_file_project_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("local_file_projects.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    transaction_category: Mapped[str] = mapped_column(Text, nullable=False)  # services|royalty|loan|... (ct_intake.CATEGORIES)
+    description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    local_entity_id: Mapped[uuid.UUID | None] = mapped_column(nullable=True)
+    associated_enterprise_id: Mapped[uuid.UUID | None] = mapped_column(nullable=True)
+    associated_enterprise_name: Mapped[str | None] = mapped_column(Text, nullable=True)
+    associated_enterprise_country: Mapped[str | None] = mapped_column(Text, nullable=True)
+    direction: Mapped[str] = mapped_column(Text, nullable=False, default="payment")   # payment|receipt
+    local_currency: Mapped[str | None] = mapped_column(Text, nullable=True)
+    local_currency_amount: Mapped[float | None] = mapped_column(Numeric, nullable=True)
+    group_currency: Mapped[str | None] = mapped_column(Text, nullable=True)
+    group_currency_amount: Mapped[float | None] = mapped_column(Numeric, nullable=True)
+    period_start: Mapped[date | None] = mapped_column(Date, nullable=True)
+    period_end: Mapped[date | None] = mapped_column(Date, nullable=True)
+    materiality_status: Mapped[str | None] = mapped_column(Text, nullable=True)
+    notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+    source_document_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("documents.id", ondelete="SET NULL"), nullable=True   # audit link to the uploaded file
+    )
+    raw: Mapped[dict | None] = mapped_column(JSONB, nullable=True)   # original imported cells (audit)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
 
 
 # Seed data for the connector registry (all available, none wired yet).

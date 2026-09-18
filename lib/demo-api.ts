@@ -10,6 +10,8 @@
 
 import type {
   Connector,
+  ControlledTransaction,
+  ControlledTransactionInput,
   CoverageResponse,
   CoverageRow,
   DocChart,
@@ -22,10 +24,13 @@ import type {
   Engagement,
   EngagementSummary,
   HealthResponse,
+  LocalFileProject,
   PipelineRecoveryResponse,
   ResearchSummary,
   RiskFinding,
   RiskResponse,
+  TxnImportResult,
+  TxnPreview,
 } from "./api"
 
 // Active only on the public demo route. Keying off the URL auto-scopes it: the real app (other routes,
@@ -385,6 +390,30 @@ const SUMMARY: EngagementSummary = {
   updated_at: "2025-09-21T09:00:00Z",
 }
 
+// ── Controlled transactions (Local File spec §2) ──────────────────────────────
+// The demo's related-party population, aggregated to the TP-category level, per jurisdiction.
+function ctProject(jur: string): LocalFileProject {
+  const p = profileFor(jur)
+  const pid = `lf-${jur}`
+  const txn = (n: number, category: string, description: string, ae: string, amount: number): ControlledTransaction => ({
+    id: `ct-${jur}-${n}`, local_file_project_id: pid, transaction_category: category, description,
+    associated_enterprise_name: ae, associated_enterprise_country: "AE", direction: "payment",
+    local_currency: p.currency, local_currency_amount: amount, group_currency: "USD", group_currency_amount: null,
+    period_start: "2024-01-01", period_end: "2024-12-31", materiality_status: "material", notes: null,
+    source_document_id: null,
+  })
+  return {
+    id: pid, engagement_id: DEMO_ENGAGEMENT_ID, entity_id: null, jurisdiction: jur, fiscal_year: "FY2024",
+    statutory_period_start: "2024-01-01", statutory_period_end: "2024-12-31", statutory_currency: p.currency,
+    consolidation_period_start: "2024-01-01", consolidation_period_end: "2024-12-31", group_reporting_currency: "USD",
+    status: "in_progress",
+    transactions: [
+      txn(1, "loan", "Intercompany fund transfers (interest-free, reciprocal)", "Veritax Group Holding", 5235269),
+      txn(2, "reimbursement", "Supplier payments settled on behalf of related parties", "Veritax Enterprise", 406858),
+    ],
+  }
+}
+
 // ── Requirements coverage ─────────────────────────────────────────────────────
 // presentCount rows resolve to "present" (in element order); the rest stay "pending" so the assessment
 // reveals row-by-row. When all are present the summary is draft-ready.
@@ -632,4 +661,30 @@ export const demoApi = {
     text: TRIAL_BALANCE_TEXT,
   }),
   getDocumentFacts: async (documentId: string): Promise<DocumentFactsResponse> => ({ document_id: documentId, facts: [] }),
+
+  // Local File — controlled transactions
+  getLocalFile: async (_id: string, jurisdiction: string): Promise<LocalFileProject> => ctProject(jurisdiction),
+  patchLocalFileProject: async (projectId: string): Promise<LocalFileProject> => {
+    const jur = projectId.replace(/^lf-/, "")
+    return ctProject(JURISDICTIONS_COVERED.includes(jur) ? jur : JURISDICTIONS_COVERED[0])
+  },
+  createTransaction: async (projectId: string, body: ControlledTransactionInput): Promise<ControlledTransaction> =>
+    ({ ...ctProject(JURISDICTIONS_COVERED[0]).transactions[0], id: rid(), local_file_project_id: projectId, ...body }),
+  updateTransaction: async (transactionId: string, body: ControlledTransactionInput): Promise<ControlledTransaction> =>
+    ({ ...ctProject(JURISDICTIONS_COVERED[0]).transactions[0], id: transactionId, ...body }),
+  deleteTransaction: async (): Promise<void> => {},
+  downloadTransactionTemplate: async (): Promise<Blob> =>
+    new Blob(["Transaction Category,Description,Associated Enterprise,AE Country,Direction,Local Currency,Local Amount\n"], { type: "text/csv" }),
+  previewTransactions: async (): Promise<TxnPreview> => ({
+    columns: [], detected_mapping: {}, rows: [],
+    diagnostics: { status: "passed", total_rows: 0, rows_with_issues: 0, issue_counts: {}, missing_required_columns: [] },
+  }),
+  importTransactions: async (projectId: string): Promise<TxnImportResult> => {
+    const jur = projectId.replace(/^lf-/, "")
+    return {
+      imported: 0, skipped: 0,
+      diagnostics: { status: "passed", total_rows: 0, rows_with_issues: 0, issue_counts: {}, missing_required_columns: [] },
+      transactions: ctProject(JURISDICTIONS_COVERED.includes(jur) ? jur : JURISDICTIONS_COVERED[0]).transactions,
+    }
+  },
 }

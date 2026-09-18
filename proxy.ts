@@ -27,8 +27,9 @@ export async function proxy(request: NextRequest) {
   const path = request.nextUrl.pathname
   // Public routes: the app entry + waitlist (/login, /signup), the no-login demo, and the real login (/auth).
   // /companies serves the standardized company-research JSON (public SEC data) the no-login demo reads.
-  // Everything else requires auth.
-  const isPublic = ["/login", "/signup", "/demo", "/auth", "/companies"].some(p => path.startsWith(p))
+  // /design is the type specimen. Everything else requires auth.
+  // Search and company records are the Stage 1 product — public. Local File (/project) still needs a session.
+  const isPublic = path === "/" || path.startsWith("/company") || path.startsWith("/api/quote") || ["/login", "/signup", "/demo", "/auth", "/companies", "/design"].some(p => path.startsWith(p))
   let user = null
   try {
     const result = await supabase.auth.getUser()

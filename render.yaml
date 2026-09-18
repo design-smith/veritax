@@ -1,4 +1,4 @@
-# Render Blueprint — one-click backend deploy. In Render: New → Blueprint → connect this repo.
+# Fallback only. Production API is Fly.io (backend/fly.toml). Render free sleeps + wipes disk.
 # All secrets are sync:false, so you enter them in the dashboard (nothing sensitive lives in the repo).
 services:
   - type: web

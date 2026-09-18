@@ -31,6 +31,7 @@ from .jobs import pipeline_worker_loop
 from .risks import AnthropicRiskAnalyzer, DeepSeekRiskAnalyzer, FakeRiskAnalyzer
 from .matching import ClassificationBackedProvider
 from .routers import (
+    companies,
     connectors,
     coverage,
     documents,
@@ -41,6 +42,7 @@ from .routers import (
     financials,
     interviews,
     invoices,
+    local_file,
     org_chart,
     pipeline,
     requirements,
@@ -196,11 +198,14 @@ for _router in (
     far.router,
     risk_control.router,
     financials.router,
+    local_file.router,
 ):
     app.include_router(_router, dependencies=[Depends(get_current_user)])
 
 # Public: the demo request-access form posts here with no account/token.
 app.include_router(waitlist.router)
+# Public: Stage 1 company search over the warehouse table (50k+), no login.
+app.include_router(companies.router)
 
 
 @app.get("/health", tags=["health"])

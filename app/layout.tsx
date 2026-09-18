@@ -1,19 +1,32 @@
 import type { Metadata } from "next"
-import { Manrope } from "next/font/google"
+import { IBM_Plex_Mono, Newsreader } from "next/font/google"
 import Script from "next/script"
 import "./globals.css"
 import AnalyticsProvider from "@/components/AnalyticsProvider"
 
-const wordmark = Manrope({ subsets: ["latin"], weight: ["300"], variable: "--font-wordmark" })
+const display = Newsreader({
+  subsets: ["latin"],
+  weight: ["400", "500"],
+  style: ["normal", "italic"],
+  variable: "--font-newsreader",
+  display: "swap",
+})
+
+const mono = IBM_Plex_Mono({
+  subsets: ["latin"],
+  weight: ["400", "500"],
+  variable: "--font-plex",
+  display: "swap",
+})
 
 export const metadata: Metadata = {
-  title: "Veritax UI",
-  description: "Local file generator."
+  title: "Veritax",
+  description: "Global company data for transfer-pricing work.",
 }
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
-    <html lang="en" className={wordmark.variable} suppressHydrationWarning>
+    <html lang="en" className={`${display.variable} ${mono.variable}`} suppressHydrationWarning>
       <body suppressHydrationWarning>
         <Script id="strip-extension-hydration-attrs" strategy="beforeInteractive">
           {`

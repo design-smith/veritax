@@ -102,10 +102,12 @@ const logRisk = (event: string, details: Record<string, unknown>) => {
   console.info(RISK_LOG_PREFIX, event, details)
 }
 
-export default function RisksStep({ engagementId, jurisdictions, entity, onOpenDraft, onOpenPlanning, accessLive }: {
+export default function RisksStep({ engagementId, jurisdictions, entity, activeJurisdiction, onJurisdictionChange, onOpenDraft, onOpenPlanning, accessLive }: {
   engagementId: string | null
   jurisdictions: string[]
   entity: string
+  activeJurisdiction: string
+  onJurisdictionChange: (jurisdiction: string) => void
   onOpenDraft?: () => void
   onOpenPlanning?: () => void
   accessLive?: boolean
@@ -114,7 +116,6 @@ export default function RisksStep({ engagementId, jurisdictions, entity, onOpenD
   const [riskByJuris, setRiskByJuris] = useState<Record<string, RiskResponse>>({})
   const [started, setStarted] = useState<Set<string>>(new Set())
   const [notReady, setNotReady] = useState<Set<string>>(new Set())
-  const [activeJurisdiction, setActive] = useState(jurisdictions[0] ?? "")
   const [issue, setIssue] = useState<ActionableIssue | null>(null)
   // ── view state (search + kind toggle + slide-in detail, from the original) ──
   const [search, setSearch] = useState("")
@@ -274,10 +275,9 @@ export default function RisksStep({ engagementId, jurisdictions, entity, onOpenD
 
   useEffect(() => {
     if (!engagementId || jurisdictions.length === 0) return
-    setActive(prev => (jurisdictions.includes(prev) ? prev : jurisdictions[0]))
-    startJurisdiction(jurisdictions[0])
+    startJurisdiction(activeJurisdiction || jurisdictions[0])
     return () => { if (pollRef.current) { clearTimeout(pollRef.current); pollRef.current = null } }
-  }, [engagementId, jurisdictions, startJurisdiction])
+  }, [engagementId, jurisdictions, activeJurisdiction, startJurisdiction])
 
   // risks_viewed once per run when the Risks screen is actually on-screen (not merely mounted) (PRD §13, §34).
   useEffect(() => {
@@ -309,7 +309,7 @@ export default function RisksStep({ engagementId, jurisdictions, entity, onOpenD
       cached: Boolean(riskRef.current[j]),
       started: startedRef.current.has(j),
     })
-    setActive(j)
+    onJurisdictionChange(j)
     setOpenFinding(null)
     setSourcePreview(null)
     startJurisdiction(j)
