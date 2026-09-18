@@ -2939,9 +2939,46 @@
 .vt-fin-nums {
   display: grid;
   grid-template-columns: 1fr;
-  gap: 0.95rem;
+  gap: 0.5rem;
   min-width: 0;
   max-width: 100%;
+}
+.vt-fin-num {
+  display: grid;
+  gap: 4px;
+  width: 100%;
+  margin: 0;
+  padding: 0.45rem 0.55rem;
+  border: 1px solid transparent;
+  border-radius: 2px;
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+  font: inherit;
+  color: inherit;
+}
+.vt-fin-num:hover { background: #f6f6f6; }
+.vt-fin-num.is-on {
+  background: #f6f6f6;
+  border-color: #dfdfdf;
+}
+.vt-fin-num:focus-visible {
+  outline: 2px solid var(--vt-focus);
+  outline-offset: 1px;
+}
+.vt-fin-num-label {
+  font-size: 11px;
+  font-family: var(--font-plex), "IBM Plex Mono", ui-monospace, monospace;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: #5d5d5d;
+}
+.vt-fin-num-value {
+  font-size: var(--font-text-md-size);
+  font-weight: var(--font-weight-medium);
+  font-family: var(--font-plex), "IBM Plex Mono", ui-monospace, monospace;
+  font-variant-numeric: tabular-nums;
+  color: #0d0d0d;
 }
 .vt-fin-scroll {
   width: 100%;

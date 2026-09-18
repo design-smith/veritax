@@ -488,7 +488,13 @@ function FinancialsTab({ p, fin, scrolled, onFinDownload, requireAuth }: {
   const years = useMemo(() => fin ? yearsAvailable(fin) : [], [fin])
   const [from, setFrom] = useState("")
   const [to, setTo] = useState("")
+  const [chart, setChart] = useState<FinChartKey>("stock")
+  const [quoteLast, setQuoteLast] = useState<string | null>(null)
   const dlRef = useRef<HTMLButtonElement>(null)
+  useEffect(() => {
+    setChart("stock")
+    setQuoteLast(null)
+  }, [p.slug])
   useEffect(() => {
     if (!years.length) return
     const y0 = years[Math.max(0, years.length - 3)]
@@ -545,8 +551,26 @@ function FinancialsTab({ p, fin, scrolled, onFinDownload, requireAuth }: {
         </div>
       )}
       <div className="vt-fin-split">
-        <StockChart symbol={listing?.ticker || null} exchange={listing?.exchange} from={start} to={end} />
-        {fin ? <AnalysisNums fin={fin} sel={sel} /> : <Centered>Loading…</Centered>}
+        <FinPeriodChart
+          metric={chart}
+          symbol={listing?.ticker || null}
+          exchange={listing?.exchange}
+          from={start}
+          to={end}
+          fin={fin}
+          sel={sel}
+          onQuote={setQuoteLast}
+        />
+        {fin ? (
+          <AnalysisNums
+            fin={fin}
+            sel={sel}
+            active={chart}
+            onSelect={setChart}
+            stockLabel={[listing?.ticker, listing?.exchange].filter(Boolean).join(" · ") || "Stock"}
+            stockValue={quoteLast}
+          />
+        ) : <Centered>Loading…</Centered>}
       </div>
       {fin && sel.length > 0 && <PliTable fin={fin} sel={sel} />}
       {fin && sel.length > 0 && (
@@ -567,77 +591,211 @@ function FinancialsTab({ p, fin, scrolled, onFinDownload, requireAuth }: {
 
 const fmtDay = (t: number) => new Date(t * 1000).toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "2-digit" })
 
-function StockChart({ symbol, exchange, from, to }: { symbol: string | null; exchange?: string | null; from: string; to: string }) {
-  const [data, setData] = useState<{ last: number; prev: number | null; currency: string; points: { t: number; c: number }[] } | null>(null)
+type FinChartKey = "stock" | "revenue" | "ebit" | "netIncome" | "opMargin" | "netMargin"
+
+type QuotePayload = { last: number; prev: number | null; currency: string; points: { t: number; c: number }[] }
+
+function FinPeriodChart({
+  metric, symbol, exchange, from, to, fin, sel, onQuote,
+}: {
+  metric: FinChartKey
+  symbol: string | null
+  exchange?: string | null
+  from: string
+  to: string
+  fin: Financials | null
+  sel: number[]
+  onQuote: (label: string | null) => void
+}) {
+  const [quote, setQuote] = useState<QuotePayload | null>(null)
   const [err, setErr] = useState(false)
   useEffect(() => {
-    if (!symbol || !from || !to) { setData(null); return }
+    if (!symbol || !from || !to) { setQuote(null); onQuote(null); return }
     const ac = new AbortController()
     setErr(false)
     const q = new URLSearchParams({ symbol, from, to })
     if (exchange) q.set("exchange", exchange)
     fetch(`/api/quote?${q}`, { signal: ac.signal })
-      .then(r => { if (!r.ok) throw new Error("quote") ; return r.json() })
-      .then(setData)
-      .catch(e => { if (e.name !== "AbortError") { setData(null); setErr(true) } })
+      .then(r => { if (!r.ok) throw new Error("quote"); return r.json() as Promise<QuotePayload> })
+      .then(d => {
+        setQuote(d)
+        const last = d.points.at(-1)?.c
+        onQuote(last != null ? last.toLocaleString(undefined, { maximumFractionDigits: 2 }) : null)
+      })
+      .catch(e => {
+        if (e.name === "AbortError") return
+        setQuote(null); setErr(true); onQuote(null)
+      })
     return () => ac.abort()
-  }, [symbol, exchange, from, to])
-  const last = data?.points.at(-1)?.c
-  const first = data?.points[0]?.c
-  const chg = last != null && first ? (last - first) / first : null
+  }, [symbol, exchange, from, to, onQuote])
+
+  const L = useMemo(() => (fin ? lines(fin) : null), [fin])
+  const series = useMemo(() => {
+    if (!L || !sel.length || metric === "stock") return [] as { y: number; v: number }[]
+    return sel.flatMap(y => {
+      let v: number | null = null
+      if (metric === "revenue") v = L.revenue[y] ?? null
+      else if (metric === "ebit") v = L.ebit[y] ?? null
+      else if (metric === "netIncome") v = L.netIncome[y] ?? null
+      else if (metric === "opMargin") {
+        const r = L.revenue[y], e = L.ebit[y]
+        v = r != null && r !== 0 && e != null ? e / r : null
+      } else if (metric === "netMargin") {
+        const r = L.revenue[y], n = L.netIncome[y]
+        v = r != null && r !== 0 && n != null ? n / r : null
+      }
+      return v == null ? [] : [{ y, v }]
+    })
+  }, [L, sel, metric])
+
+  const isPct = metric === "opMargin" || metric === "netMargin"
+  const isMoney = metric === "revenue" || metric === "ebit" || metric === "netIncome"
+  const title = metric === "stock"
+    ? ([symbol, exchange].filter(Boolean).join(" · ") || "Quote")
+    : metric === "revenue" ? "Revenue"
+      : metric === "ebit" ? "EBIT"
+        : metric === "netIncome" ? "Net income"
+          : metric === "opMargin" ? "Operating margin"
+            : "Net margin"
+
+  const stockLast = quote?.points.at(-1)?.c
+  const stockFirst = quote?.points[0]?.c
+  const stockChg = stockLast != null && stockFirst ? (stockLast - stockFirst) / stockFirst : null
+  const seriesLast = series.at(-1)?.v
+  const seriesFirst = series[0]?.v
+  const seriesChg = seriesLast != null && seriesFirst != null && seriesFirst !== 0
+    ? (seriesLast - seriesFirst) / Math.abs(seriesFirst)
+    : null
+
+  const fmtHead = (v: number) => {
+    if (isPct) return fmtPLI(v, "pct")
+    if (isMoney) return money(v, fin?.currency ?? null)
+    return v.toLocaleString(undefined, { maximumFractionDigits: 2 })
+  }
+  const fmtTip = (v: number) => {
+    if (isPct) return fmtPLI(v, "pct")
+    if (isMoney) return money(v, fin?.currency ?? null)
+    return v.toLocaleString(undefined, { maximumFractionDigits: 2 })
+  }
+
   return (
     <div className="vt-fin-chart">
       <div className="vt-fin-chart-head">
-        <span className="vt-fin-chart-sym">{[symbol, exchange].filter(Boolean).join(" · ") || "Quote"}</span>
-        {last != null && (
+        <span className="vt-fin-chart-sym">{title}</span>
+        {metric === "stock" && stockLast != null && (
           <span className="vt-fin-chart-px">
-            {last.toLocaleString(undefined, { maximumFractionDigits: 2 })}
-            {chg != null && <small className={chg >= 0 ? "is-up" : "is-down"}>{`${chg >= 0 ? "+" : ""}${(chg * 100).toFixed(2)}%`}</small>}
+            {stockLast.toLocaleString(undefined, { maximumFractionDigits: 2 })}
+            {stockChg != null && <small className={stockChg >= 0 ? "is-up" : "is-down"}>{`${stockChg >= 0 ? "+" : ""}${(stockChg * 100).toFixed(2)}%`}</small>}
+          </span>
+        )}
+        {metric !== "stock" && seriesLast != null && (
+          <span className="vt-fin-chart-px">
+            {fmtHead(seriesLast)}
+            {seriesChg != null && <small className={seriesChg >= 0 ? "is-up" : "is-down"}>{`${seriesChg >= 0 ? "+" : ""}${(seriesChg * 100).toFixed(2)}%`}</small>}
           </span>
         )}
       </div>
-      {!symbol ? <div className="vt-fin-chart-empty">No listed ticker.</div>
-        : err ? <div className="vt-fin-chart-empty">Quote unavailable for this window.</div>
-        : !data ? <div className="vt-fin-chart-empty">Loading quote…</div>
-        : (
-          <div className="vt-fin-chart-plot">
-            <ResponsiveContainer width="100%" height="100%">
-              <AreaChart data={data.points} margin={{ top: 8, right: 8, left: 0, bottom: 0 }}>
-                <defs>
-                  <linearGradient id="vt-quote-fill" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="0%" stopColor="#0d0d0d" stopOpacity={0.16} />
-                    <stop offset="100%" stopColor="#0d0d0d" stopOpacity={0} />
-                  </linearGradient>
-                </defs>
-                <XAxis dataKey="t" tickFormatter={fmtDay} minTickGap={48} stroke="#dfdfdf" tick={{ fill: "#5d5d5d", fontSize: 10, fontFamily: "var(--font-plex)" }} axisLine={{ stroke: "#dfdfdf" }} tickLine={false} />
-                <YAxis domain={["auto", "auto"]} orientation="right" width={56} stroke="#dfdfdf" tick={{ fill: "#5d5d5d", fontSize: 10, fontFamily: "var(--font-plex)" }} axisLine={false} tickLine={false} />
-                <Tooltip
-                  labelFormatter={v => fmtDay(Number(v))}
-                  formatter={(v) => [typeof v === "number" ? v.toLocaleString(undefined, { maximumFractionDigits: 2 }) : String(v ?? ""), "Close"]}
-                  contentStyle={{ background: "#fcfcfc", border: "1px solid #dfdfdf", borderRadius: 4, fontFamily: "var(--font-plex)", fontSize: 12, color: "#0d0d0d" }}
-                />
-                <Area type="monotone" dataKey="c" stroke="#0d0d0d" fill="url(#vt-quote-fill)" strokeWidth={1.5} dot={false} />
-              </AreaChart>
-            </ResponsiveContainer>
-          </div>
-        )}
+      {metric === "stock" ? (
+        !symbol ? <div className="vt-fin-chart-empty">No listed ticker.</div>
+          : err ? <div className="vt-fin-chart-empty">Quote unavailable for this window.</div>
+            : !quote ? <div className="vt-fin-chart-empty">Loading quote…</div>
+              : (
+                <div className="vt-fin-chart-plot">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <AreaChart data={quote.points} margin={{ top: 8, right: 8, left: 0, bottom: 0 }}>
+                      <defs>
+                        <linearGradient id="vt-fin-fill" x1="0" y1="0" x2="0" y2="1">
+                          <stop offset="0%" stopColor="#0d0d0d" stopOpacity={0.16} />
+                          <stop offset="100%" stopColor="#0d0d0d" stopOpacity={0} />
+                        </linearGradient>
+                      </defs>
+                      <XAxis dataKey="t" tickFormatter={fmtDay} minTickGap={48} stroke="#dfdfdf" tick={{ fill: "#5d5d5d", fontSize: 10, fontFamily: "var(--font-plex)" }} axisLine={{ stroke: "#dfdfdf" }} tickLine={false} />
+                      <YAxis domain={["auto", "auto"]} orientation="right" width={56} stroke="#dfdfdf" tick={{ fill: "#5d5d5d", fontSize: 10, fontFamily: "var(--font-plex)" }} axisLine={false} tickLine={false} />
+                      <Tooltip
+                        labelFormatter={v => fmtDay(Number(v))}
+                        formatter={(v) => [typeof v === "number" ? v.toLocaleString(undefined, { maximumFractionDigits: 2 }) : String(v ?? ""), "Close"]}
+                        contentStyle={{ background: "#fcfcfc", border: "1px solid #dfdfdf", borderRadius: 4, fontFamily: "var(--font-plex)", fontSize: 12, color: "#0d0d0d" }}
+                      />
+                      <Area type="monotone" dataKey="c" stroke="#0d0d0d" fill="url(#vt-fin-fill)" strokeWidth={1.5} dot={false} />
+                    </AreaChart>
+                  </ResponsiveContainer>
+                </div>
+              )
+      ) : !series.length ? (
+        <div className="vt-fin-chart-empty">No figures in this window.</div>
+      ) : (
+        <div className="vt-fin-chart-plot">
+          <ResponsiveContainer width="100%" height="100%">
+            <AreaChart data={series} margin={{ top: 8, right: 8, left: 0, bottom: 0 }}>
+              <defs>
+                <linearGradient id="vt-fin-fill" x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="0%" stopColor="#0d0d0d" stopOpacity={0.16} />
+                  <stop offset="100%" stopColor="#0d0d0d" stopOpacity={0} />
+                </linearGradient>
+              </defs>
+              <XAxis dataKey="y" stroke="#dfdfdf" tick={{ fill: "#5d5d5d", fontSize: 10, fontFamily: "var(--font-plex)" }} axisLine={{ stroke: "#dfdfdf" }} tickLine={false} />
+              <YAxis
+                domain={["auto", "auto"]}
+                orientation="right"
+                width={64}
+                stroke="#dfdfdf"
+                tick={{ fill: "#5d5d5d", fontSize: 10, fontFamily: "var(--font-plex)" }}
+                axisLine={false}
+                tickLine={false}
+                tickFormatter={(v: number) => (isPct ? `${(v * 100).toFixed(0)}%` : compact(v))}
+              />
+              <Tooltip
+                labelFormatter={v => String(v)}
+                formatter={(v) => [typeof v === "number" ? fmtTip(v) : String(v ?? ""), title]}
+                contentStyle={{ background: "#fcfcfc", border: "1px solid #dfdfdf", borderRadius: 4, fontFamily: "var(--font-plex)", fontSize: 12, color: "#0d0d0d" }}
+              />
+              <Area type="monotone" dataKey="v" stroke="#0d0d0d" fill="url(#vt-fin-fill)" strokeWidth={1.5} dot={{ r: 2.5, fill: "#0d0d0d", strokeWidth: 0 }} />
+            </AreaChart>
+          </ResponsiveContainer>
+        </div>
+      )}
     </div>
   )
 }
 
-function AnalysisNums({ fin, sel }: { fin: Financials; sel: number[] }) {
+function AnalysisNums({
+  fin, sel, active, onSelect, stockLabel, stockValue,
+}: {
+  fin: Financials
+  sel: number[]
+  active: FinChartKey
+  onSelect: (key: FinChartKey) => void
+  stockLabel: string
+  stockValue: string | null
+}) {
   const L = useMemo(() => lines(fin), [fin])
   if (!sel.length) return <div className="vt-fin-chart-empty">No years in this window.</div>
   const totals = periodTotals(L, sel)
   const cur = fin.currency
   const n = sel.length
+  const rows: { key: FinChartKey; label: string; value: React.ReactNode }[] = [
+    { key: "stock", label: stockLabel, value: stockValue ?? "—" },
+    { key: "revenue", label: `Revenue · ${n}y`, value: money(totals.revenue, cur) },
+    { key: "ebit", label: "EBIT", value: money(totals.ebit, cur) },
+    { key: "netIncome", label: "Net income", value: money(totals.netIncome, cur) },
+    { key: "opMargin", label: "Operating margin", value: fmtPLI(totals.opMargin, "pct") },
+    { key: "netMargin", label: "Net margin", value: fmtPLI(totals.netMargin, "pct") },
+  ]
   return (
-    <div className="vt-fin-nums">
-      <Field label={`Revenue · ${n}y`}>{money(totals.revenue, cur)}</Field>
-      <Field label="EBIT">{money(totals.ebit, cur)}</Field>
-      <Field label="Net income">{money(totals.netIncome, cur)}</Field>
-      <Field label="Operating margin">{fmtPLI(totals.opMargin, "pct")}</Field>
-      <Field label="Net margin">{fmtPLI(totals.netMargin, "pct")}</Field>
+    <div className="vt-fin-nums" role="tablist" aria-label="Chart metric">
+      {rows.map(r => (
+        <button
+          key={r.key}
+          type="button"
+          role="tab"
+          aria-selected={active === r.key}
+          className={active === r.key ? "vt-fin-num is-on" : "vt-fin-num"}
+          onClick={() => onSelect(r.key)}
+        >
+          <span className="vt-fin-num-label">{r.label}</span>
+          <span className="vt-fin-num-value">{r.value}</span>
+        </button>
+      ))}
     </div>
   )
 }
